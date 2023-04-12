@@ -17,8 +17,8 @@ A network/graph is a collection of nodes connected by edges.
 | ensemble.py      | A helper class to generate an ensemble of random networks and store in HDF5 format. |
 | util.py          | Some custom utility functions used in other library classes |
 | _generator.py    | base class inherited by Network class. Generator functions for different network topologies |
-| numpy_json.py    | json custom encoder to handle complex numpy arrays |
-| dict_hdf5        | custom dict <--> hdf5 convertor to handle complex numpy arrays |
+| _numpy_json.py    | json custom encoder to handle complex numpy arrays |
+| _dict_hdf5        | custom dict <--> hdf5 convertor to handle complex numpy arrays |
 
 
 ## Package versions
