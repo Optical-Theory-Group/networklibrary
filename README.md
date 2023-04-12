@@ -22,8 +22,11 @@ A network/graph is a collection of nodes connected by edges.
 
 
 ## Package versions
-The code was written and tested in Python 3.9.13 using 
-numpy 
-scipy
-matplotlib 
-seaborn
+The code has been tested with Python 3.9.13 and the following package versions
+
+| Package | Version |
+| ------- | ------- | 
+| numpy   |   tbc     |
+| scipy   |   tbc  |
+| matplotlib | tbc  |
+| seaborn  |   tbc |
