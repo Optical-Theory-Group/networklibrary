@@ -4,9 +4,10 @@
 .db
 *.log
 *.h5
+*[conflicted]*
 
 # Ignore the following directories
 *pycache*/
-*data*/
-*output*/
+data/*/
+output/*/
 .idea/

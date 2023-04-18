@@ -12,7 +12,6 @@ import math
 
 import random
 from scipy.spatial import Delaunay, Voronoi, ConvexHull
-from shapely.geometry import LineString
 
 from .node import NODE
 from .link import LINK
@@ -406,41 +405,41 @@ class NetworkGenerator:
                 E = (-xb, -yb)
                 F = (xb, -yb)
 
-                lineridge = LineString([A, B])
-                lineupper = LineString([C, D])
-                linelower = LineString([E, F])
-                int_ptU = lineupper.intersection(lineridge)
-                int_ptL = linelower.intersection(lineridge)
-                if (int_ptU.is_empty is False) and \
-                        (int_ptL.is_empty is False):  # intersect with upper and lower boundary
+                lineridge = [A, B]
+                lineupper = [C, D]
+                linelower = [E, F]
+                int_ptU = self.intersection(lineupper, lineridge)
+                int_ptL = self.intersection(linelower, lineridge)
+
+
+                if (int_ptU is not None) and \
+                        (int_ptL is not None):  # intersect with upper and lower boundary
                     # upper node
                     intersect_node_idU = self.gen_unique_node_id()
                     edge_node_ids_upper.append(intersect_node_idU)
-                    self.add_node(intersect_node_idU, (int_ptU.x, int_ptU.y))
-                    int_posU = (int_ptU.x, int_ptU.y)
+                    self.add_node(intersect_node_idU, int_ptU)
 
                     # lower node
                     intersect_node_idL = self.gen_unique_node_id()
                     edge_node_ids_lower.append(intersect_node_idL)
-                    self.add_node(intersect_node_idL, (int_ptL.x, int_ptL.y))
-                    int_posL = (int_ptL.x, int_ptL.y)
+                    self.add_node(intersect_node_idL, int_ptL)
 
                     # connection within network
                     self.add_connection(intersect_node_idU, intersect_node_idL,
-                                        self.calculate_distance(int_posU, int_posL), self.k, self.n, 'internal')
+                                        self.calculate_distance(int_ptU, int_ptL), self.k, self.n, 'internal')
 
                     intersectionsU[intersect_node_idU] = {'ridge': ii,
-                                                          'position': int_posU,
+                                                          'position': int_ptU,
                                                           'node1': intersect_node_idU,
                                                           'node2': intersect_node_idL,
                                                           }
 
                     intersectionsL[intersect_node_idL] = {'ridge': ii,
-                                                          'position': int_posL,
+                                                          'position': int_ptL,
                                                           'node1': intersect_node_idL,
                                                           'node2': intersect_node_idU,
                                                           }
-                elif int_ptU.is_empty is False:  # intersect with upper boundary
+                elif int_ptU is not None:  # intersect with upper boundary
                     # get id for node within bounding rectangle
                     if (abs(Ax) <= xb) and (abs(Ay) <= yb):
                         initnode = connection1.node1
@@ -449,16 +448,15 @@ class NetworkGenerator:
 
                     intersect_node_id = self.gen_unique_node_id()
                     edge_node_ids_upper.append(intersect_node_id)
-                    int_pos = (int_ptU.x, int_ptU.y)
-                    self.add_node(intersect_node_id, (int_ptU.x, int_ptU.y))
-                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_pos), self.k,
+                    self.add_node(intersect_node_id, int_ptU)
+                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_ptU), self.k,
                                         self.n, 'internal')
                     intersectionsU[intersect_node_id] = {'ridge': ii,
-                                                         'position': int_pos,
+                                                         'position': int_ptU,
                                                          'node1': intersect_node_id,
                                                          'node2': initnode,
                                                          }
-                elif int_ptL.is_empty is False:  # intersect with lower boundary
+                elif int_ptL is not None:  # intersect with lower boundary
                     # get id for node within bounding rectangle
                     if (abs(Ax) <= xb) and (abs(Ay) <= yb):
                         initnode = connection1.node1
@@ -467,12 +465,11 @@ class NetworkGenerator:
 
                     intersect_node_id = self.gen_unique_node_id()
                     edge_node_ids_lower.append(intersect_node_id)
-                    int_pos = (int_ptL.x, int_ptL.y)
-                    self.add_node(intersect_node_id, (int_ptL.x, int_ptL.y))
-                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_pos), self.k,
+                    self.add_node(intersect_node_id, int_ptL)
+                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_ptL), self.k,
                                         self.n, 'internal')
                     intersectionsL[intersect_node_id] = {'ridge': ii,
-                                                         'position': int_pos,
+                                                         'position': int_ptL,
                                                          'node1': intersect_node_id,
                                                          'node2': initnode,
                                                          }
@@ -622,15 +619,13 @@ class NetworkGenerator:
                     C = self.get_node(connection2.node1).position
                     D = self.get_node(connection2.node2).position
 
-                    line1 = LineString([A, B])
-                    line2 = LineString([C, D])
-                    int_pt = line1.intersection(line2)
-                    if int_pt.is_empty is False:  # lines intersect
+                    line1 = [A, B]
+                    line2 = [C, D]
+                    int_pt = self.intersection(line1, line2)
+                    if int_pt is not None:  # lines intersect
                         intersect_node_id = len(self.nodes)
-                        int_pos = (int_pt.x, int_pt.y)
-                        self.add_node(intersect_node_id, (int_pt.x, int_pt.y))
-                        intersections[intersect_node_id] = {'line1': ii, 'line2': jj, 'position': int_pos}
-                        # intersections.append([intersect_node_id,ii,jj,int_pos])
+                        self.add_node(intersect_node_id, int_pt)
+                        intersections[intersect_node_id] = {'line1': ii, 'line2': jj, 'position': int_pt}
 
             # construct connections
             for ii in range(0, len(fibres)):
@@ -962,10 +957,10 @@ class NetworkGenerator:
                 cnode.n_connect -= 1
                 cnode.sorted_connected_nodes.remove(number)
 
-                # reinitialise scattering matrix of node if needed
-                # this should also reset input/output wave vectors
-                if hasattr(cnode, 'S_mat'):
-                    cnode.init_Smat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
+                # # reinitialise scattering matrix of node if needed
+                # # this should also reset input/output wave vectors
+                # if hasattr(cnode, 'S_mat'):
+                #     cnode.init_Smat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
 
             # remove node
             del self.nodes[self.nodenumber_indices[number]]
@@ -1077,6 +1072,50 @@ class NetworkGenerator:
                     pass
 
         return len(components), components
+
+    @staticmethod
+    def intersection(line1, line2):
+        """
+        Find the intersection of two line segments defined by their endpoints.
+
+        Parameters
+        ----------
+            line1 [(x1,y1),(x2,y2)]: A list containing two (x, y) coordinate tuples representing
+                the endpoints of the first line segment.
+            line2 [(x3,y3),(x4,y4)]: A list containing two (x, y) coordinate tuples representing
+                the endpoints of the second line segment.
+
+        Returns
+        -------
+            tuple: A tuple containing the (x, y) coordinates of the intersection point,
+                or None if the lines do not intersect.
+        """
+        # Unpack the coordinates of the line segments
+        p1, p2 = line1
+        p3, p4 = line2
+
+        # Convert to numpy arrays
+        p1, p2, p3, p4 = np.array(p1), np.array(p2), np.array(p3), np.array(p4)
+
+        # Calculate the denominator of the line intersection formula
+        den = np.linalg.det(np.array([p2 - p1, p4 - p3]))
+
+        # Check if the denominator is 0 (i.e. lines are parallel)
+        if den == 0:
+            return None
+        else:
+            # Calculate the numerator of the line intersection formula
+            num = np.linalg.det(np.array([p3 - p1, p4 - p3]))
+
+            # Calculate the intersection point parameter (t)
+            t = num / den
+
+            # Check if the intersection point is within both line segments
+            if t < 0 or t > 1:
+                return None
+            else:
+                # Calculate the intersection point and return as a tuple
+                return tuple(p1 + t * (p2 - p1))
 
     def breadth_first_search(self, initial):
         """
