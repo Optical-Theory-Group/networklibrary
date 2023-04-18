@@ -2,29 +2,37 @@
 """
 Created on Wed Nov  9 09:44:38 2022
 
-@author: mforeman
+@author: Matthew Foreman
 
 Node class functions
 """
 
 import numpy as np
 
-class NODE():
-    def __init__(self, number=0, pos=(0,0), node_type='internal',nodedict=None):
-        '''
+
+class NODE:
+
+    def __init__(self, number=0, pos=(0, 0), node_type='internal', nodedict=None):
+        """
         Constructor/initialisation function for individual node
 
         Parameters
         ----------
         number : int
             Unique id number for node.
-        x,y : float
+        pos : (x,y) tuple
             Position of nodes.
         node_type : string, optional
             Specifies whether node is an 'internal' or 'exit' node
-        dict : supply dictionary to set node properties from stored/previous values
+        nodedict : supply dictionary to set node properties from stored/previous values
             Default is None
-        '''
+        """
+        self.inwave = None
+        self.outwave = None
+        self.inwave_np = None
+        self.outwave_np = None
+        self.S_mat = None
+        self.iS_mat = None
 
         if nodedict is not None:
             self.dict_to_node(nodedict)
@@ -36,14 +44,14 @@ class NODE():
             self.sorted_connected_nodes = []
 
     def degree(self):
-        '''
+        """
         Returns degree of node, i.e. the number of connecting edges
 
-        '''
+        """
         return self.n_connect
 
     # def init_Smat(self,Smat_type,scat_loss,**kwargs):
-    #     '''
+    #     """
     #     Initialise scattering matrix of node
 
     #     Parameters
@@ -55,7 +63,8 @@ class NODE():
     #             'random': random SM. Each elemen takes a value in [0,1)
     #             'isotropic_unitary': unitary isotropic SM, implemented through DFT matrix of correct dimension
     #             'random_unitary': random unitary SM
-    #             'unitary_cyclic': unitary cyclic SM constructed through specifying phases of eigenvalues using 'delta' kwarg
+    #             'unitary_cyclic': unitary cyclic SM constructed through specifying phases of eigenvalues using 'delta'
+    #                               kwarg
     #             'to_the_lowest_index': reroutes all energy to connected node of lowest index
     #             'custom' : Set a custom scattering matrix. Requires kwarg 'Smat' to be set
 
@@ -68,12 +77,11 @@ class NODE():
     #             For scat_mat_type == 'unitary_cyclic':
     #                 kwargs['delta'] is a vector define phase of eigenvalues of scattering matrix
 
-
     #     Returns
     #     -------
     #     None.
 
-    #     '''
+    #     """
     #     self.scat_mat_type = Smat_type
     #     self.scat_loss = scat_loss
     #     self.Smat_params = kwargs
@@ -109,7 +117,8 @@ class NODE():
     #         mat = kwargs['Smat']
     #         # dimension checking
     #         if mat.shape  != (self.n_connect,self.n_connect):
-    #             raise RuntimeError("Supplied scattering matrix is of incorrect dimensions: {} supplied, {} expected".format(mat.shape,(self.n_connect,self.n_connect)))
+    #             raise RuntimeError("Supplied scattering matrix is of incorrect dimensions: {} supplied,
+    #                                  {} expected".format(mat.shape,(self.n_connect,self.n_connect)))
     #         else:
     #             self.S_mat = mat
     #     elif self.scat_mat_type == 'unitary_cyclic':
@@ -135,7 +144,6 @@ class NODE():
     #         S_mat_bot_row = np.concatenate((S21,S22),axis=1)
     #         self.S_mat= np.concatenate((S_mat_top_row,S_mat_bot_row),axis=0)
 
-
     #         iS11 = self.iS_mat / np.sqrt(1-scat_loss**2)
     #         iS12 = np.zeros(shape=(self.n_connect,self.n_connect),dtype=np.complex_)
     #         iS21 = np.zeros(shape=(self.n_connect,self.n_connect),dtype=np.complex_)
@@ -145,8 +153,8 @@ class NODE():
     #         iS_mat_bot_row = np.concatenate((iS21,iS22),axis=1)
     #         self.iS_mat= np.concatenate((iS_mat_top_row,iS_mat_bot_row),axis=0)
 
-    def update(self,scat_loss=0,direction='forward'):
-        '''
+    def update(self, scat_loss=0, direction='forward'):
+        """
         Update function for recursive method of calculating mode distributions.
         Updates output/input amplitudes at each connecting node according to scattering matrix
 
@@ -162,69 +170,69 @@ class NODE():
         -------
         None.
 
-        '''
+        """
         # check scattering matrix has been initialised
         if not hasattr(self, 'S_mat'):
-            raise AttributeError('Nodal scattering matrix has not been initialised. Try assigning a scattering matrix first.')
+            raise AttributeError('Nodal scattering matrix has not been initialised. '
+                                 'Try assigning a scattering matrix first.')
 
         # check to see if we have created the list of sorted node IDs
-        if self.sorted_connected_nodes == []:
+        if not self.sorted_connected_nodes:
             self.sorted_connected_nodes = sorted(self.inwave.keys())
 
         if direction == 'forward':
             # create vector of incoming wave amplitude (in the order from small node number to large)
-            for index,value in enumerate(self.sorted_connected_nodes):
+            for index, value in enumerate(self.sorted_connected_nodes):
                 self.inwave_np[index] = self.inwave[value]
 
             # calculate outgoing wave amplitude using the scattering matrix
-            outwave = np.matmul(self.S_mat , self.inwave_np).T
+            outwave = np.matmul(self.S_mat, self.inwave_np).T
 
-            #### UPDATE EACH NODE OUTWAVE AMPLITUDE      ###########
-            if self.node_type == 'internal':     #ONLY UPDATES INTERNAL NODES, NOT EXIT NODES,
-                                                 #WAVE IS NEVER REFLECTED BACK INTO SYSTEM AT EXIT NODE
+            # UPDATE EACH NODE OUTWAVE AMPLITUDE
+            if self.node_type == 'internal':  # ONLY UPDATES INTERNAL NODES, NOT EXIT NODES,
+                # WAVE IS NEVER REFLECTED BACK INTO SYSTEM AT EXIT NODE
 
-                for [counter,u] in enumerate(self.sorted_connected_nodes):
+                for [counter, u] in enumerate(self.sorted_connected_nodes):
                     # self.outwave.update({u:outwave[counter]})
                     self.outwave[u] = outwave[counter]
                     if scat_loss != 0:
                         # self.outwave.update({'loss%u'%u:outwave[counter + self.n_connect]})
-                        self.outwave['loss%u'%u] = outwave[counter + self.n_connect]
+                        self.outwave['loss%u' % u] = outwave[counter + self.n_connect]
         elif direction == 'backwards':
             # create vector of outgoing wave amplitude (in the order from small node number to large)
-            for index,value in enumerate(self.sorted_connected_nodes):
+            for index, value in enumerate(self.sorted_connected_nodes):
                 self.outwave_np[index] = self.outwave[value]
 
             # calculate incoming wave amplitude using the inverse scattering matrix
             inwave = np.matmul(self.iS_mat, self.outwave_np).T
 
-            #### UPDATE EACH NODE INPUT AMPLITUDE      ###########
-            if self.node_type == 'internal':     #ONLY UPDATES INTERNAL NODES, NOT EXIT NODES,
-                                                  #WAVE IS NEVER REFLECTED BACK INTO SYSTEM AT EXIT NODE
+            # UPDATE EACH NODE INPUT AMPLITUDE
+            if self.node_type == 'internal':  # ONLY UPDATES INTERNAL NODES, NOT EXIT NODES,
+                # WAVE IS NEVER REFLECTED BACK INTO SYSTEM AT EXIT NODE
 
-                for [counter,u] in enumerate(self.sorted_connected_nodes):
+                for [counter, u] in enumerate(self.sorted_connected_nodes):
                     # self.inwave.update({u:inwave[counter]})
                     self.inwave[u] = inwave[counter]
                     if scat_loss != 0:
                         # self.outwave.update({'loss%u'%u:inwave[counter + self.n_connect]})
-                        self.outwave['loss%u'%u] = inwave[counter + self.n_connect]
+                        self.outwave['loss%u' % u] = inwave[counter + self.n_connect]
 
         else:
-            raise(ValueError,'Unknown run direction type: must be "forwards" or "backwards"')
-
+            raise (ValueError, 'Unknown run direction type: must be "forwards" or "backwards"')
 
     ##########################
     # %% Save/Load Functions
     ##########################
-    def node_to_dict(self,):
-        varnames = ['number','position','node_type','n_connect',
-                    'sorted_connected_nodes','scat_mat_type','scat_loss',
-                    'Smat_params','inwave','outwave','S_mat','iS_mat',
+    def node_to_dict(self, ):
+        varnames = ['number', 'position', 'node_type', 'n_connect',
+                    'sorted_connected_nodes', 'scat_mat_type', 'scat_loss',
+                    'Smat_params', 'inwave', 'outwave', 'S_mat', 'iS_mat',
                     ]
 
-        nodedict = dict((v, eval('self.'+v)) for v in varnames if hasattr(self, v))
+        nodedict = dict((v, eval('self.' + v)) for v in varnames if hasattr(self, v))
 
         return nodedict
 
-    def dict_to_node(self,nodedict):
-        for key,val in nodedict.items():
+    def dict_to_node(self, nodedict):
+        for key, val in nodedict.items():
             setattr(self, key, val)

@@ -2,7 +2,7 @@
 """
 Created on Thu Nov 10 17:53:42 2022
 
-@author: mforeman
+@author: Matthew Foreman
 """
 import json
 import numpy as np
@@ -18,28 +18,31 @@ def json_numpy_obj_hook(dct):
     """
     if isinstance(dct, dict) and '__ndarray__' in dct:
         return np.array(dct['__ndarray__'], dct['dtype']).reshape(dct['shape'])
-    
+
     if isinstance(dct, dict) and '__ndarraycr__' in dct:
-        return np.array(dct['__ndarraycr__'] + 1j*dct['__ndarrayci__'], dct['dtype']).reshape(dct['shape'])
-    
+        return np.array(dct['__ndarraycr__'] + 1j * dct['__ndarrayci__'], dct['dtype']).reshape(dct['shape'])
+
     if isinstance(dct, dict) and '__complexr__' in dct:
-        return dct['__complexr__'] + 1j*dct['__complexi__']
-    
-    
+        return dct['__complexr__'] + 1j * dct['__complexi__']
+
     return dct
+
 
 # Overload dump/load to default use this behavior.
 def dumps(*args, **kwargs):
     kwargs.setdefault('cls', NumpyJSONEncoder)
     return json.dumps(*args, **kwargs)
 
+
 def loads(*args, **kwargs):
-    kwargs.setdefault('object_hook', json_numpy_obj_hook)    
+    kwargs.setdefault('object_hook', json_numpy_obj_hook)
     return json.loads(*args, **kwargs)
+
 
 def dump(*args, **kwargs):
     kwargs.setdefault('cls', NumpyJSONEncoder)
     return json.dump(*args, **kwargs)
+
 
 def load(*args, **kwargs):
     kwargs.setdefault('object_hook', json_numpy_obj_hook)
@@ -53,22 +56,22 @@ class NumpyJSONEncoder(json.JSONEncoder):
         """
         # print(type(obj))
         if isinstance(obj, np.ndarray):
-            data = obj.tolist() 
-            
-            if 'complex' in str(obj.dtype): # complex
-                return dict(__ndarraycr__= np.real(data),
-                            __ndarrayci__= np.imag(data),
-                        dtype=str(obj.dtype),
-                        shape=obj.shape)
+            data = obj.tolist()
+
+            if 'complex' in str(obj.dtype):  # complex
+                return dict(__ndarraycr__=np.real(data),
+                            __ndarrayci__=np.imag(data),
+                            dtype=str(obj.dtype),
+                            shape=obj.shape)
             else:
-                return dict(__ndarray__= data,
-                        dtype=str(obj.dtype),
-                        shape=obj.shape)
-        
+                return dict(__ndarray__=data,
+                            dtype=str(obj.dtype),
+                            shape=obj.shape)
+
         if isinstance(obj, complex):
-            return dict(__complexr__= obj.real,
-                        __complexi__= obj.imag
+            return dict(__complexr__=obj.real,
+                        __complexi__=obj.imag
                         )
-        
+
         # Let the base class default method raise the TypeError
         return json.JSONEncoder.default(self, obj)
