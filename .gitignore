@@ -3,6 +3,9 @@
 .DS_Store
 .db
 *.log
+*.h5
 
 # Ignore the following directories
 *pycache*/
+*data*/
+*output*/
