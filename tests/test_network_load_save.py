@@ -14,8 +14,8 @@ import os
 from complexnetworklibrary.network import Network
 
 wavelength = 500e-9
-k=(2*np.pi)/wavelength
-n=1
+k = (2 * np.pi) / wavelength
+n = 1
 seed = 3
 
 # delaunay circular
@@ -28,16 +28,16 @@ network_spec = {'internal_nodes': 30,
                 'refractive_index': n,
                 'shape': 'circular'}
 
-node_spec = {'Smat_type': 'isotropic_unitary' ,
+node_spec = {'Smat_type': 'isotropic_unitary',
              'scat_loss': 0}
 
 network = Network(network_type,
                   network_spec,
                   node_spec,
-                  seed_number=seed)   #CREATE A NETWORK OBJECT
+                  seed_number=seed)  # CREATE A NETWORK OBJECT
 
 network.draw()
-filepath = 'data/test_network.h5'
+filepath = '../data/test_network.h5'
 datadir = os.path.dirname(filepath)
 # make data folder if they dont exist
 if not os.path.exists(datadir):
@@ -51,5 +51,3 @@ print('-------------------------------------------------------')
 print('-------------------------------------------------------')
 newnetwork = Network(filename=filepath)
 newnetwork.draw()
-
-
