@@ -143,7 +143,8 @@ class LINK:
                     'n', 'k', 'inwave', 'outwave', 'S_mat', 'iS_mat',
                     ]
 
-        linkdict = dict((v, eval('self.' + v)) for v in varnames if hasattr(self, v))
+        linkdict = dict((v, eval('self.' + v)) for v in varnames
+                        if (hasattr(self, v) and eval('self.' + v) is not None))
 
         return linkdict
 

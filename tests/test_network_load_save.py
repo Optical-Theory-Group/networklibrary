@@ -7,8 +7,10 @@ Test network load/save functions
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 import os
+import time
+import matplotlib
+# matplotlib.use('TkAgg')
 
 # Import the Network class from the complexnetworklibrary.network module
 from complexnetworklibrary.network import Network
@@ -30,7 +32,7 @@ network_spec = {'internal_nodes': 30,
                 'shape': 'circular'}
 
 # Define some specifications for the nodes in the network
-node_spec = {'Smat_type': 'isotropic_unitary',
+node_spec = {'scat_mat_type': 'isotropic_unitary',
              'scat_loss': 0}
 
 # Create a new network object with the specified parameters and specifications
@@ -51,6 +53,10 @@ if not os.path.exists(datadir):
 
 # Save the network object to the filepath
 network.save_network(filepath)
+network.draw()
+for ii in range(0,10):
+    print(ii)
+    time.sleep(1)
 
 print('-------------------------------------------------------')
 print('-------------------------------------------------------')
@@ -59,5 +65,5 @@ print('-------------------------------------------------------')
 newnetwork = Network(filename=filepath)
 
 # Draw the original and loaded network object for a visual comparison
-network.draw()
+
 newnetwork.draw()

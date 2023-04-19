@@ -1297,7 +1297,8 @@ class Network(NetworkGenerator):
                     'network_spec', 'network_type', 'node_spec', 'seed_number',
                     ]
 
-        networkprops = dict((v, eval('self.' + v)) for v in varnames if hasattr(self, v))
+        networkprops = dict((v, eval('self.' + v)) for v in varnames
+                            if (hasattr(self, v) and eval('self.' + v) is not None))
 
         # store exit node data separately
         exitpos = [node.position for node in self.nodes if node.node_type == 'exit']
@@ -1452,3 +1453,5 @@ class Network(NetworkGenerator):
                     # plt.text(node.position[0], node.position[1],str(node.number),
                     # bbox=dict(facecolor='red',alpha=0.5),
                     # size =15 ,color='white')
+
+        plt.show()

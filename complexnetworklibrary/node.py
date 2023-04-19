@@ -229,7 +229,8 @@ class NODE:
                     'Smat_params', 'inwave', 'outwave', 'S_mat', 'iS_mat',
                     ]
 
-        nodedict = dict((v, eval('self.' + v)) for v in varnames if hasattr(self, v))
+        nodedict = dict((v, eval('self.' + v)) for v in varnames
+                        if (hasattr(self, v) and eval('self.' + v) is not None))
 
         return nodedict
 

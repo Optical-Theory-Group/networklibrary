@@ -69,7 +69,7 @@ def recursively_save_dict_contents_to_group(h5file, path, dic):
             item = np.array(item)  # this is likely to fail for all but simple numeric tuples
 
         # save strings, numpy.int64, numpy.float64 etc types
-        if isinstance(item, (np.int32, np.int64, np.float64, np.float, str, float, np.float32, int)):
+        if isinstance(item, (np.int32, np.int64, np.float64, str, float, np.float32, int)):
             h5file[path + key] = item
 
         # save numpy arrays

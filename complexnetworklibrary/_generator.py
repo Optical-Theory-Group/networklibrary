@@ -11,6 +11,7 @@ import numpy as np
 import math
 
 import random
+import warnings
 from scipy.spatial import Delaunay, Voronoi, ConvexHull
 
 from .node import NODE
@@ -959,7 +960,9 @@ class NetworkGenerator:
 
                 # # reinitialise scattering matrix of node if needed
                 # # this should also reset input/output wave vectors
-                # if hasattr(cnode, 'S_mat'):
+                if hasattr(cnode, 'S_mat'):
+                    warnings.warn("Remove node after nodal scattering matrices were initialised. Ensure you "
+                                  "reinitialise your nodes correctly.")
                 #     cnode.init_Smat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
 
             # remove node
@@ -997,10 +1000,7 @@ class NetworkGenerator:
             for connection in self.links:
                 if node.number == connection.node1 or node.number == connection.node2:
                     empty = [connection.node1, connection.node2]
-                    # if node.node_type == 'internal':
                     node.n_connect += 1
-                    # elif node.node_type == 'exit':
-                    # node.n_connect = 1
 
                     for othernode in empty:
                         if othernode != node.number:
@@ -1025,7 +1025,6 @@ class NetworkGenerator:
             Number of external network nodes.
         t : int
             Total number of network nodes = i + e.
-
 
         """
         # count nodes
@@ -1122,19 +1121,35 @@ class NetworkGenerator:
         Does a breadth first search of network and returns node ids within
         the network component containing 'initial' node id
 
+        Arguments:
+        ----------
+            initial (int): The id of the initial node to start the search from
+
+        Returns:
+        ----------
+            list: A list of node ids within the network component containing the initial node
+
         """
+        # Initialize visited and queue lists
         visited = []
         queue = [initial]
 
+        # While there are still nodes to visit
         while queue:
+            # Get the next node from the front of the queue
             node = queue.pop(0)
+            # If the node has not been visited yet
             if node not in visited:
+                # Add the node to the visited list
                 visited.append(node)
+                # Get the sorted list of connected nodes for the current node
                 neighbours = self.get_node(node).sorted_connected_nodes
-
+                # For each connected node
                 for neighbour in neighbours:
+                    # Add it to the end of the queue
                     queue.append(neighbour)
 
+        # Return the list of visited nodes
         return visited
 
     def trim_network_exits(self, nexit=1):

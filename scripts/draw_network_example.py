@@ -110,7 +110,6 @@ for case in cases:
                       seed_number=seed)  # CREATE A NETWORK OBJECT
 
     network.draw('')
-    ax = plt.gca().set_aspect('equal', 'box')
 
     if 'exit_size' in network_spec.keys():
         exit_size = 1.1 * network_spec['exit_size']
