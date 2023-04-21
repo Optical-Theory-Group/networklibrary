@@ -19,6 +19,12 @@ from line_profiler_pycharm import profile
 from .node import NODE
 from .link import LINK
 
+# setup code logging
+import logging
+import logconfig
+
+logconfig.setup_logging()
+logger = logging.getLogger(__name__)
 
 class NetworkGenerator:
     def __init__(self, network_type, network_spec, seed_number=0):

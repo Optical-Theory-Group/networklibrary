@@ -22,6 +22,13 @@ from .util import update_progress, detect_peaks, plot_colourline
 # from ._numpy_json import dump, load, dumps, loads, json_numpy_obj_hook,NumpyJSONEncoder
 from ._dict_hdf5 import save_dict_to_hdf5, load_dict_from_hdf5
 
+# setup code logging
+import logging
+import logconfig
+
+logconfig.setup_logging()
+logger = logging.getLogger(__name__)
+
 
 class Network(NetworkGenerator):
     def __init__(self, network_type=None, network_spec=None,
@@ -135,6 +142,12 @@ class Network(NetworkGenerator):
         None.
 
         """
+        supported_Smats = ['identity', 'permute_identity', 'random', 'isotropic_unitary', 'random_unitary', 'COE',
+                           'CUE', 'unitary_cyclic', 'to_the_lowest_index', 'custom']
+
+        if Smat_type not in supported_Smats:
+            raise ValueError('Specified scattering matrix type is invalid. Please choice one from {}'.format(supported_Smats))
+
         node = self.get_node(nodeid)
 
         node.Smat_type = Smat_type

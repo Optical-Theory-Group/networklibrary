@@ -180,16 +180,16 @@ class LINK:
 
     @staticmethod
     def get_default_properties():
-        return {'node1': 0,
-                'node2': 1,
-                'link_type': 'internal',
-                'distance': 0,
-                'n': 1.0,
-                'k': 1,
-                'inwave': np.array([0 + 0j, 0 + 0j]),
-                'outwave': np.array([0 + 0j, 0 + 0j]),
-                'S_mat': np.array([[0, 1 + 0j],
+        return {'node1': 0,                 # unique numerical id for 1st connected node
+                'node2': 1,                 # unique numerical id for 2nd connected node
+                'link_type': 'internal',    # 'internal' or 'exit' specifying nature of link
+                'distance': 0,              # length of link
+                'n': 1.0,                   # effective refractive index of link
+                'k': 1,                     # vacuum wavenumber of wave propagating in link
+                'inwave': np.array([0 + 0j, 0 + 0j]),   # array of inwave amplitudes
+                'outwave': np.array([0 + 0j, 0 + 0j]),  # array of outwave amplitudes
+                'S_mat': np.array([[0, 1 + 0j],         # propagation matrix
                                    [1 + 0j, 0]]),
-                'iS_mat': np.array([[0, 1 + 0j],
+                'iS_mat': np.array([[0, 1 + 0j],        # inverse propagation matrix
                                     [1 + 0j, 0]])
                 }

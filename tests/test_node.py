@@ -24,8 +24,10 @@ class NodeTestCase(unittest.TestCase):
             'Smat_type': 'test',
             'scat_loss': 1,
             'Smat_params': None,
-            'inwave': [1, 1, 1, 1],
-            'outwave': [0, 0, 0, 0],
+            'inwave': {0: 1, 1: 1, 2: 1, 3: 1},
+            'outwave': {0: 0, 1: 0, 2: 0, 3: 0},
+            'inwave_np': [1, 1, 1, 1],
+            'outwave_np': [0, 0, 0, 0],
             'S_mat': np.identity(4),
             'iS_mat': np.identity(4)
         }
@@ -39,8 +41,10 @@ class NodeTestCase(unittest.TestCase):
         node.Smat_type = 'test'
         node.scat_loss = 1
         node.Smat_params = None
-        node.inwave = [1, 1, 1, 1]
-        node.outwave = [0, 0, 0, 0]
+        node.inwave = {0:1,1:1,2:1,3:1}
+        node.outwave = {0: 0, 1: 0, 2: 0, 3: 0}
+        node.inwave_np = [1, 1, 1, 1]
+        node.outwave_np = [0, 0, 0, 0]
         node.S_mat = np.identity(4)
         node.iS_mat = np.identity(4)
         self.node = node
