@@ -52,6 +52,9 @@ def recursively_save_dict_contents_to_group(h5file, path, dic):
     # save items to the hdf5 file
     for key, item in dic.items():
         key = str(key)
+        if item is None:
+            continue
+
         if isinstance(item, list):
             item = np.array(item)
 
@@ -93,7 +96,6 @@ def recursively_load_dict_contents_from_group(h5file, path):
     """
     ans = {}
     for key, item in h5file[path].items():
-
         if isinstance(item, h5py._hl.dataset.Dataset):
             if key in ['__complex_real__',
                        '__complex_imag__',
@@ -109,7 +111,6 @@ def recursively_load_dict_contents_from_group(h5file, path):
             if '__complex_real__' in item.keys():
                 ans[key] = item['__complex_real__'][()] + 1j * (item['__complex_imag__'][()])
             elif '__ndarray_complex_real__' in item.keys():
-
                 ans[key] = item['__ndarray_complex_real__'][()] + 1j * (item['__ndarray_complex_imag__'][()])
             else:  # other keep going with recursive
                 ans[key] = recursively_load_dict_contents_from_group(h5file, path + key + '/')

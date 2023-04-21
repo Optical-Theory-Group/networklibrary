@@ -15,33 +15,33 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from complexnetworklibrary._dict_hdf5 import  load_dict_from_hdf5,recursively_load_dict_contents_from_group, save_dict_to_hdf5
+from complexnetworklibrary._dict_hdf5 import load_dict_from_hdf5, recursively_load_dict_contents_from_group, \
+    save_dict_to_hdf5
 from complexnetworklibrary.util import update_progress
 from complexnetworklibrary.network import Network
-
 
 obj = os.scandir('data/')
 dirs = [entry.name for entry in obj if entry.is_dir()]
 
-#%% Datafile selection / read or load selection
+# %% Datafile selection / read or load selection
 
 process_or_load = input('(P) Process datafile or (L) load preprocessed data? :')
 
 if process_or_load.upper() == 'P':
-    for i,entry in enumerate(dirs):
-        print("[{}] - {} - {}".format(i,'x' if os.path.exists('data/{}/proc_data_{}.h5'.format(entry,entry)) else ' ',  entry))
+    for i, entry in enumerate(dirs):
+        print("[{}] - {} - {}".format(i, 'x' if os.path.exists('data/{}/proc_data_{}.h5'.format(entry, entry)) else ' ',
+                                      entry))
 
     inputstr = (input("Please enter index (or comma separated indexes) of dataset(s) above to analyse:"))
     strlist = inputstr.split(',')
     dataindices = [int(s) for s in strlist]
 
-
     for dataindex in dataindices:
-        if dataindex not in range(0,len(dirs)):
+        if dataindex not in range(0, len(dirs)):
             raise ValueError('Incorrect value given')
 
         runid = dirs[dataindex]
-        datafile = 'data/{}/p{}.h5'.format(runid,runid)
+        datafile = 'data/{}/p{}.h5'.format(runid, runid)
 
         # make output/data folder if it doesnt exist
         datadir = 'data/{}'.format(runid)
@@ -55,7 +55,6 @@ if process_or_load.upper() == 'P':
         print('--------- Processing {}.h5 dataset ----------'.format(dirs[dataindex]))
         print('----------------------------------------------')
 
-
         with h5py.File(datafile, 'r') as h5file:
             realisations = [key for key in h5file.keys()]
 
@@ -66,14 +65,14 @@ if process_or_load.upper() == 'P':
             data0keys = [key for key in h5file[realisations[0]]['NETWORK']]
             if 'network_spec' in data0keys:
                 ns_path = '{}/NETWORK/network_spec'.format(realisations[0])
-                network_spec = recursively_load_dict_contents_from_group(h5file,ns_path)
+                network_spec = recursively_load_dict_contents_from_group(h5file, ns_path)
 
                 print('----------------------------------------------')
                 print('Network specification is:')
                 print(network_spec)
             if 'node_spec' in data0keys:
                 ns_path = '{}/NETWORK/node_spec'.format(realisations[0])
-                node_spec = recursively_load_dict_contents_from_group(h5file,ns_path)
+                node_spec = recursively_load_dict_contents_from_group(h5file, ns_path)
 
                 print('----------------------------------------------')
                 print('Node specification is:')
@@ -95,44 +94,44 @@ if process_or_load.upper() == 'P':
             all_int_nodes = []
             all_ext_nodes = []
 
-            for ii,rid in enumerate(realisations):
-                update_progress(ii/nreals,'Analysing SM {}/{}'.format(ii,nreals))
+            for ii, rid in enumerate(realisations):
+                update_progress(ii / nreals, 'Analysing SM {}/{}'.format(ii, nreals))
 
                 # get scattering matrix and network properties
                 nw_path = '{}/NETWORK/'.format(rid)
-                nw = recursively_load_dict_contents_from_group(h5file,nw_path)
+                nw = recursively_load_dict_contents_from_group(h5file, nw_path)
                 sm = nw['scattering_matrix']
                 smnodes = nw['sm_node_order']
 
-                exitids = nw['exit_ids'] # same elemnts as smnodes but potentially different order
+                exitids = nw['exit_ids']  # same elemnts as smnodes but potentially different order
                 exitpos = nw['exit_positions']
 
-                #sort positions of exit nodes to match smnodes
+                # sort positions of exit nodes to match smnodes
                 smeinds = [list(exitids).index(eid) for eid in smnodes]
-                smpos   = exitpos[smeinds]
+                smpos = exitpos[smeinds]
 
-                leftids = [eid for ii,eid in enumerate(smnodes) if smpos[ii][0] < 0 ]
-                rightids = [eid for ii,eid in enumerate(smnodes) if smpos[ii][0] >= 0 ]
-                leftindex = [ii for ii,eid in enumerate(smnodes) if smpos[ii][0] < 0 ]
-                rightindex = [ii for ii,eid in enumerate(smnodes) if smpos[ii][0] >= 0 ]
+                leftids = [eid for ii, eid in enumerate(smnodes) if smpos[ii][0] < 0]
+                rightids = [eid for ii, eid in enumerate(smnodes) if smpos[ii][0] >= 0]
+                leftindex = [ii for ii, eid in enumerate(smnodes) if smpos[ii][0] < 0]
+                rightindex = [ii for ii, eid in enumerate(smnodes) if smpos[ii][0] >= 0]
 
                 # extract t,t',r,r' blocks (form matches Rotter review)
                 # S = [ r  t' ]
                 #     [ t  r' ]
-                [LI1,LI2] = np.meshgrid(leftindex,leftindex)
-                [RI1,RI2] = np.meshgrid(rightindex,rightindex)
-                [RI3,LI3] = np.meshgrid(rightindex,leftindex)
-                [LI4,RI4] = np.meshgrid(leftindex,rightindex)
+                [LI1, LI2] = np.meshgrid(leftindex, leftindex)
+                [RI1, RI2] = np.meshgrid(rightindex, rightindex)
+                [RI3, LI3] = np.meshgrid(rightindex, leftindex)
+                [LI4, RI4] = np.meshgrid(leftindex, rightindex)
 
-                r  = sm[LI1,LI2]
-                rp = sm[RI1,RI2]
-                t  = sm[RI3,LI3]  # left to right
-                tp = sm[LI4,RI4]  # right to left
+                r = sm[LI1, LI2]
+                rp = sm[RI1, RI2]
+                t = sm[RI3, LI3]  # left to right
+                tp = sm[LI4, RI4]  # right to left
 
                 # do svd of each block to get transmission/reflection eigenvalues
-                ur , sr , vrh  = np.linalg.svd(r)
+                ur, sr, vrh = np.linalg.svd(r)
                 urp, srp, vrph = np.linalg.svd(rp)
-                ut , st , vth  = np.linalg.svd(t)
+                ut, st, vth = np.linalg.svd(t)
                 utp, stp, vtph = np.linalg.svd(tp)
                 ### BEWARE // ORDERING OF SINGULAR VECTORS/VALUES DIFFERS
 
@@ -145,7 +144,7 @@ if process_or_load.upper() == 'P':
                 eigs = np.linalg.eigvals(sm)
 
                 # scattering matrix determinant
-                det  = np.linalg.det(sm)
+                det = np.linalg.det(sm)
 
                 # add to result store
                 all_eigs.append(eigs)
@@ -171,27 +170,27 @@ if process_or_load.upper() == 'P':
         # Save processed data
         data_to_store = {'eigenvalues': all_eigs,
                          'det_sm': all_dets,
-                         'tau_LR'   : all_teigLR,
-                         'tau_RL' : all_teigRL,
-                         'rho_LL'   : all_reigLL,
-                         'rho_RR' : all_reigRR,
+                         'tau_LR': all_teigLR,
+                         'tau_RL': all_teigRL,
+                         'rho_LL': all_reigLL,
+                         'rho_RR': all_reigRR,
                          'internal_nodes': all_int_nodes,
-                         'exit_nodes'   : all_ext_nodes,
-                         'unitary'      : all_unitary,
-                         'reciprocal'   : all_reciprocal,
-                         'timereversal' : all_timerev,
+                         'exit_nodes': all_ext_nodes,
+                         'unitary': all_unitary,
+                         'reciprocal': all_reciprocal,
+                         'timereversal': all_timerev,
                          'network_spec': network_spec,  # NB only saves last value but all should be the same
-                         'node_spec': node_spec, # NB only saves last value but all should be the same
-                         'network_type': network_type, # NB only saves last value but all should be the same
+                         'node_spec': node_spec,  # NB only saves last value but all should be the same
+                         'network_type': network_type,  # NB only saves last value but all should be the same
                          }
 
-        savefilename = 'data/{}/proc_data_{}.h5'.format(runid,runid)
-        save_dict_to_hdf5(data_to_store,savefilename)
+        savefilename = 'data/{}/proc_data_{}.h5'.format(runid, runid)
+        save_dict_to_hdf5(data_to_store, savefilename)
 elif process_or_load.upper() == 'L':
-    preprocess_list = [runid for runid in dirs if os.path.exists('data/{}/proc_data_{}.h5'.format(runid,runid))]
+    preprocess_list = [runid for runid in dirs if os.path.exists('data/{}/proc_data_{}.h5'.format(runid, runid))]
 
-    for i,entry in enumerate(preprocess_list):
-        print("[{}] {}".format(i,entry))
+    for i, entry in enumerate(preprocess_list):
+        print("[{}] {}".format(i, entry))
 
     inputstr = (input("Please enter index (or comma separated indexes) of dataset(s) above to analyse:"))
     strlist = inputstr.split(',')
@@ -201,11 +200,11 @@ elif process_or_load.upper() == 'L':
 
     for dataindex in dataindices:
         # dataindex = int(input("Please enter   index of dataset above to load:"))
-        if dataindex not in range(0,len(preprocess_list)):
+        if dataindex not in range(0, len(preprocess_list)):
             raise ValueError('Incorrect value given')
 
         runid = preprocess_list[dataindex]
-        datafile = 'data/{}/proc_data_{}.h5'.format(runid,runid)
+        datafile = 'data/{}/proc_data_{}.h5'.format(runid, runid)
 
         # make outputfolder if it doesnt exist
         outputdir = 'output/{}'.format(runid)
@@ -233,69 +232,65 @@ elif process_or_load.upper() == 'L':
         total_trans.append(np.mean([np.mean(tau) for tau in all_teigLR]))
 
         plt.close('all')
-        #%% PLOT AN EXAMPLE NETWORK
+        # %% PLOT AN EXAMPLE NETWORK
         network = Network(network_type,
-                  network_spec,
-                  node_spec,
-                  seed_number=seed)
+                          network_spec,
+                          node_spec,
+                          seed_number=seed)
 
         network.draw('')
         plt.title('Example network')
-        plt.savefig("output/{}/example_network_{}.pdf".format(runid,runid),format='pdf')
+        plt.savefig("output/{}/example_network_{}.pdf".format(runid, runid), format='pdf')
 
-        #%% PLOT NODE NUMBER DISTRIBUTIONS
-
+        # %% PLOT NODE NUMBER DISTRIBUTIONS
 
         plt.figure('node numbers')
-        plt.subplot(1,2,1)
-        sns.histplot((all_int_nodes),discrete=True,binrange=(min(all_int_nodes)-5,max(all_int_nodes)+5))
+        plt.subplot(1, 2, 1)
+        sns.histplot((all_int_nodes), discrete=True, binrange=(min(all_int_nodes) - 5, max(all_int_nodes) + 5))
         plt.title('Internal node distribution')
-        plt.subplot(1,2,2)
-        sns.histplot((all_ext_nodes),discrete=True,binrange=(min(all_ext_nodes)-5,max(all_ext_nodes)+5))
+        plt.subplot(1, 2, 2)
+        sns.histplot((all_ext_nodes), discrete=True, binrange=(min(all_ext_nodes) - 5, max(all_ext_nodes) + 5))
         plt.title('Exit node distribution')
-        plt.savefig("output/{}/node_distribution_{}.pdf".format(runid,runid),format='pdf')
+        plt.savefig("output/{}/node_distribution_{}.pdf".format(runid, runid), format='pdf')
 
-
-
-        #%%  PLOT EIGENVALUE DISTRIBUTION
+        # %%  PLOT EIGENVALUE DISTRIBUTION
         df = pd.DataFrame()
         df['real'] = np.real(all_eigs.flatten())
         df['imag'] = np.imag(all_eigs.flatten())
 
-        sns.jointplot(data=df,x='real',y='imag',kind='hex',xlim=(-1.1,1.1),ylim=(-1.1,1.1))
+        sns.jointplot(data=df, x='real', y='imag', kind='hex', xlim=(-1.1, 1.1), ylim=(-1.1, 1.1))
         figabs = plt.gcf()
         figabs.canvas.set_window_title('eigenvalue magnitude')
-        plt.savefig("output/{}/SM_ev_dist_{}.pdf".format(runid,runid),format='pdf')
+        plt.savefig("output/{}/SM_ev_dist_{}.pdf".format(runid, runid), format='pdf')
 
         figang = plt.figure('eigenvalue phase')
         figang.clear()
-        sns.histplot(np.angle(all_eigs.flatten())/np.pi,bins=40)
-        plt.savefig("output/{}/SM_ev_phase_{}.pdf".format(runid,runid),format='pdf')
+        sns.histplot(np.angle(all_eigs.flatten()) / np.pi, bins=40)
+        plt.savefig("output/{}/SM_ev_phase_{}.pdf".format(runid, runid), format='pdf')
 
-        #%% PLOT TRANSMISSION/REFLECTION EIGENVALUE DISTRIBUTION
+        # %% PLOT TRANSMISSION/REFLECTION EIGENVALUE DISTRIBUTION
 
         figtreigs = plt.figure('transmission/reflection eigenvalues')
 
-        plt.subplot(2,2,1)
-        sns.histplot(all_reigLL.flatten(),bins=40)
+        plt.subplot(2, 2, 1)
+        sns.histplot(all_reigLL.flatten(), bins=40)
         plt.title(r'$\rho_{LL}$')
 
-        plt.subplot(2,2,2)
-        sns.histplot(all_teigRL.flatten(),bins=40)
+        plt.subplot(2, 2, 2)
+        sns.histplot(all_teigRL.flatten(), bins=40)
         plt.title(r'$\tau_{LR}$')
 
-        plt.subplot(2,2,3)
-        sns.histplot(all_teigLR.flatten(),bins=40)
+        plt.subplot(2, 2, 3)
+        sns.histplot(all_teigLR.flatten(), bins=40)
         plt.title(r'$\tau_{LR}$')
 
-        plt.subplot(2,2,4)
-        sns.histplot(all_reigRR.flatten(),bins=40)
+        plt.subplot(2, 2, 4)
+        sns.histplot(all_reigRR.flatten(), bins=40)
         plt.title(r'$\rho_{RR}$')
-        plt.savefig("output/{}/t_r_evs_{}.pdf".format(runid,runid),format='pdf')
+        plt.savefig("output/{}/t_r_evs_{}.pdf".format(runid, runid), format='pdf')
 
     if len(total_trans) > 1:
         fig_totaltrans = plt.figure('total transmission')
         plt.plot(total_trans)
 else:
     raise ValueError('Incorrect value given. Choose either "P" or "L".')
-

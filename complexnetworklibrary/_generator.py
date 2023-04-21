@@ -13,6 +13,8 @@ import math
 import random
 import warnings
 from scipy.spatial import Delaunay, Voronoi, ConvexHull
+from line_profiler_pycharm import profile
+
 
 from .node import NODE
 from .link import LINK
@@ -305,6 +307,16 @@ class NetworkGenerator:
                 id1 = ridge[1]
                 distance = self.calculate_distance(self.get_node(id0).position, self.get_node(id1).position)
                 self.add_connection(id0, id1, distance, self.k, self.n, 'internal')
+    @staticmethod
+    def plot_lines(line1, line2, intersection=None):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        ax.plot([line1[0][0], line1[1][0]], [line1[0][1], line1[1][1]], label='Line 1')
+        ax.plot([line2[0][0], line2[1][0]], [line2[0][1], line2[1][1]], label='Line 2')
+        if intersection:
+            ax.plot(intersection[0], intersection[1], 'ro', label='Intersection')
+        ax.legend()
+        plt.show()
 
     def generate_voronoi_slab(self, spec):
         seed_nodes = spec['seed_nodes']
@@ -340,10 +352,10 @@ class NetworkGenerator:
             # do Voronoi meshing
             vor = Voronoi(points)
 
-            from scipy.spatial import voronoi_plot_2d
-            import matplotlib.pyplot as plt
-            voronoi_plot_2d(vor)
-            plt.show()
+            # from scipy.spatial import voronoi_plot_2d
+            # import matplotlib.pyplot as plt
+            # voronoi_plot_2d(vor)
+            # plt.show()
 
             vor_vertices = vor.vertices
             vor_ridges = vor.ridge_vertices
@@ -960,7 +972,7 @@ class NetworkGenerator:
 
                 # # reinitialise scattering matrix of node if needed
                 # # this should also reset input/output wave vectors
-                if hasattr(cnode, 'S_mat'):
+                if hasattr(cnode, 'S_mat') and cnode.S_mat is not None:
                     warnings.warn("Remove node after nodal scattering matrices were initialised. Ensure you "
                                   "reinitialise your nodes correctly.")
                 #     cnode.init_Smat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
@@ -1104,17 +1116,18 @@ class NetworkGenerator:
             return None
         else:
             # Calculate the numerator of the line intersection formula
-            num = np.linalg.det(np.array([p3 - p1, p4 - p3]))
-
+            num1 = np.linalg.det(np.array([p3 - p1, p4 - p3]))
+            num2 = np.linalg.det(np.array([p3 - p1, p2 - p1]))
             # Calculate the intersection point parameter (t)
-            t = num / den
+            t1 = num1 / den
+            t2 = num2 / den
 
             # Check if the intersection point is within both line segments
-            if t < 0 or t > 1:
-                return None
-            else:
+            if 0 <= t1 <= 1 and 0 <= t2 <= 1:
                 # Calculate the intersection point and return as a tuple
-                return tuple(p1 + t * (p2 - p1))
+                return tuple(p1 + t1 * (p2 - p1))
+            else:
+                return None
 
     def breadth_first_search(self, initial):
         """

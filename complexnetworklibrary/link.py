@@ -10,9 +10,34 @@ Link class functions
 
 import numpy as np
 
+# setup code logging
+import logging
+import logconfig
+
+logconfig.setup_logging()
+logger = logging.getLogger(__name__)
+
+class LinkType:
+    def __init__(self, default):
+        self.allowed = ['internal', 'exit']
+        self.value = default
+
+    def __set_name__(self, owner, name):
+        self.name = "_" + name
+
+    def __get__(self, instance, owner):
+        return self.value
+
+    def __set__(self, instance, value):
+        if value not in self.allowed:
+            raise ValueError("Value must be one of {}".format(self.allowed))
+        self.value = value
+
 
 class LINK:
-    def __init__(self, node1=None, node2=None, distance=None, k=None, ni=1.0, link_type='internal', linkdict=None):
+    link_type = LinkType('internal')
+
+    def __init__(self, node1=0, node2=1, distance=0, k=1.0, ni=1.0, linktype='internal', linkdict=None):
         """
         Constructor/initialisation function for individual edge
 
@@ -26,7 +51,7 @@ class LINK:
             wavenumber for propagation along edge
         ni : float, optional
             Complex refractive index of edge. The default is 1.0.
-        link_type : str, optional
+        linktype : str, optional
             Specifies whether edge is an 'internal' (default) or connects to an 'exit' node.
         linkdict : supply dictionary to set link properties from stored/previous values
             Default is None
@@ -36,20 +61,16 @@ class LINK:
         None.
 
         """
-        self.k = None
-        self.n = None
-        self.distance = None
-        self.inwave = None
-        self.outwave = None
-        self.S_mat = None
-        self.iS_mat = None
+        # initialise all class properties
+        for v, d in self.get_default_properties().items():
+            setattr(self, v, d)
 
         if linkdict is not None:
             self.dict_to_link(linkdict)
         else:
-            self.node1 = int(node1)
-            self.node2 = int(node2)
-            self.link_type = link_type
+            self.node1 = int(node1) if node1 is not None else None
+            self.node2 = int(node2) if node2 is not None else None
+            self.link_type = linktype
             self.reset_link(distance, k, ni)
 
     def reset_link(self, distance, k, ni):
@@ -139,15 +160,36 @@ class LINK:
     # %% Save/Load Functions
     ##########################
     def link_to_dict(self, ):
-        varnames = ['node1', 'node2', 'link_type', 'distance',
-                    'n', 'k', 'inwave', 'outwave', 'S_mat', 'iS_mat',
-                    ]
+        # note we choose not to use __dict__ method to have greater more transparent control of what we are saving.
+        varnames = self.get_default_properties().keys()
 
         linkdict = dict((v, eval('self.' + v)) for v in varnames
-                        if (hasattr(self, v) and eval('self.' + v) is not None))
+                        if hasattr(self, v))
 
         return linkdict
 
     def dict_to_link(self, linkdict):
-        for key, val in linkdict.items():
-            setattr(self, key, val)
+        varnames = self.get_default_properties().keys()
+
+        keys = linkdict.keys()
+        for v in varnames:
+            if v in keys:
+                setattr(self, v, linkdict[v])
+            else:
+                setattr(self, v, None)
+
+    @staticmethod
+    def get_default_properties():
+        return {'node1': 0,
+                'node2': 1,
+                'link_type': 'internal',
+                'distance': 0,
+                'n': 1.0,
+                'k': 1,
+                'inwave': np.array([0 + 0j, 0 + 0j]),
+                'outwave': np.array([0 + 0j, 0 + 0j]),
+                'S_mat': np.array([[0, 1 + 0j],
+                                   [1 + 0j, 0]]),
+                'iS_mat': np.array([[0, 1 + 0j],
+                                    [1 + 0j, 0]])
+                }

@@ -5,6 +5,7 @@
 *.log
 *.h5
 *[conflicted]*
+simulation.log
 
 # Ignore the following directories
 *pycache*/

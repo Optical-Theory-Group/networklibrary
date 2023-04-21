@@ -99,7 +99,7 @@ for case in cases:
     else:
         raise ValueError
 
-    node_spec = {'scat_mat_type': SM_type,
+    node_spec = {'Smat_type': SM_type,
                  'scat_loss': 0,
                  'subunitary_factor': 1
                  }
@@ -114,8 +114,8 @@ for case in cases:
     if 'exit_size' in network_spec.keys():
         exit_size = 1.1 * network_spec['exit_size']
     else:
-        exit_size = 1.1 * (network_spec['network_size'][0] if isinstance(network_spec['network_size'], tuple) \
-                               else network_spec['network_size'])
+        exit_size = 1.1 * (network_spec['network_size'][0] if isinstance(network_spec['network_size'], tuple)
+                           else network_spec['network_size'])
 
     plt.savefig(os.path.join(output_root, "network_{}{}_example.png".format(case, qualifier)), dpi=300)
     plt.savefig(os.path.join(output_root, "network_{}{}_example.pdf".format(case, qualifier)), dpi=300)

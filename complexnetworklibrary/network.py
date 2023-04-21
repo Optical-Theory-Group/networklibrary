@@ -31,13 +31,9 @@ class Network(NetworkGenerator):
         Initialises some class properties.
 
         """
-
-        self.sm_node_order = None
-        self.scattering_matrix = None
-        self.inverse_scattering_matrix = None
-        self.input = None
-        self.output = None
-        self.scat_loss = 0
+        # initialise all class properties
+        for v, d in self.get_default_properties().items():
+            setattr(self, v, d)
 
         if filename is not None:
             self.load_network(filename)
@@ -102,7 +98,7 @@ class Network(NetworkGenerator):
         if output_amp is not None:
             self.reset_outputs(output_amp)
 
-    def initialise_node_Smat(self, nodeid, scat_mat_type, scat_loss, **kwargs):
+    def initialise_node_Smat(self, nodeid, Smat_type, scat_loss, **kwargs):
         """
         Initialise scattering matrix of node
 
@@ -110,7 +106,7 @@ class Network(NetworkGenerator):
         ----------
         nodeid : int
             ID number of node to initialise
-        scat_mat_type : str
+        Smat_type : str
             Specifies type of scattering matrix to use.
                 'identity': SM is set to identity matrix - complete reflection at each input
                 'permute_identity' : permuted identity matrix - rerouting to next edge
@@ -128,9 +124,9 @@ class Network(NetworkGenerator):
             Specify scattering loss parameter for node, i.e. fraction of power lost
         **kwargs : Keyword arguments
             Extra keyword arguments required for specified type of scattering matrix:
-                For scat_mat_type == 'custom':
+                For Smat_type == 'custom':
                     kwargs['Smat'] defines custom scattering matrix
-                For scat_mat_type == 'unitary_cyclic':
+                For Smat_type == 'unitary_cyclic':
                     kwargs['delta'] is a vector define phase of eigenvalues of scattering matrix
 
 
@@ -141,7 +137,7 @@ class Network(NetworkGenerator):
         """
         node = self.get_node(nodeid)
 
-        node.scat_mat_type = scat_mat_type
+        node.Smat_type = Smat_type
         node.scat_loss = scat_loss
         node.Smat_params = kwargs
 
@@ -159,24 +155,25 @@ class Network(NetworkGenerator):
             return
 
         # scattering matrix for internal node
-        if node.scat_mat_type == 'identity':
+        if node.Smat_type == 'identity':
             node.S_mat = np.identity(node.n_connect, dtype=np.complex_)  # identity matrix
-        elif node.scat_mat_type == 'uniform_random':
+        elif node.Smat_type == 'uniform_random':
             node.S_mat = np.random.rand(node.n_connect, node.n_connect)  # RANDOM SCATTEING MATRIX (nXn)
-        elif node.scat_mat_type == 'isotropic_unitary':
+        elif node.Smat_type == 'isotropic_unitary':
             node.S_mat = (1 / node.n_connect) ** 0.5 * dft(node.n_connect)
-        elif node.scat_mat_type == 'CUE':
+        elif node.Smat_type == 'CUE':
             gamma = 1 if 'subunitary_factor' not in kwargs.keys() else kwargs['subunitary_factor']
-            node.S_mat = gamma * stats.unitary_group.rvs(node.n_connect)
-        elif node.scat_mat_type == 'COE':
+            x = np.identity(1, dtype=np.complex_) if node.n_connect == 1 else stats.unitary_group.rvs(node.n_connect)
+            node.S_mat = gamma * x
+        elif node.Smat_type == 'COE':
             gamma = 1 if 'subunitary_factor' not in kwargs.keys() else kwargs['subunitary_factor']
-            x = stats.unitary_group.rvs(node.n_connect)
+            x = np.identity(1, dtype=np.complex_) if node.n_connect == 1 else stats.unitary_group.rvs(node.n_connect)
             node.S_mat = gamma * (x.T @ x)
-        elif node.scat_mat_type == 'permute_identity':
+        elif node.Smat_type == 'permute_identity':
             mat = np.identity(node.n_connect, dtype=np.complex_)
             inds = [(i - 1) % node.n_connect for i in range(0, node.n_connect)]
             node.S_mat = mat[:, inds]
-        elif node.scat_mat_type == 'custom':
+        elif node.Smat_type == 'custom':
             mat = kwargs['Smat']
             # dimension checking
             if mat.shape != (node.n_connect, node.n_connect):
@@ -187,7 +184,7 @@ class Network(NetworkGenerator):
                                                       ))
             else:
                 node.S_mat = mat
-        elif node.scat_mat_type == 'unitary_cyclic':
+        elif node.Smat_type == 'unitary_cyclic':
             if 'delta' in kwargs.keys():
                 ll = np.exp(1j * kwargs['delta'][0:node.n_connect])
             else:
@@ -1291,14 +1288,10 @@ class Network(NetworkGenerator):
         alllinks = {i: link.link_to_dict() for i, link in enumerate(self.links)}
 
         # save other network properties
-        varnames = ['scat_loss', 'input', 'output', 'k', 'n',
-                    'total_nodes', 'internal_nodes', 'exit_nodes',
-                    'scattering_matrix', 'sm_node_order',
-                    'network_spec', 'network_type', 'node_spec', 'seed_number',
-                    ]
+        varnames = self.get_default_properties().keys()
 
         networkprops = dict((v, eval('self.' + v)) for v in varnames
-                            if (hasattr(self, v) and eval('self.' + v) is not None))
+                            if hasattr(self, v))
 
         # store exit node data separately
         exitpos = [node.position for node in self.nodes if node.node_type == 'exit']
@@ -1320,17 +1313,11 @@ class Network(NetworkGenerator):
         self.node_indices = []
         self.nodenumber_indices = {}
 
-        varnames = ['scat_loss', 'input', 'output', 'k', 'n',
-                    'total_nodes', 'internal_nodes', 'exit_nodes',
-                    'scattering_matrix', 'sm_node_order',
-                    'network_spec', 'network_type', 'node_spec', 'seed_number',
-                    ]
-
         # reset all network attributes
         networkprops = networkdict['NETWORK']
-        for v in varnames:
+        for v, d in self.get_default_properties().items():
             if hasattr(self, v):
-                delattr(self, v)
+                setattr(self, v, d)
 
         for key, val in networkprops.items():
             setattr(self, key, val)
@@ -1347,6 +1334,24 @@ class Network(NetworkGenerator):
 
         self.count_nodes()
         self.connect_nodes()
+
+    @staticmethod
+    def get_default_properties():
+        return {'scat_loss': 0,
+                'input': None,
+                'output': None,
+                'k': 1.0,
+                'n': 1.0,
+                'total_nodes': 0,
+                'internal_nodes': 0,
+                'exit_nodes': 0,
+                'scattering_matrix': None,
+                'sm_node_order': None,
+                'network_spec': None,
+                'network_type': None,
+                'node_spec': None,
+                'seed_number': 0
+                }
 
     ##########################
     # %% Plotting Functions
@@ -1441,7 +1446,7 @@ class Network(NetworkGenerator):
                          [node1.position[1], node2.position[1]], color=linecol)
 
             for node in self.nodes:
-                # plt.text(node.position[0], node.position[1],node.number, size =13 ,color='black',alpha=0.7)
+                plt.text(node.position[0], node.position[1], node.number, size=13, color='black', alpha=0.7)
                 if node.node_type == 'internal':
                     plt.plot(node.position[0], node.position[1], 'o', color='#9678B4')
                     # plt.text(node.position[0], node.position[1],str(node.number),

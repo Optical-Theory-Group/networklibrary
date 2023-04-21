@@ -29,6 +29,63 @@ def convert_seconds_to_hms(seconds):
 
     return "%d:%02d:%02d" % (hour, minutes, seconds)
 
+def compare_dict(dict1, dict2):
+    """
+    Compare two dictionaries containing numpy arrays and other data types.
+    Returns True if they are equal, False otherwise.
+    """
+    # if len(dict1) != len(dict2):
+    #     return False
+    #
+    # for key in dict1:
+    #     if key not in dict2:
+    #         return False
+    #
+    #     val1 = dict1[key]
+    #     val2 = dict2[key]
+    #
+    #     if isinstance(val1, np.ndarray) and isinstance(val2, np.ndarray):
+    #         if not np.array_equal(val1, val2):
+    #             return False
+    #     else:
+    #         try:
+    #             if val1 != val2:
+    #                 return False
+    #         except:
+    #             print('---------ERROR {}------------'.format(key))
+    #             print('---------val1------------')
+    #             print(val1)
+    #             print('---------val2------------')
+    #             print(val2)
+    # Check if the dictionaries have the same keys
+    if set(dict1.keys()) != set(dict2.keys()):
+        print('Different keys')
+        return False
+
+    # Compare each value in the dictionaries
+    for key in dict1:
+        val1 = dict1[key]
+        val2 = dict2[key]
+        #
+        # if type(val1) != type(val2):
+        #     print('Different types {} vs {} in {}'.format(type(val1), type(val2), key))
+        #     return False
+
+        if isinstance(val1, np.ndarray) and isinstance(val2, np.ndarray):
+            if not np.array_equal(val1, val2):
+                print('Unequal numpy arrays {} vs {} in {}'.format(val1, val2, key))
+                return False
+        elif isinstance(val1, dict) and isinstance(val2, dict):
+            if not compare_dict(val1, val2):
+                print('In nested dictionary {}'.format(key))
+                return False
+        else:
+            if val1 != val2:
+                print('Unequal values {} vs {} in {}'.format(val1, val2, key))
+                return False
+
+    return True
+
 
 def update_progress(progress, status='', barlength=20):
     """
