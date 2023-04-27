@@ -108,12 +108,12 @@ for ns in numseeds:
     #     length_scal_factor)
 
     runid = runid.replace(' ', '')
-    nrealisations = 20#10000
-    nbatchsize = 250
+    nrealisations = 200#10000
+    nbatchsize = 50
 
-    # fudge since parallel hdf5 doesnt seem to work on my Windows
-    if os.name == 'nt':
-        nbatchsize = 1
+    # # fudge since parallel hdf5 doesnt seem to work on my Windows
+    # if os.name == 'nt':
+    #     nbatchsize = 1
 
     nbatch = int(nrealisations / nbatchsize)
 

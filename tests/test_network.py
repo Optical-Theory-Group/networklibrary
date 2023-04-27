@@ -10,6 +10,7 @@ import unittest
 import numpy as np
 import os
 import time
+import random
 
 # Import the Network class from the complexnetworklibrary.network module
 from complexnetworklibrary.network import Network
@@ -24,14 +25,9 @@ class NetworkTestCase(unittest.TestCase):
         seed = 3
 
         # Define the type and specifications for the network to be created
-        network_type = 'delaunay'
-        network_spec = {'internal_nodes': 30,
-                        'exit_nodes': 10,
-                        'network_size': 100e-6,
-                        'exit_size': 110e-6,
-                        'wavenumber': k,
-                        'refractive_index': n,
-                        'shape': 'circular'}
+        network_type = 'empty'
+        network_spec = {}#{'wavenumber': 1,
+                        # 'refractive_index':1}
 
         # Define some specifications for the nodes in the network
         node_spec = {'Smat_type': 'isotropic_unitary',
@@ -42,6 +38,25 @@ class NetworkTestCase(unittest.TestCase):
                                network_spec,
                                node_spec,
                                seed_number=seed)
+
+        for i in range(1, 4):
+            self.network.add_node(number=i,position=(random.uniform(0, 1), random.uniform(0, 1)))
+        for i in range(4, 10):
+            self.network.add_node(number=i,position=(random.uniform(0, 1), random.uniform(0, 1)))
+
+        # Connect the nodes in the first component
+        self.network.add_connection(node1=1, node2=2, distance=1)
+        self.network.add_connection(node1=1, node2=3, distance=1)
+        self.network.add_connection(node1=2, node2=3, distance=1)
+
+        # Connect the nodes in the second component
+        self.network.add_connection(node1=4, node2=5, distance=1)
+        self.network.add_connection(node1=4, node2=6, distance=1)
+        self.network.add_connection(node1=5, node2=6, distance=1)
+        self.network.add_connection(node1=7, node2=8, distance=1)
+        self.network.add_connection(node1=7, node2=9, distance=1)
+        self.network.add_connection(node1=8, node2=9, distance=1)
+        self.network.draw()
 
     def test_network_load_save(self):
         # Define a filepath to save the network object to

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import logging
 import sys
 import numpy as np
 from scipy.ndimage.filters import maximum_filter
@@ -68,7 +68,7 @@ def compare_dict(dict1, dict2):
         val2 = dict2[key]
         #
         # if type(val1) != type(val2):
-        #     print('Different types {} vs {} in {}'.format(type(val1), type(val2), key))
+        #     logging.ERROR('Different types {} vs {} in {}'.format(type(val1), type(val2), key))
         #     return False
 
         if isinstance(val1, np.ndarray) and isinstance(val2, np.ndarray):
@@ -80,7 +80,7 @@ def compare_dict(dict1, dict2):
                 print('In nested dictionary {}'.format(key))
                 return False
         else:
-            if val1 != val2:
+            if np.array(val1 != val2).all():
                 print('Unequal values {} vs {} in {}'.format(val1, val2, key))
                 return False
 

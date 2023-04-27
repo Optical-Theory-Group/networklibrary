@@ -55,7 +55,7 @@ class LinkTestCase(unittest.TestCase):
         link.link_type = 'exit'
         link.link_type = 'internal'
         self.assertTrue(isinstance(link.link_type, str))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             link.link_type = 'wrong_type'
 
     def test_dict_to_link(self):

@@ -22,6 +22,10 @@ from .util import update_progress, detect_peaks, plot_colourline
 # from ._numpy_json import dump, load, dumps, loads, json_numpy_obj_hook,NumpyJSONEncoder
 from ._dict_hdf5 import save_dict_to_hdf5, load_dict_from_hdf5
 
+from .node import NODE
+from .link import LINK
+from typing import Dict, Iterable, Union
+
 # setup code logging
 import logging
 import logconfig
@@ -31,21 +35,46 @@ logger = logging.getLogger(__name__)
 
 
 class Network(NetworkGenerator):
-    def __init__(self, network_type=None, network_spec=None,
-                 node_spec=None, seed_number=0, filename=None):
+    def __init__(self, network_type: str = None, network_spec: dict = None,
+                 node_spec: Union[Dict, None] = None, seed_number: int = 0, filename: Union[str, None] = None) -> None:
         """
         Constructor function for network class
         Initialises some class properties.
 
         """
+        logging.info("Initialising network properties...")
         # initialise all class properties
+        self.scat_loss: float  # parameter describing fractional scattering loss
+        self.input: np.ndarray[np.complex64]  # array of input wave amplitudes
+        self.output: np.ndarray[np.complex64]  # array of output wave amplitudes
+        self.k: Union[float, complex]  # vacuum wavenumber of wave propagating in link
+        self.n: Union[float, complex]  # effective refractive index of link
+        self.total_nodes: int  # total number of nodes in network
+        self.internal_nodes: int  # number of internal nodes in network
+        self.exit_nodes: int  # number of exit nodes in network
+        self.scattering_matrix: np.ndarray[np.complex64]  # network scattering matrix
+        self.sm_node_order: list[int]  # list of exit node ids corresponding to SM order
+        self.network_spec: dict  # dictionary specifying network properties
+        self.network_type: str  # type of network
+        self.node_spec: dict  # dictionary specifying node properties
+        self.seed_number: int  # seed number used for network generation
+
         for v, d in self.get_default_properties().items():
             setattr(self, v, d)
 
         if filename is not None:
+            logging.info("...from file")
             self.load_network(filename)
         else:
+            logging.info("...from input arguments")
             super(Network, self).__init__(network_type, network_spec, seed_number)
+            if network_spec is None:
+                raise TypeError("network_spec required")
+            if network_type is None:
+                raise TypeError("network_type required")
+            if node_spec is None:
+                raise TypeError("node_spec required")
+
             self.initialise_network(node_spec)
             self.network_type = network_type
             self.network_spec = network_spec
@@ -56,7 +85,8 @@ class Network(NetworkGenerator):
     # %% network initialisation and recursive functions
     ###########################################################################
 
-    def initialise_network(self, node_spec, input_amp=None, output_amp=None):
+    def initialise_network(self, node_spec: Dict, input_amp: Union[Iterable[Union[float, complex]], None] = None,
+                           output_amp: Union[Iterable[Union[float, complex]], None] = None) -> None:
         """
         Sets the scattering matrix condition for each node
 
@@ -105,7 +135,7 @@ class Network(NetworkGenerator):
         if output_amp is not None:
             self.reset_outputs(output_amp)
 
-    def initialise_node_Smat(self, nodeid, Smat_type, scat_loss, **kwargs):
+    def initialise_node_Smat(self, nodeid: int, Smat_type: str, scat_loss: float, **kwargs) -> None:
         """
         Initialise scattering matrix of node
 
@@ -146,9 +176,10 @@ class Network(NetworkGenerator):
                            'CUE', 'unitary_cyclic', 'to_the_lowest_index', 'custom']
 
         if Smat_type not in supported_Smats:
-            raise ValueError('Specified scattering matrix type is invalid. Please choice one from {}'.format(supported_Smats))
+            raise ValueError(
+                'Specified scattering matrix type is invalid. Please choice one from {}'.format(supported_Smats))
 
-        node = self.get_node(nodeid)
+        node: NODE = self.get_node(nodeid)
 
         node.Smat_type = Smat_type
         node.scat_loss = scat_loss
@@ -232,7 +263,7 @@ class Network(NetworkGenerator):
             iS_mat_bot_row = np.concatenate((iS21, iS22), axis=1)
             node.iS_mat = np.concatenate((iS_mat_top_row, iS_mat_bot_row), axis=0)
 
-    def get_node_amplitudes(self, nodetype='all'):
+    def get_node_amplitudes(self, nodetype: str = 'all') -> np.ndarray:
         """
         Returns a vector of all mode amplitudes in the network for specified node types
 
@@ -258,7 +289,7 @@ class Network(NetworkGenerator):
 
         return np.array(coeffs)
 
-    def update_network(self, direction='forward'):
+    def update_network(self, direction: str = 'forward') -> None:
         """
         Main update function for doing iterative calculation. Algorithm does the following
         1. do the propagation through all waveguides using LINK.update()
@@ -288,12 +319,12 @@ class Network(NetworkGenerator):
         pass
 
     def run_network(self,
-                    n_iterations=10000,
-                    converge=True,
-                    period=200,
-                    threshold=0.0001,
-                    conv_nodes='all',
-                    direction='forward'):
+                    n_iterations: int = 10000,
+                    converge: bool = True,
+                    period: int = 200,
+                    threshold: float = 0.0001,
+                    conv_nodes: str = 'all',
+                    direction: str = 'forward'):
         total_var = 1
 
         if converge is False:
@@ -326,7 +357,9 @@ class Network(NetworkGenerator):
     # %% network reset functions
     #####################################
 
-    def reset_network(self, k=None, input_amp=None, output_amp=None):
+    def reset_network(self, k: Union[complex, float, None] = None,
+                      input_amp: Union[np.ndarray[complex, float], None] = None,
+                      output_amp: Union[np.ndarray[complex, float], None] = None):
         """
         Resets the specified properties of the network
 
@@ -366,13 +399,13 @@ class Network(NetworkGenerator):
         if output_amp is not None:
             self.reset_outputs(output_amp)
 
-    def reset_inputs(self, input_amp):
+    def reset_inputs(self, input_amp: np.ndarray[np.complex64]):
         """
         Helper function to reset input amplitudes of input/output nodes.
 
         Parameters
         ----------
-        input_amp : [float]
+        input_amp : np.ndarray(np.complex64)
             List of input mode amplitudes at input/output nodes. .
 
         Returns
@@ -391,7 +424,8 @@ class Network(NetworkGenerator):
                     node.inwave[i] = 0 + 0j
                     try:
                         node.outwave[i] = next(input_amps_iterate)
-                    except:
+                    except Exception as e:
+                        logging.ERROR(e)
                         pass
 
     def reset_outputs(self, output_amp):
@@ -423,7 +457,8 @@ class Network(NetworkGenerator):
     # %% network analysis functions
     #####################################
 
-    def find_pole(self, k0, method='CG', opts=None, bounds=None):
+    def find_pole(self, k0: complex, method: str = 'CG', opts: Union[dict, None] = None,
+                  bounds: Union[tuple, None] = None) -> complex:
         """
         Finds poles of the scattering matrix in the complex k plane (actually search 
         is based on finding minima of inverse scattering matrix logarithmic determinant).
@@ -436,7 +471,7 @@ class Network(NetworkGenerator):
             Search algorithm (see optimize.minimize documentation). The default is 'CG'.
         opts : 
             Search algorithm options (see optimize.minimize documentation). The default is None.
-        bounds : sequence or Bounds instance, optional
+        bounds : tuple of bounds, optional
             Bounds on search region (see optimize.minimize documentation).
 
         Returns
@@ -446,9 +481,8 @@ class Network(NetworkGenerator):
 
         """
         opt_network = deepcopy(self)
-
         optout = optimize.minimize(lambda kk: self._find_pole_helper(kk[0], kk[1], opt_network),
-                                   np.array([np.real(k0), np.imag(k0)]), method=method, options=opts, bounds=bounds)
+                                   np.array([k0.real, k0.imag]), method=method, options=opts, bounds=bounds)
         if not optout['success']:
             print(optout['message'])
         # return minimum
@@ -456,7 +490,7 @@ class Network(NetworkGenerator):
         return minimum[0] + 1j * minimum[1]
 
     @staticmethod
-    def _find_pole_helper(kr, ki, opt_network):
+    def _find_pole_helper(kr: float, ki: float, opt_network: 'Network') -> complex:
         """
         Helper function for find_poles function
 
@@ -488,43 +522,86 @@ class Network(NetworkGenerator):
 
         return det  # -sign*det # 1/det
 
-    def calc_det_S(self, kmin, kmax, npr, npi=None, takeabs=True, progress_bar_text=''):
+    # This method calculates determinant of scattering matrix of the network object.
+    # Input parameters:
+    # - self: An instance of Network class.
+    # - kmin: Minimum wavenumber value to calculate determinant.
+    # - kmax: Maximum wavenumber value to calculate determinant.
+    # - npr: Number of points in the real axis.
+    # - npi: Number of points in the imaginary axis.
+    # - takeabs: Flag to determine whether to take the absolute value of determinant or not.
+    # - progress_bar_text: Text to show in the progress bar.
+    def calc_det_S(self, kmin: complex, kmax: complex, npr: int, npi: Union[int, None] = None, takeabs: bool = True,
+                   progress_bar_text: str = ''):
+        """
+        This method calculates determinant of scattering matrix of the network object.
+
+        Inputs:
+            kmin: complex
+                Minimum wavenumber value to calculate determinant.
+            kmax: complex
+                Maximum wavenumber value to calculate determinant.
+            npr: int
+                Number of points in the real axis.
+            npi: int, optional
+                Number of points in the imaginary axis. DEFAULT = npr
+            takeabs: bool, optional
+                Flag to determine whether to take the absolute value of determinant or not. DEFAULT = True
+            progress_bar_text: str, optional
+                Text to show in the progress bar.
+
+        Returns:
+            KR, KI: numpy ndarrays giving meshgrid of real and imaginary k coordinates
+            detS:   abs(|SM|) or |SM| found at each position on k grid
+            kpeaks: coarse approximation of positions of peaks in detS
+        """
+        # If npi is not given, we by default set it equal to npr.
         if npi is None:
             npi = npr
+
+        # Save the original value of k.
         korig = self.k
 
-        krmin = np.real(kmin)
-        kimin = np.imag(kmin)
-
-        krmax = np.real(kmax)
-        kimax = np.imag(kmax)
-
+        # Get real and imaginary parts of kmin and kmax and create a meshgrid of points for real/imaginary axes.
+        krmin = kmin.real
+        kimin = kmin.imag
+        krmax = kmax.real
+        kimax = kmax.imag
         kr = np.linspace(krmin, krmax, npr)
         ki = np.linspace(kimin, kimax, npi)
         KR, KI = np.meshgrid(kr, ki)
 
+        # Initialise array to store determinant values for each complex wavenumber
         if takeabs is True:
             detS = np.zeros((npr, npi))
         else:
             detS = np.zeros((npr, npi)) + 1j * np.zeros((npr, npi))
 
+        # Iterate over the grid and calculate the determinant of the scattering matrix for each point.
         for ii in range(0, npr):
             k_real = kr[ii]
             for jj in range(0, npi):
+                # Update the progress bar and working value of k.
                 update_progress((ii * npr + jj) / npr ** 2, status=progress_bar_text)
-                k_imag = ki[jj]
+                k = k_real + 1j * ki[jj]
 
-                k = k_real + 1j * k_imag
+                # Reset the network with the new k value.
                 self.reset_network(k=k)
+
+                # Calculate the scattering matrix and node order and store SM determinant into array.
                 sm, node_order = self.scattering_matrix_direct()
                 if takeabs is True:
                     detS[ii, jj] = abs(np.linalg.det(sm))
                 else:
                     detS[ii, jj] = (np.linalg.det(sm))
 
+        # Reset the network back to the original k value.
         self.reset_network(k=korig)
 
+        # Find peaks of detS.
         peak_inds = detect_peaks(abs(detS))
+
+        # Create an array with the wavenumbers of the peaks.
         kpeaks = np.array([kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]] for i in range(0, len(peak_inds))])
 
         return KR, KI, detS, kpeaks
@@ -1288,8 +1365,6 @@ class Network(NetworkGenerator):
         #     dump(networkdict, f, indent=4)
 
     def load_network(self, filename):
-        # with open(filename) as f:
-        # networkdict  = load(f)
         networkdict = load_dict_from_hdf5(filename)
         self.dict_to_network(networkdict)
 
@@ -1349,22 +1424,24 @@ class Network(NetworkGenerator):
         self.connect_nodes()
 
     @staticmethod
-    def get_default_properties():
-        return {'scat_loss': 0,
-                'input': None,
-                'output': None,
-                'k': 1.0,
-                'n': 1.0,
-                'total_nodes': 0,
-                'internal_nodes': 0,
-                'exit_nodes': 0,
-                'scattering_matrix': None,
-                'sm_node_order': None,
-                'network_spec': None,
-                'network_type': None,
-                'node_spec': None,
-                'seed_number': 0
-                }
+    def get_default_properties() -> dict:
+        default_values = {'scat_loss': 0,  # parameter describing fractional scattering loss
+                          'input': None,  # array of input wave amplitudes
+                          'output': None,  # array of output wave amplitudes
+                          'k': 1.0,  # vacuum wavenumber of wave propagating in link
+                          'n': 1.0,  # effective refractive index of link
+                          'total_nodes': 0,  # total number of nodes in network
+                          'internal_nodes': 0,  # number of internal nodes in network
+                          'exit_nodes': 0,  # number of exit nodes in network
+                          'scattering_matrix': None,  # network scattering matrix
+                          'sm_node_order': None,  # list of exit node ids corresponding to SM order
+                          'network_spec': None,  # dictionary specifying network properties
+                          'network_type': None,  # type of network
+                          'node_spec': None,  # dictionary specifying node properties
+                          'seed_number': 0  # seed number used for network generation
+                          }
+
+        return default_values
 
     ##########################
     # %% Plotting Functions

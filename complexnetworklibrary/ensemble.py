@@ -100,7 +100,7 @@ class NetworkEnsemble:
         network = Network(network_type, network_spec, node_spec, seed_number)
         smd, node_order = network.scattering_matrix_direct()
         networkdict = network.network_to_dict()
-        network.draw()
+        # network.draw()
         return networkdict
 
     @staticmethod

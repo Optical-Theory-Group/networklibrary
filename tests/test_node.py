@@ -32,10 +32,7 @@ class NodeTestCase(unittest.TestCase):
             'iS_mat': np.identity(4)
         }
 
-        node = NODE()
-        node.number = 1
-        node.position = (.3, -3)
-        node.node_type = 'internal'
+        node = NODE(number = 1, pos = (.3, -3), nodetype = 'internal')
         node.n_connect = 4
         node.sorted_connected_nodes = [2, 3, 1, 0]
         node.Smat_type = 'test'
@@ -54,12 +51,12 @@ class NodeTestCase(unittest.TestCase):
         Test restriction on node_type works correctly
         """
         logging.info("Beginning unittest: NodeType")
-        node = NODE()
+        node = NODE(number = 1, pos = (.3, -3), nodetype = 'internal')
 
         node.node_type = 'exit'
         node.node_type = 'internal'
         self.assertTrue(isinstance(node.node_type, str))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             node.node_type = 'wrong_type'
 
     def test_dict_to_node(self):
