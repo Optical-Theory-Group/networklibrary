@@ -111,18 +111,18 @@ for ns in numseeds:
     nrealisations = 200#10000
     nbatchsize = 50
 
-    # # fudge since parallel hdf5 doesnt seem to work on my Windows
-    # if os.name == 'nt':
-    #     nbatchsize = 1
+    # fudge since parallel hdf5 doesnt seem to work on my Windows
+    if os.name == 'nt':
+        nbatchsize = 1
 
     nbatch = int(nrealisations / nbatchsize)
 
     initial_seed = 0
-    savefilename = 'data/{}/p{}.h5'.format(runid, runid)
+    savefilename = '../data/{}/p{}.h5'.format(runid, runid)
 
     # make data folders if they don't exist
-    datadir = 'data/{}'.format(runid)
-    outputdir = 'output/{}'.format(runid)
+    datadir = '../data/{}'.format(runid)
+    outputdir = '../output/{}'.format(runid)
     if not os.path.exists(datadir):
         os.makedirs(datadir)
     if not os.path.exists(outputdir):

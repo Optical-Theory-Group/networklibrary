@@ -16,6 +16,13 @@ from .util import update_progress
 from ._dict_hdf5 import recursively_save_dict_contents_to_group, load_dict_from_hdf5
 from complexnetworklibrary.network import Network
 
+# setup code logging
+import logging
+import logconfig
+
+logconfig.setup_logging()
+logger = logging.getLogger(__name__)
+
 
 class NetworkEnsemble:
     global resultstosave
@@ -25,8 +32,37 @@ class NetworkEnsemble:
     resultstosave = {}
     progresscount = 0
 
-    def __init__(self, savetofilename, writemode, network_type, network_spec, node_spec,
-                 nbatch=1000, nbatchsize=1, initial_seed=0):
+    def __init__(self, savetofilename: str, writemode: str, network_type: str, network_spec: dict, node_spec: dict,
+                 nbatch: int = 1000, nbatchsize: int = 1, initial_seed:int = 0) -> None:
+        """
+            Upon initialising this class an ensemble of complex networks with the specified network and node properties
+            is generated. Refer to network.py and node.py documentation for further details on network_type,network_spec
+            and node_spec inputs. Generated ensemble data is saved to a hdf5 file. Data saved is the dictionary output
+            from a call to the Network.network_to_dict() method. If called on an existing data file, data is appended 
+            to existing realisations.
+
+            Parameters
+            ----------
+                savetofilename: str
+                    Specify the name of the hdf5 file where results are saved
+                writemode: str
+                    Output from Network.network_to_dict() will be pruned depending on value chosen according to:
+                        - 'sm':  only stores network scattering matrix and relevant node ids/order information
+                        - 'network': stores the 'NETWORK' results
+                        - otherwise the entire output dictionary is stored
+                network_type: str
+                    Specify the type of network to be generated
+                network_spec: dict
+                    Specify the network type and parameters
+                node_spec: dict
+                    Specify the node model
+                nbatch: int
+                    Specify how many parallel batches of realisations
+                nbatchsize: int
+                    Specify the number of realisations to run in each parallel batch
+                initial_seed: int
+                    Set the random seed for the first realisation
+        """
         global resultstosave
         global progresscount
         global totalrealisations
@@ -40,7 +76,7 @@ class NetworkEnsemble:
         totalrealisations = (nbatch * nbatchsize)
 
         with h5py.File(savetofilename, 'a', driver=None) as h5file:
-            print(h5file)
+            logging.info("Data will be saved to {}".format(h5file))
             existing_realisations = [int(k) for k in h5file.keys()]
             starttime = datetime.now()  # time.time()
 
@@ -100,7 +136,6 @@ class NetworkEnsemble:
         network = Network(network_type, network_spec, node_spec, seed_number)
         smd, node_order = network.scattering_matrix_direct()
         networkdict = network.network_to_dict()
-        # network.draw()
         return networkdict
 
     @staticmethod
