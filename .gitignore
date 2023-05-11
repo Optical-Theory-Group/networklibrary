@@ -4,12 +4,12 @@
 .db
 *.log
 *.h5
-*[conflicted]*
+*conflicted*
 simulation.log
-
-# Ignore the following directories
+#
+## Ignore the following directories
 *pycache*/
 data/*/
-output/*/
+output/*
 .idea/
-defunct/
+complexnetworklibrary/defunct/
