@@ -686,45 +686,45 @@ class Network(NetworkGenerator):
 
         return output_power / impedance
 
-    def calc_internal_energy(self, epsr=1):
-        """
-        Calculates the total energy density within the network.
-        Energy density given is expressed per unit cross-sectional area of connections
-
-        Parameters
-        ----------
-        epsr : float, optional
-            relative permittivity of connections
-        """
-        Utot = 0
-        eps0 = 1  # 8.854187812*1e-12
-
-        for connection in self.links:
-            d = connection.distance
-            Ap = connection.inwave[0]
-            Am = connection.inwave[1]
-            Apc = np.conjugate(Ap)
-            Amc = np.conjugate(Am)
-
-            kr = np.real(self.k)
-            ki = np.imag(self.k)
-
-            if ki == 0:
-                UintPP = Ap * Apc * d
-                UintMM = Am * Amc * d
-                UintPM = Ap * Amc * (np.sin(kr * d)) / kr
-                UintMP = Am * Apc * (np.sin(kr * d)) / kr
-            else:
-                UintPP = Ap * Apc * (1 - np.exp(-2 * d * ki)) / (2 * ki)
-                UintMM = Am * Amc * (1 - np.exp(-2 * d * ki)) / (2 * ki)
-                UintPM = Ap * Amc * (np.sin(kr * d)) * np.exp(-d * ki) / kr
-                UintMP = Am * Apc * (np.sin(kr * d)) * np.exp(-d * ki) / kr
-
-            U1 = 2 * 0.5 * eps0 * epsr * (UintPP + UintMM + UintPM + UintMP)  # twice since we assume Ue = Um
-
-            Utot += U1
-
-        return Utot
+    # def calc_internal_energy(self, epsr=1):
+    #     """
+    #     Calculates the total energy density within the network.
+    #     Energy density given is expressed per unit cross-sectional area of connections
+    #
+    #     Parameters
+    #     ----------
+    #     epsr : float, optional
+    #         relative permittivity of connections
+    #     """
+    #     Utot = 0
+    #     eps0 = 1  # 8.854187812*1e-12
+    #
+    #     for connection in self.links:
+    #         d = connection.distance
+    #         Ap = connection.inwave[0]
+    #         Am = connection.inwave[1]
+    #         Apc = np.conjugate(Ap)
+    #         Amc = np.conjugate(Am)
+    #
+    #         kr = np.real(self.k)
+    #         ki = np.imag(self.k)
+    #
+    #         if ki == 0:
+    #             UintPP = Ap * Apc * d
+    #             UintMM = Am * Amc * d
+    #             UintPM = Ap * Amc * (np.sin(kr * d)) / kr
+    #             UintMP = Am * Apc * (np.sin(kr * d)) / kr
+    #         else:
+    #             UintPP = Ap * Apc * (1 - np.exp(-2 * d * ki)) / (2 * ki)
+    #             UintMM = Am * Amc * (1 - np.exp(-2 * d * ki)) / (2 * ki)
+    #             UintPM = Ap * Amc * (np.sin(kr * d)) * np.exp(-d * ki) / kr
+    #             UintMP = Am * Apc * (np.sin(kr * d)) * np.exp(-d * ki) / kr
+    #
+    #         U1 = 2 * 0.5 * eps0 * epsr * (UintPP + UintMM + UintPM + UintMP)  # twice since we assume Ue = Um
+    #
+    #         Utot += U1
+    #
+    #     return Utot
 
     ###########################
     # %%  network properties
