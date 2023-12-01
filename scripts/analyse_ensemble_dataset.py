@@ -20,7 +20,7 @@ from complexnetworklibrary._dict_hdf5 import load_dict_from_hdf5, recursively_lo
 from complexnetworklibrary.util import update_progress
 from complexnetworklibrary.network import Network
 
-obj = os.scandir('data/')
+obj = os.scandir('../data/')
 dirs = [entry.name for entry in obj if entry.is_dir()]
 
 # %% Datafile selection / read or load selection

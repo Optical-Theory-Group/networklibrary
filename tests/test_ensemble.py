@@ -16,7 +16,7 @@ if __name__ == '__main__':
     writemode = 'a'
     verbose = 1
 
-    ivals0 = range(100)
+    ivals0 = range(200)
 
     generate_ensemble(filename, ivals0,
                       generator, generator_args,

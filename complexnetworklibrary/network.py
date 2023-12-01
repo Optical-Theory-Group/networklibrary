@@ -147,7 +147,7 @@ class Network(NetworkGenerator):
             Specifies type of scattering matrix to use.
                 'identity': SM is set to identity matrix - complete reflection at each input
                 'permute_identity' : permuted identity matrix - rerouting to next edge
-                'random': random SM. Each elemen takes a value in [0,1)
+                'random': random SM. Each element takes a value in [0,1)
                 'isotropic_unitary': unitary isotropic SM, implemented through DFT matrix of correct dimension
                 'random_unitary': random unitary SM
                 'COE' : drawn from COE
@@ -1536,7 +1536,7 @@ class Network(NetworkGenerator):
                          [node1.position[1], node2.position[1]], color=linecol)
 
             for node in self.nodes:
-                plt.text(node.position[0], node.position[1], node.number, size=13, color='black', alpha=0.7)
+                # plt.text(node.position[0], node.position[1], node.number, size=13, color='black', alpha=0.7)
                 if node.node_type == 'internal':
                     plt.plot(node.position[0], node.position[1], 'o', color='#9678B4')
                     # plt.text(node.position[0], node.position[1],str(node.number),

@@ -1237,7 +1237,7 @@ class NetworkGenerator:
     def trim_extra_exit_node_connections(self, ):
         """
             Removes all but one connection originating from an exit node. The link
-            that is remains is chosen based on the shortest distance to an internal node.
+            that remains is chosen based on the shortest distance to an internal node.
         """
 
         # loop over exit nodes and remove all but one of the links
