@@ -1,13 +1,15 @@
-import shapely
+from typing import Union
+
+import matplotlib.pyplot as plt
 # from igraph import Graph
 import numpy as np
 import scipy.spatial as sp
-from shapely.geometry import Polygon
+import shapely
 from shapely.affinity import rotate, translate
+from shapely.geometry import Polygon
 from shapely.ops import nearest_points
 from shapely.plotting import plot_polygon
-from typing import Union
-import matplotlib.pyplot as plt
+
 # from matplotlib.axes import Axes
 # from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 #

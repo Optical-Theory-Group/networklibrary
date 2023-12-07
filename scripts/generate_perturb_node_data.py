@@ -8,14 +8,14 @@ Generates a single random network and calculates the |S| complex spectrum
 as a specified node is perturbed
 
 """
-import numpy as np
+import os
+
+import dill
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
+import numpy as np
 import seaborn as sns
 from matplotlib.animation import FFMpegFileWriter
-import os
-import dill
-
+from matplotlib.collections import LineCollection
 from scipy.optimize import Bounds
 
 from complexnetworklibrary.network import Network
@@ -52,7 +52,7 @@ if case == 'delaunay':
 # node specification
 
 scattering_loss = 0
-node_spec = {'Smat_type': 'unitary_cyclic',
+node_spec = {'S_mat_type': 'unitary_cyclic',
              'scat_loss': scattering_loss,
              # leave 'delta' out to get random phases across all nodes
              }
@@ -62,7 +62,7 @@ length_scal_factor = 1
 # %%parameters for data files
 # #################################################
 runid = 'perturb_node_{}_{}_i{}_e{}_dim{}_lf{}_merge'.format(network_type,
-                                        node_spec['Smat_type'],
+                                        node_spec['S_mat_type'],
                                         network_spec['internal_nodes'],
                                         network_spec['exit_nodes'],
                                         np.array(network_spec['network_size'])*1e6,
@@ -124,13 +124,13 @@ nodeindextochange = 1
 dvec = np.zeros((network.nodes[node_number].n_connect))
 dvec[nodeindextochange] = parameter_values[index]
 
-new_node_spec = {'Smat_type': 'unitary_cyclic',
+new_node_spec = {'S_mat_type': 'unitary_cyclic',
                  'scat_loss': 0,
                  'delta':dvec,
                  }
 
 # reset the scattering matrix of the given node
-network.initialise_node_Smat(node_number,**node_spec)
+network.initialise_node_S_mat(node_number,**node_spec)
 
 # Initialise arrays to store results
 parameter_scan_results = {}
@@ -155,13 +155,13 @@ for index in range(indmin,indmax):
     results['delta'] = dvec
     results['parameter'] = parameter_values[index]
     results['index'] = index
-    new_node_spec = {'Smat_type': 'unitary_cyclic',
+    new_node_spec = {'S_mat_type': 'unitary_cyclic',
                      'scat_loss': 0,
                      'delta':dvec,
                      }
 
     # reset the scattering matrix of the given node
-    network.initialise_node_Smat(node_number,**new_node_spec)
+    network.initialise_node_S_mat(node_number,**new_node_spec)
     rcoeff[index] = network.nodes[node_number].S_mat[nodeindextochange,nodeindextochange]
     results['rcoeff'] = rcoeff[index]
 
@@ -294,13 +294,13 @@ for index in range(indmin+1,indmax):
     # reset the scattering matrix of the given node
     dvec = np.zeros((network.nodes[node_number].n_connect))
     dvec[nodeindextochange] = parameter_values[index] 
-    new_node_spec = {'Smat_type': 'unitary_cyclic',
+    new_node_spec = {'S_mat_type': 'unitary_cyclic',
                      'scat_loss': 0,
                      'delta':dvec,
                      }
 
     # reset the scattering matrix of the given node
-    network.initialise_node_Smat(node_number,**new_node_spec)
+    network.initialise_node_S_mat(node_number,**new_node_spec)
 
     # calculate resonance shifts
     dkanal_temp = np.zeros((len(kpoles_iter)),dtype=np.complex_)

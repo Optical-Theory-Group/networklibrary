@@ -5,10 +5,12 @@ Created on Mon Mar  6 08:42:57 2023
 @author: mforeman
 """
 
-import numpy as np
 import os
-import dill
 from copy import deepcopy
+
+import dill
+import numpy as np
+
 from complexnetworklibrary.util import update_progress
 
 # #################################################
@@ -42,7 +44,7 @@ if case == 'delaunay':
 # node specification
 
 scattering_loss = 0
-node_spec = {'Smat_type': 'unitary_cyclic',
+node_spec = {'S_mat_type': 'unitary_cyclic',
              'scat_loss': scattering_loss,
              # leave 'delta' out to get random phases across all nodes
              }
@@ -53,21 +55,21 @@ length_scal_factor = 1
 # #################################################
 
 runid1 = 'perturb_node_{}_{}_i{}_e{}_dim{}_lf{}'.format(network_type,
-                                        node_spec['Smat_type'],
+                                        node_spec['S_mat_type'],
                                         network_spec['internal_nodes'],
                                         network_spec['exit_nodes'],
                                         np.array(network_spec['network_size'])*1e6,
                                         length_scal_factor)
 
 runid2 = 'perturb_node_{}_{}_i{}_e{}_dim{}_lf{}_v2'.format(network_type,
-                                        node_spec['Smat_type'],
+                                        node_spec['S_mat_type'],
                                         network_spec['internal_nodes'],
                                         network_spec['exit_nodes'],
                                         np.array(network_spec['network_size'])*1e6,
                                         length_scal_factor)
 
 runid3 = 'perturb_node_{}_{}_i{}_e{}_dim{}_lf{}_merge'.format(network_type,
-                                        node_spec['Smat_type'],
+                                        node_spec['S_mat_type'],
                                         network_spec['internal_nodes'],
                                         network_spec['exit_nodes'],
                                         np.array(network_spec['network_size'])*1e6,

@@ -6,15 +6,17 @@ Test network load/save functions
 
 """
 
-import unittest
-import numpy as np
 import os
-import time
 import random
+import time
+import unittest
+
+import numpy as np
 
 # Import the Network class from the complexnetworklibrary.network module
 from complexnetworklibrary.network import Network
 from complexnetworklibrary.util import compare_dict
+
 
 class NetworkTestCase(unittest.TestCase):
     def setUp(self):

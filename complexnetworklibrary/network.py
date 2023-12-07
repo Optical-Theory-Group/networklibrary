@@ -8,35 +8,40 @@ Class file for Network object. Inherits from NetworkGenerator class
 
 """
 
-from copy import deepcopy
-import numpy as np
-from scipy.linalg import null_space
-from scipy import optimize
-import matplotlib.pyplot as plt
-import scipy.stats as stats
-from scipy.linalg import dft
-import seaborn as sns
-
-from ._generator import NetworkGenerator
-from .util import update_progress, detect_peaks, plot_colourline
-# from ._numpy_json import dump, load, dumps, loads, json_numpy_obj_hook,NumpyJSONEncoder
-from ._dict_hdf5 import save_dict_to_hdf5, load_dict_from_hdf5
-
-from .node import NODE
-from .link import LINK
-from typing import Dict, Iterable, Union
-
 # setup code logging
 import logging
+from copy import deepcopy
+from typing import Dict, Iterable, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.stats as stats
+import seaborn as sns
+from scipy import optimize
+from scipy.linalg import dft, null_space
+
 import logconfig
+
+# from ._numpy_json import dump, load, dumps, loads, json_numpy_obj_hook,NumpyJSONEncoder
+from ._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
+from ._generator import NetworkGenerator
+from .link import Link
+from .node import Node
+from .util import detect_peaks, plot_colourline, update_progress
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 
 class Network(NetworkGenerator):
-    def __init__(self, network_type: str = None, network_spec: dict = None,
-                 node_spec: Union[Dict, None] = None, seed_number: int = 0, filename: Union[str, None] = None) -> None:
+    def __init__(
+        self,
+        network_type: str = None,
+        network_spec: dict = None,
+        node_spec: Union[Dict, None] = None,
+        seed_number: int = 0,
+        filename: Union[str, None] = None,
+    ) -> None:
         """
         Constructor function for network class
         Initialises some class properties.
@@ -46,14 +51,22 @@ class Network(NetworkGenerator):
         # initialise all class properties
         self.scat_loss: float  # parameter describing fractional scattering loss
         self.input: np.ndarray[np.complex64]  # array of input wave amplitudes
-        self.output: np.ndarray[np.complex64]  # array of output wave amplitudes
-        self.k: Union[float, complex]  # vacuum wavenumber of wave propagating in link
+        self.output: np.ndarray[
+            np.complex64
+        ]  # array of output wave amplitudes
+        self.k: Union[
+            float, complex
+        ]  # vacuum wavenumber of wave propagating in link
         self.n: Union[float, complex]  # effective refractive index of link
         self.total_nodes: int  # total number of nodes in network
         self.internal_nodes: int  # number of internal nodes in network
         self.exit_nodes: int  # number of exit nodes in network
-        self.scattering_matrix: np.ndarray[np.complex64]  # network scattering matrix
-        self.sm_node_order: list[int]  # list of exit node ids corresponding to SM order
+        self.scattering_matrix: np.ndarray[
+            np.complex64
+        ]  # network scattering matrix
+        self.sm_node_order: list[
+            int
+        ]  # list of exit node ids corresponding to SM order
         self.network_spec: dict  # dictionary specifying network properties
         self.network_type: str  # type of network
         self.node_spec: dict  # dictionary specifying node properties
@@ -67,7 +80,9 @@ class Network(NetworkGenerator):
             self.load_network(filename)
         else:
             logging.info("...from input arguments")
-            super(Network, self).__init__(network_type, network_spec, seed_number)
+            super(Network, self).__init__(
+                network_type, network_spec, seed_number
+            )
             if network_spec is None:
                 raise TypeError("network_spec required")
             if network_type is None:
@@ -85,8 +100,12 @@ class Network(NetworkGenerator):
     # %% network initialisation and recursive functions
     ###########################################################################
 
-    def initialise_network(self, node_spec: Dict, input_amp: Union[Iterable[Union[float, complex]], None] = None,
-                           output_amp: Union[Iterable[Union[float, complex]], None] = None) -> None:
+    def initialise_network(
+        self,
+        node_spec: Dict,
+        input_amp: Union[Iterable[Union[float, complex]], None] = None,
+        output_amp: Union[Iterable[Union[float, complex]], None] = None,
+    ) -> None:
         """
         Sets the scattering matrix condition for each node
 
@@ -108,10 +127,12 @@ class Network(NetworkGenerator):
 
         """
 
-        if 'scat_loss' in node_spec.keys():
-            self.scat_loss = node_spec['scat_loss']
-        if input_amp is not None: self.input = input_amp
-        if output_amp is not None: self.output = output_amp
+        if "scat_loss" in node_spec.keys():
+            self.scat_loss = node_spec["scat_loss"]
+        if input_amp is not None:
+            self.input = input_amp
+        if output_amp is not None:
+            self.output = output_amp
 
         # loop over each node
         for node in self.nodes:
@@ -119,14 +140,14 @@ class Network(NetworkGenerator):
             sorted_connected_nodes = node.sorted_connected_nodes
             node.inwave = {n: (0 + 0j) for n in sorted_connected_nodes}
             node.outwave = {n: (0 + 0j) for n in sorted_connected_nodes}
-            if self.scat_loss != 0 and node.node_type == 'internal':
+            if self.scat_loss != 0 and node.node_type == "internal":
                 for u in sorted_connected_nodes:
                     # node.outwave.update({'loss%u'%u:(0+0j) })
-                    node.outwave['loss%u' % u] = (0 + 0j)
+                    node.outwave["loss%u" % u] = 0 + 0j
 
             # INITIALISE THE NODE SCATTERING MATRIX
-            self.initialise_node_Smat(node.number, **node_spec)
-            # node.init_Smat(**node_spec)
+            self.initialise_node_S_mat(node.number, **node_spec)
+            # node.init_S_mat(**node_spec)
 
         # ###### initialising input/output node amplitudes  ##########
         if input_amp is not None:
@@ -135,7 +156,9 @@ class Network(NetworkGenerator):
         if output_amp is not None:
             self.reset_outputs(output_amp)
 
-    def initialise_node_Smat(self, nodeid: int, Smat_type: str, scat_loss: float, **kwargs) -> None:
+    def initialise_node_S_mat(
+        self, nodeid: int, S_mat_type: str, scat_loss: float, **kwargs
+    ) -> None:
         """
         Initialise scattering matrix of node
 
@@ -143,7 +166,7 @@ class Network(NetworkGenerator):
         ----------
         nodeid : int
             ID number of node to initialise
-        Smat_type : str
+        S_mat_type : str
             Specifies type of scattering matrix to use.
                 'identity': SM is set to identity matrix - complete reflection at each input
                 'permute_identity' : permuted identity matrix - rerouting to next edge
@@ -155,15 +178,15 @@ class Network(NetworkGenerator):
                 'unitary_cyclic': unitary cyclic SM constructed through specifying phases of eigenvalues using 'delta'
                                     kwarg
                 'to_the_lowest_index': reroutes all energy to connected node of lowest index
-                'custom' : Set a custom scattering matrix. Requires kwarg 'Smat' to be set
+                'custom' : Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
 
         scat_loss : float
             Specify scattering loss parameter for node, i.e. fraction of power lost
         **kwargs : Keyword arguments
             Extra keyword arguments required for specified type of scattering matrix:
-                For Smat_type == 'custom':
-                    kwargs['Smat'] defines custom scattering matrix
-                For Smat_type == 'unitary_cyclic':
+                For S_mat_type == 'custom':
+                    kwargs['S_mat'] defines custom scattering matrix
+                For S_mat_type == 'unitary_cyclic':
                     kwargs['delta'] is a vector define phase of eigenvalues of scattering matrix
 
 
@@ -172,20 +195,33 @@ class Network(NetworkGenerator):
         None.
 
         """
-        supported_Smats = ['identity', 'permute_identity', 'random', 'isotropic_unitary', 'random_unitary', 'COE',
-                           'CUE', 'unitary_cyclic', 'to_the_lowest_index', 'custom']
+        supported_S_mats = [
+            "identity",
+            "permute_identity",
+            "random",
+            "isotropic_unitary",
+            "random_unitary",
+            "COE",
+            "CUE",
+            "unitary_cyclic",
+            "to_the_lowest_index",
+            "custom",
+        ]
 
-        if Smat_type not in supported_Smats:
+        if S_mat_type not in supported_S_mats:
             raise ValueError(
-                'Specified scattering matrix type is invalid. Please choice one from {}'.format(supported_Smats))
+                "Specified scattering matrix type is invalid. Please choice one from {}".format(
+                    supported_S_mats
+                )
+            )
 
-        node: NODE = self.get_node(nodeid)
+        node: Node = self.get_node(nodeid)
 
-        node.Smat_type = Smat_type
+        node.S_mat_type = S_mat_type
         node.scat_loss = scat_loss
-        node.Smat_params = kwargs
+        node.S_mat_params = kwargs
 
-        if scat_loss != 0 and node.node_type == 'internal':
+        if scat_loss != 0 and node.node_type == "internal":
             node.inwave_np = np.array([0 + 0j] * (2 * node.n_connect))
             node.outwave_np = np.array([0 + 0j] * (2 * node.n_connect))
         else:
@@ -193,77 +229,113 @@ class Network(NetworkGenerator):
             node.outwave_np = np.array([0 + 0j] * node.n_connect)
 
         # scattering matrix for exit node is identity
-        if node.node_type == 'exit':
+        if node.node_type == "exit":
             node.S_mat = np.identity(node.n_connect, dtype=np.complex_)
             node.iS_mat = np.identity(node.n_connect, dtype=np.complex_)
             return
 
         # scattering matrix for internal node
-        if node.Smat_type == 'identity':
-            node.S_mat = np.identity(node.n_connect, dtype=np.complex_)  # identity matrix
-        elif node.Smat_type == 'uniform_random':
-            node.S_mat = np.random.rand(node.n_connect, node.n_connect)  # RANDOM SCATTEING MATRIX (nXn)
-        elif node.Smat_type == 'isotropic_unitary':
+        if node.S_mat_type == "identity":
+            node.S_mat = np.identity(
+                node.n_connect, dtype=np.complex_
+            )  # identity matrix
+        elif node.S_mat_type == "uniform_random":
+            node.S_mat = np.random.rand(
+                node.n_connect, node.n_connect
+            )  # RANDOM SCATTEING MATRIX (nXn)
+        elif node.S_mat_type == "isotropic_unitary":
             node.S_mat = (1 / node.n_connect) ** 0.5 * dft(node.n_connect)
-        elif node.Smat_type == 'CUE':
-            gamma = 1 if 'subunitary_factor' not in kwargs.keys() else kwargs['subunitary_factor']
-            x = np.identity(1, dtype=np.complex_) if node.n_connect == 1 else stats.unitary_group.rvs(node.n_connect)
+        elif node.S_mat_type == "CUE":
+            gamma = (
+                1
+                if "subunitary_factor" not in kwargs.keys()
+                else kwargs["subunitary_factor"]
+            )
+            x = (
+                np.identity(1, dtype=np.complex_)
+                if node.n_connect == 1
+                else stats.unitary_group.rvs(node.n_connect)
+            )
             node.S_mat = gamma * x
-        elif node.Smat_type == 'COE':
-            gamma = 1 if 'subunitary_factor' not in kwargs.keys() else kwargs['subunitary_factor']
-            x = np.identity(1, dtype=np.complex_) if node.n_connect == 1 else stats.unitary_group.rvs(node.n_connect)
+        elif node.S_mat_type == "COE":
+            gamma = (
+                1
+                if "subunitary_factor" not in kwargs.keys()
+                else kwargs["subunitary_factor"]
+            )
+            x = (
+                np.identity(1, dtype=np.complex_)
+                if node.n_connect == 1
+                else stats.unitary_group.rvs(node.n_connect)
+            )
             node.S_mat = gamma * (x.T @ x)
-        elif node.Smat_type == 'permute_identity':
+        elif node.S_mat_type == "permute_identity":
             mat = np.identity(node.n_connect, dtype=np.complex_)
             inds = [(i - 1) % node.n_connect for i in range(0, node.n_connect)]
             node.S_mat = mat[:, inds]
-        elif node.Smat_type == 'custom':
-            mat = kwargs['Smat']
+        elif node.S_mat_type == "custom":
+            mat = kwargs["S_mat"]
             # dimension checking
             if mat.shape != (node.n_connect, node.n_connect):
                 raise RuntimeError(
                     "Supplied scattering matrix is of incorrect dimensions: "
-                    "{} supplied, {} expected".format(mat.shape,
-                                                      (node.n_connect, node.n_connect)
-                                                      ))
+                    "{} supplied, {} expected".format(
+                        mat.shape, (node.n_connect, node.n_connect)
+                    )
+                )
             else:
                 node.S_mat = mat
-        elif node.Smat_type == 'unitary_cyclic':
-            if 'delta' in kwargs.keys():
-                ll = np.exp(1j * kwargs['delta'][0:node.n_connect])
+        elif node.S_mat_type == "unitary_cyclic":
+            if "delta" in kwargs.keys():
+                ll = np.exp(1j * kwargs["delta"][0 : node.n_connect])
             else:
                 ll = np.exp(1j * 2 * np.pi * np.random.rand(node.n_connect))
             s = np.matmul((1 / node.n_connect) * dft(node.n_connect), ll)
-            node.S_mat = np.zeros(shape=(node.n_connect, node.n_connect), dtype=np.complex_)
+            node.S_mat = np.zeros(
+                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+            )
             for jj in range(0, node.n_connect):
                 node.S_mat[jj, :] = np.concatenate(
-                    (s[(node.n_connect - jj):node.n_connect],
-                     s[0:node.n_connect - jj]))
+                    (
+                        s[(node.n_connect - jj) : node.n_connect],
+                        s[0 : node.n_connect - jj],
+                    )
+                )
 
         # define inverse scattering matrix
         node.iS_mat = np.linalg.inv(node.S_mat)
 
         # ###  INTRODUCE INCOHERENT SCATTERING LOSS   #########
         if scat_loss != 0:
-            S11 = (np.sqrt(1 - scat_loss ** 2)) * node.S_mat
-            S12 = np.zeros(shape=(node.n_connect, node.n_connect), dtype=np.complex_)
-            S21 = np.zeros(shape=(node.n_connect, node.n_connect), dtype=np.complex_)
+            S11 = (np.sqrt(1 - scat_loss**2)) * node.S_mat
+            S12 = np.zeros(
+                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+            )
+            S21 = np.zeros(
+                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+            )
             S22 = scat_loss * np.identity(node.n_connect, dtype=np.complex_)
 
             S_mat_top_row = np.concatenate((S11, S12), axis=1)
             S_mat_bot_row = np.concatenate((S21, S22), axis=1)
             node.S_mat = np.concatenate((S_mat_top_row, S_mat_bot_row), axis=0)
 
-            iS11 = node.iS_mat / np.sqrt(1 - scat_loss ** 2)
-            iS12 = np.zeros(shape=(node.n_connect, node.n_connect), dtype=np.complex_)
-            iS21 = np.zeros(shape=(node.n_connect, node.n_connect), dtype=np.complex_)
-            iS22 = scat_loss * node.iS_mat / np.sqrt(1 - scat_loss ** 2)
+            iS11 = node.iS_mat / np.sqrt(1 - scat_loss**2)
+            iS12 = np.zeros(
+                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+            )
+            iS21 = np.zeros(
+                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+            )
+            iS22 = scat_loss * node.iS_mat / np.sqrt(1 - scat_loss**2)
 
             iS_mat_top_row = np.concatenate((iS11, iS12), axis=1)
             iS_mat_bot_row = np.concatenate((iS21, iS22), axis=1)
-            node.iS_mat = np.concatenate((iS_mat_top_row, iS_mat_bot_row), axis=0)
+            node.iS_mat = np.concatenate(
+                (iS_mat_top_row, iS_mat_bot_row), axis=0
+            )
 
-    def get_node_amplitudes(self, nodetype: str = 'all') -> np.ndarray:
+    def get_node_amplitudes(self, node_type: str = "all") -> np.ndarray:
         """
         Returns a vector of all mode amplitudes in the network for specified node types
 
@@ -275,13 +347,13 @@ class Network(NetworkGenerator):
 
         coeffs = []
         for node in self.nodes:
-            if nodetype == 'all':
+            if node_type == "all":
                 inampls = [x for x in node.inwave.values()]
                 outampls = [x for x in node.outwave.values()]
                 ampls = inampls + outampls
                 coeffs += ampls
             else:
-                if node.node_type != nodetype:
+                if node.node_type != node_type:
                     inampls = [x for x in node.inwave.values()]
                     outampls = [x for x in node.outwave.values()]
                     ampls = inampls + outampls
@@ -289,7 +361,7 @@ class Network(NetworkGenerator):
 
         return np.array(coeffs)
 
-    def update_network(self, direction: str = 'forward') -> None:
+    def update_network(self, direction: str = "forward") -> None:
         """
         Main update function for doing iterative calculation. Algorithm does the following
         1. do the propagation through all waveguides using LINK.update()
@@ -310,7 +382,10 @@ class Network(NetworkGenerator):
         """
 
         for link in self.links:
-            connected_nodes = [self.get_node(link.node1), self.get_node(link.node2)]
+            connected_nodes = [
+                self.get_node(link.node1),
+                self.get_node(link.node2),
+            ]
             link.update(connected_nodes, direction)
             # link.update(self.nodes)
             # link.scattering_matrix(self.nodes)
@@ -318,13 +393,15 @@ class Network(NetworkGenerator):
             node.update(self.scat_loss, direction)
         pass
 
-    def run_network(self,
-                    n_iterations: int = 10000,
-                    converge: bool = True,
-                    period: int = 200,
-                    threshold: float = 0.0001,
-                    conv_nodes: str = 'all',
-                    direction: str = 'forward'):
+    def run_network(
+        self,
+        n_iterations: int = 10000,
+        converge: bool = True,
+        period: int = 200,
+        threshold: float = 0.0001,
+        conv_nodes: str = "all",
+        direction: str = "forward",
+    ):
         total_var = 1
 
         if converge is False:
@@ -337,19 +414,29 @@ class Network(NetworkGenerator):
             coeffs = np.zeros((period, len(new_coeffs)), dtype=np.complex128)
             coeffs[0, :] = new_coeffs
             for niter in range(1, n_iterations):
-                update_progress(threshold / abs(total_var - threshold),
-                                'Iteration {}/{} : variance {}'.format(niter, n_iterations, total_var))
+                update_progress(
+                    threshold / abs(total_var - threshold),
+                    "Iteration {}/{} : variance {}".format(
+                        niter, n_iterations, total_var
+                    ),
+                )
                 self.update_network(direction)  # updates and iterate
                 coeffs[niter % period, :] = self.get_node_amplitudes()
 
                 # check convergence
                 if niter % period == 0:
                     # print('***********************************')
-                    total_var = sum(stats.tstd(np.abs(coeffs))) / sum(np.mean(np.abs(coeffs), axis=0))
+                    total_var = sum(stats.tstd(np.abs(coeffs))) / sum(
+                        np.mean(np.abs(coeffs), axis=0)
+                    )
 
                     if total_var < threshold:
-                        update_progress(threshold / abs(total_var - threshold),
-                                        'Iteration {}/{} : variance {}'.format(niter, n_iterations, total_var))
+                        update_progress(
+                            threshold / abs(total_var - threshold),
+                            "Iteration {}/{} : variance {}".format(
+                                niter, n_iterations, total_var
+                            ),
+                        )
                         # print ('Converged after ',niter,' iterations')
                         break
 
@@ -357,9 +444,12 @@ class Network(NetworkGenerator):
     # %% network reset functions
     #####################################
 
-    def reset_network(self, k: Union[complex, float, None] = None,
-                      input_amp: Union[np.ndarray[complex, float], None] = None,
-                      output_amp: Union[np.ndarray[complex, float], None] = None):
+    def reset_network(
+        self,
+        k: Union[complex, float, None] = None,
+        input_amp: Union[np.ndarray[complex, float], None] = None,
+        output_amp: Union[np.ndarray[complex, float], None] = None,
+    ):
         """
         Resets the specified properties of the network
 
@@ -417,7 +507,7 @@ class Network(NetworkGenerator):
         input_amps_iterate = iter(input_amp)
 
         for node in self.nodes:
-            if node.node_type == 'exit':
+            if node.node_type == "exit":
                 for i in node.inwave:
                     # node.inwave.update({i:0 +0j})
                     # node.outwave.update({i:next(input_amps_iterate)})
@@ -446,7 +536,7 @@ class Network(NetworkGenerator):
         output_amps_iterate = iter(output_amp)
 
         for node in self.nodes:
-            if node.node_type == 'exit':
+            if node.node_type == "exit":
                 for i in node.inwave:
                     # node.outwave.update({i:0 +0j})
                     # node.inwave.update({i:next(output_amps_iterate)})
@@ -457,10 +547,15 @@ class Network(NetworkGenerator):
     # %% network analysis functions
     #####################################
 
-    def find_pole(self, k0: complex, method: str = 'CG', opts: Union[dict, None] = None,
-                  bounds: Union[tuple, None] = None) -> complex:
+    def find_pole(
+        self,
+        k0: complex,
+        method: str = "CG",
+        opts: Union[dict, None] = None,
+        bounds: Union[tuple, None] = None,
+    ) -> complex:
         """
-        Finds poles of the scattering matrix in the complex k plane (actually search 
+        Finds poles of the scattering matrix in the complex k plane (actually search
         is based on finding minima of inverse scattering matrix logarithmic determinant).
 
         Parameters
@@ -469,7 +564,7 @@ class Network(NetworkGenerator):
             initial start point.
         method : string, optional
             Search algorithm (see optimize.minimize documentation). The default is 'CG'.
-        opts : 
+        opts :
             Search algorithm options (see optimize.minimize documentation). The default is None.
         bounds : tuple of bounds, optional
             Bounds on search region (see optimize.minimize documentation).
@@ -481,16 +576,23 @@ class Network(NetworkGenerator):
 
         """
         opt_network = deepcopy(self)
-        optout = optimize.minimize(lambda kk: self._find_pole_helper(kk[0], kk[1], opt_network),
-                                   np.array([k0.real, k0.imag]), method=method, options=opts, bounds=bounds)
-        if not optout['success']:
-            print(optout['message'])
+        optout = optimize.minimize(
+            lambda kk: self._find_pole_helper(kk[0], kk[1], opt_network),
+            np.array([k0.real, k0.imag]),
+            method=method,
+            options=opts,
+            bounds=bounds,
+        )
+        if not optout["success"]:
+            print(optout["message"])
         # return minimum
-        minimum = optout['x']
+        minimum = optout["x"]
         return minimum[0] + 1j * minimum[1]
 
     @staticmethod
-    def _find_pole_helper(kr: float, ki: float, opt_network: 'Network') -> complex:
+    def _find_pole_helper(
+        kr: float, ki: float, opt_network: "Network"
+    ) -> complex:
         """
         Helper function for find_poles function
 
@@ -501,7 +603,7 @@ class Network(NetworkGenerator):
         ki : float
             imaginary part of wavenumber.
         opt_network : Network
-            instance of Network being used for minimization. 
+            instance of Network being used for minimization.
 
         Returns
         -------
@@ -515,7 +617,7 @@ class Network(NetworkGenerator):
         # sm,_ = opt_network.scattering_matrix_direct()
         # try:
         # det = np.abs(np.linalg.det(ism))
-        sign, det = (np.linalg.slogdet(ism))
+        sign, det = np.linalg.slogdet(ism)
         # sign, det = (np.linalg.slogdet(sm)) # logarithm and sign of determinant
         # if np.isnan(det):
         #     sm,_ = opt_network.scattering_matrix_direct()
@@ -531,8 +633,15 @@ class Network(NetworkGenerator):
     # - npi: Number of points in the imaginary axis.
     # - takeabs: Flag to determine whether to take the absolute value of determinant or not.
     # - progress_bar_text: Text to show in the progress bar.
-    def calc_det_S(self, kmin: complex, kmax: complex, npr: int, npi: Union[int, None] = None, takeabs: bool = True,
-                   progress_bar_text: str = ''):
+    def calc_det_S(
+        self,
+        kmin: complex,
+        kmax: complex,
+        npr: int,
+        npi: Union[int, None] = None,
+        takeabs: bool = True,
+        progress_bar_text: str = "",
+    ):
         """
         This method calculates determinant of scattering matrix of the network object.
 
@@ -582,7 +691,9 @@ class Network(NetworkGenerator):
             k_real = kr[ii]
             for jj in range(0, npi):
                 # Update the progress bar and working value of k.
-                update_progress((ii * npr + jj) / npr ** 2, status=progress_bar_text)
+                update_progress(
+                    (ii * npr + jj) / npr**2, status=progress_bar_text
+                )
                 k = k_real + 1j * ki[jj]
 
                 # Reset the network with the new k value.
@@ -593,7 +704,7 @@ class Network(NetworkGenerator):
                 if takeabs is True:
                     detS[ii, jj] = abs(np.linalg.det(sm))
                 else:
-                    detS[ii, jj] = (np.linalg.det(sm))
+                    detS[ii, jj] = np.linalg.det(sm)
 
         # Reset the network back to the original k value.
         self.reset_network(k=korig)
@@ -602,7 +713,12 @@ class Network(NetworkGenerator):
         peak_inds = detect_peaks(abs(detS))
 
         # Create an array with the wavenumbers of the peaks.
-        kpeaks = np.array([kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]] for i in range(0, len(peak_inds))])
+        kpeaks = np.array(
+            [
+                kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]]
+                for i in range(0, len(peak_inds))
+            ]
+        )
 
         return KR, KI, detS, kpeaks
 
@@ -629,7 +745,7 @@ class Network(NetworkGenerator):
         for ii in range(0, npr):
             k_real = kr[ii]
             for jj in range(0, npi):
-                update_progress((ii * npr + jj) / npr ** 2)
+                update_progress((ii * npr + jj) / npr**2)
                 k_imag = ki[jj]
 
                 k = k_real + 1j * k_imag
@@ -639,12 +755,17 @@ class Network(NetworkGenerator):
                 if takeabs is True:
                     detS[ii, jj] = abs(np.linalg.det(sm))
                 else:
-                    detS[ii, jj] = (np.linalg.det(sm))
+                    detS[ii, jj] = np.linalg.det(sm)
 
         self.reset_network(k=korig)
 
         peak_inds = detect_peaks(abs(detS))
-        kpeaks = np.array([kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]] for i in range(0, len(peak_inds))])
+        kpeaks = np.array(
+            [
+                kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]]
+                for i in range(0, len(peak_inds))
+            ]
+        )
 
         return KR, KI, detS, kpeaks
 
@@ -662,9 +783,10 @@ class Network(NetworkGenerator):
 
         input_power = 0
         for node in self.nodes:
-            if node.node_type == 'exit':
-                input_power += np.sum(np.abs(np.array(list(
-                    node.outwave.values()))) ** 2)  # note energy going into network is going out from the exit node
+            if node.node_type == "exit":
+                input_power += np.sum(
+                    np.abs(np.array(list(node.outwave.values()))) ** 2
+                )  # note energy going into network is going out from the exit node
 
         return input_power / impedance
 
@@ -681,8 +803,10 @@ class Network(NetworkGenerator):
         """
         output_power = 0
         for node in self.nodes:
-            if node.node_type == 'exit':
-                output_power += np.sum(np.abs(np.array(list(node.inwave.values()))) ** 2)
+            if node.node_type == "exit":
+                output_power += np.sum(
+                    np.abs(np.array(list(node.inwave.values()))) ** 2
+                )
 
         return output_power / impedance
 
@@ -730,7 +854,9 @@ class Network(NetworkGenerator):
     # %%  network properties
     ###########################
 
-    def laplacian_matrix(self, ):
+    def laplacian_matrix(
+        self,
+    ):
         """
         Returns Laplacian matrix for network
         https://en.wikipedia.org/wiki/Laplacian_matrix
@@ -740,7 +866,9 @@ class Network(NetworkGenerator):
         D = self.degree_matrix()
         return D - A
 
-    def degree_matrix(self, ):
+    def degree_matrix(
+        self,
+    ):
         """
         Returns degree matrix for network
         https://en.wikipedia.org/wiki/Degree_matrix
@@ -764,11 +892,13 @@ class Network(NetworkGenerator):
         for n_id in sorted_nodes:
             node = self.get_node(n_id)
             index = sorted_nodes.index(n_id)
-            deg[index, index] = node.degree()
+            deg[index, index] = node.degree
 
         return deg
 
-    def adjacency_matrix(self, ):
+    def adjacency_matrix(
+        self,
+    ):
         """
         Returns adjacency matrix for network
         https://en.wikipedia.org/wiki/Adjacency_matrix
@@ -797,7 +927,9 @@ class Network(NetworkGenerator):
 
         return adj
 
-    def fiedler(self, ):
+    def fiedler(
+        self,
+    ):
         """
         Returns Fiedler value or algebraic connectivity for network
         https://en.wikipedia.org/wiki/Algebraic_connectivity
@@ -813,7 +945,9 @@ class Network(NetworkGenerator):
         fv = eigenvectors[list(eigenvalues).index(f)]
         return f, fv
 
-    def get_components(self, ):
+    def get_components(
+        self,
+    ):
         """
         Generates a list of network objects for each component in the parent Network class.
 
@@ -832,7 +966,9 @@ class Network(NetworkGenerator):
 
         return subnetworks
 
-    def connected_components(self, ):
+    def connected_components(
+        self,
+    ):
         """
         Returns number of connected components of network
         """
@@ -840,29 +976,37 @@ class Network(NetworkGenerator):
         ns = null_space(L)
         return ns.shape[1]
 
-    def network_parameters(self, ):
-        (node_degrees, internal_node_degrees, exit_node_degrees) = self.degree_distribution(plotflag=False)
+    def network_parameters(
+        self,
+    ):
+        (
+            node_degrees,
+            internal_node_degrees,
+            exit_node_degrees,
+        ) = self.degree_distribution(plotflag=False)
 
-        parameters = {"total_nodes": len(self.nodes),
-                      "external_nodes": len(exit_node_degrees),
-                      "internal_nodes": len(internal_node_degrees),
-                      "total_links": len(self.links),
-                      "external_links": len(exit_node_degrees),
-                      "internal_links": len(self.links) - len(exit_node_degrees),
-                      "node_degree_statistics": self.degree_statistics(),
-                      # "node_degree": {"internal": internal_node_degrees,
-                      #                 "external": exit_node_degrees,
-                      #                 "total": node_degrees ,
-                      #                 },
-                      "adjacency_matrix": self.adjacency_matrix(),
-                      "mean_free_path": self.mean_free_path(),
-                      "components": self.connected_components(),
-
-                      }
+        parameters = {
+            "total_nodes": len(self.nodes),
+            "external_nodes": len(exit_node_degrees),
+            "internal_nodes": len(internal_node_degrees),
+            "total_links": len(self.links),
+            "external_links": len(exit_node_degrees),
+            "internal_links": len(self.links) - len(exit_node_degrees),
+            "node_degree_statistics": self.degree_statistics(),
+            # "node_degree": {"internal": internal_node_degrees,
+            #                 "external": exit_node_degrees,
+            #                 "total": node_degrees ,
+            #                 },
+            "adjacency_matrix": self.adjacency_matrix(),
+            "mean_free_path": self.mean_free_path(),
+            "components": self.connected_components(),
+        }
 
         return parameters
 
-    def mean_free_path(self, ):
+    def mean_free_path(
+        self,
+    ):
         """
         Returns mean link length excluding exit links
         """
@@ -899,11 +1043,11 @@ class Network(NetworkGenerator):
         exit_node_degrees = []
 
         for node in self.nodes:
-            if node.node_type == 'internal':
+            if node.node_type == "internal":
                 # do we want to check if the node is connected to and exit node and discount those connections?
-                internal_node_degrees.append(node.degree())
+                internal_node_degrees.append(node.degree)
             else:
-                exit_node_degrees.append(node.degree())
+                exit_node_degrees.append(node.degree)
 
         node_degrees = internal_node_degrees + exit_node_degrees
 
@@ -912,34 +1056,65 @@ class Network(NetworkGenerator):
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
             all_bins = [i for i in range(0, max(node_degrees) + 1)]
 
-            sns.distplot(internal_node_degrees, ax=ax1, bins=all_bins, color='red', label="internal nodes", kde=kde)
+            sns.distplot(
+                internal_node_degrees,
+                ax=ax1,
+                bins=all_bins,
+                color="red",
+                label="internal nodes",
+                kde=kde,
+            )
             plt.legend()
-            sns.distplot(exit_node_degrees, ax=ax2, bins=all_bins, color='green', label="external nodes", kde=kde)
+            sns.distplot(
+                exit_node_degrees,
+                ax=ax2,
+                bins=all_bins,
+                color="green",
+                label="external nodes",
+                kde=kde,
+            )
             plt.legend()
-            sns.distplot(node_degrees, ax=ax3, bins=all_bins, color='blue', label="all nodes", kde=kde)
+            sns.distplot(
+                node_degrees,
+                ax=ax3,
+                bins=all_bins,
+                color="blue",
+                label="all nodes",
+                kde=kde,
+            )
             plt.legend()
 
         return node_degrees, internal_node_degrees, exit_node_degrees
 
-    def degree_statistics(self, ):
+    def degree_statistics(
+        self,
+    ):
         """
         Returns dictionary of mean, and standard deviation of node degree distributions
 
         """
-        node_degrees, internal_node_degrees, exit_node_degrees = self.degree_distribution(False)
-        return {"internal": {"mean": stats.tmean(internal_node_degrees),
-                             "std": stats.tstd(internal_node_degrees),
-                             # "median": stats.median(internal_node_degrees),
-                             },
-                "exit": {"mean": stats.tmean(exit_node_degrees),
-                         "std": stats.tstd(exit_node_degrees),
-                         # "median": statistics.median(exit_node_degrees),
-                         },
-                "all": {"mean": stats.tmean(node_degrees),
-                        "std": stats.tstd(node_degrees),
-                        # "median": statistics.median(node_degrees),
-                        },
-                }
+        (
+            node_degrees,
+            internal_node_degrees,
+            exit_node_degrees,
+        ) = self.degree_distribution(False)
+        return {
+            "internal": {
+                "mean": stats.tmean(internal_node_degrees),
+                "std": stats.tstd(internal_node_degrees),
+                # "median": stats.median(internal_node_degrees),
+            },
+            "exit": {
+                "mean": stats.tmean(exit_node_degrees),
+                "std": stats.tstd(exit_node_degrees),
+                # "median": statistics.median(exit_node_degrees),
+            },
+            "all": {
+                "mean": stats.tmean(node_degrees),
+                "std": stats.tstd(node_degrees),
+                # "median": statistics.median(node_degrees),
+            },
+        }
 
     ######################################################
     # %%  scattering matrix related functions
@@ -962,7 +1137,13 @@ class Network(NetworkGenerator):
         sorted_nodes = sorted(IDs)
 
         # construct big S matrix
-        total_degree = sum([node.degree() for node in self.nodes if node.node_type == 'internal'])
+        total_degree = sum(
+            [
+                node.degree
+                for node in self.nodes
+                if node.node_type == "internal"
+            ]
+        )
         Sdim = total_degree if self.scat_loss == 0 else 2 * total_degree
         S = np.zeros(shape=(Sdim, Sdim), dtype=np.complex_)
 
@@ -976,7 +1157,7 @@ class Network(NetworkGenerator):
         sindex = 0
         for nodeid in sorted_nodes:
             node = self.get_node(nodeid)
-            if node.node_type == 'internal':
+            if node.node_type == "internal":
                 sdim = node.S_mat.shape[0]
                 for i in node.sorted_connected_nodes:
                     # connected_node = self.get_node(i)
@@ -992,16 +1173,21 @@ class Network(NetworkGenerator):
                         Scoeff_inds.append((node.number, i))
                         Scoeff_type.append(2)
 
-                S[sindex:sindex + sdim, sindex:sindex + sdim] = node.S_mat
+                S[sindex : sindex + sdim, sindex : sindex + sdim] = node.S_mat
                 sindex += sdim
 
-            elif node.node_type == 'exit':
+            elif node.node_type == "exit":
                 for i in node.sorted_connected_nodes:
                     Pcoeff_inds.append((node.number, i))
                     Pcoeff_type.append(1)
 
         # construct small S blocks
-        s11filter = np.array(np.zeros(shape=S.shape, ), dtype='bool')
+        s11filter = np.array(
+            np.zeros(
+                shape=S.shape,
+            ),
+            dtype="bool",
+        )
         for index1 in range(0, len(Scoeff_inds)):
             for index2 in range(0, len(Scoeff_inds)):
                 if (Scoeff_type[index1] == 0) and (Scoeff_type[index2] == 0):
@@ -1012,7 +1198,9 @@ class Network(NetworkGenerator):
         S11 = np.extract(s11filter, S).reshape((nab, nab))
 
         # construct big P matrix
-        P = np.zeros(shape=(len(Pcoeff_inds), len(Pcoeff_inds)), dtype=np.complex_)
+        P = np.zeros(
+            shape=(len(Pcoeff_inds), len(Pcoeff_inds)), dtype=np.complex_
+        )
         for index1, (i, j) in enumerate(Pcoeff_inds):
             # node1 = self.get_node(i)
             # node2 = self.get_node(j)
@@ -1020,7 +1208,12 @@ class Network(NetworkGenerator):
             link = self.get_link(i, j)
             index2 = Pcoeff_inds.index((j, i))
             P[index1, index2] = np.exp(1j * link.k * link.distance)
-        p11filter = np.array(np.zeros(shape=P.shape, ), dtype='bool')
+        p11filter = np.array(
+            np.zeros(
+                shape=P.shape,
+            ),
+            dtype="bool",
+        )
 
         sm_sorted_nodes = []
         for index1 in range(0, len(Pcoeff_inds)):
@@ -1038,12 +1231,12 @@ class Network(NetworkGenerator):
 
     def generate_SP_matrices(self, inverse=False):
         """
-        Calculates the S and P block matrices used for direct computation of the 
-        scattering matrix of the network 
+        Calculates the S and P block matrices used for direct computation of the
+        scattering matrix of the network
 
         Returns
         -------
-        S11,S12,S21,S22,P11,P12,P21,P22 : numpy arrays for blocks of S and P 
+        S11,S12,S21,S22,P11,P12,P21,P22 : numpy arrays for blocks of S and P
             matrices
 
         """
@@ -1056,7 +1249,13 @@ class Network(NetworkGenerator):
         sorted_nodes = sorted(IDs)
 
         # construct big S matrix
-        total_degree = sum([node.degree() for node in self.nodes if node.node_type == 'internal'])
+        total_degree = sum(
+            [
+                node.degree
+                for node in self.nodes
+                if node.node_type == "internal"
+            ]
+        )
         Sdim = total_degree if self.scat_loss == 0 else 2 * total_degree
         S = np.zeros(shape=(Sdim, Sdim), dtype=np.complex_)
 
@@ -1070,7 +1269,7 @@ class Network(NetworkGenerator):
         sindex = 0
         for nodeid in sorted_nodes:
             node = self.get_node(nodeid)
-            if node.node_type == 'internal':
+            if node.node_type == "internal":
                 sdim = node.S_mat.shape[0]
                 for i in node.sorted_connected_nodes:
                     # connected_node = self.get_node(i)
@@ -1087,21 +1286,45 @@ class Network(NetworkGenerator):
                         Scoeff_type.append(2)
 
                 if inverse:
-                    S[sindex:sindex + sdim, sindex:sindex + sdim] = node.iS_mat
+                    S[
+                        sindex : sindex + sdim, sindex : sindex + sdim
+                    ] = node.iS_mat
                 else:
-                    S[sindex:sindex + sdim, sindex:sindex + sdim] = node.S_mat
+                    S[
+                        sindex : sindex + sdim, sindex : sindex + sdim
+                    ] = node.S_mat
                 sindex += sdim
 
-            elif node.node_type == 'exit':
+            elif node.node_type == "exit":
                 for i in node.sorted_connected_nodes:
                     Pcoeff_inds.append((node.number, i))
                     Pcoeff_type.append(1)
 
         # construct small S blocks
-        s11filter = np.array(np.zeros(shape=S.shape, ), dtype='bool')
-        s12filter = np.array(np.zeros(shape=S.shape, ), dtype='bool')
-        s21filter = np.array(np.zeros(shape=S.shape, ), dtype='bool')
-        s22filter = np.array(np.zeros(shape=S.shape, ), dtype='bool')
+        s11filter = np.array(
+            np.zeros(
+                shape=S.shape,
+            ),
+            dtype="bool",
+        )
+        s12filter = np.array(
+            np.zeros(
+                shape=S.shape,
+            ),
+            dtype="bool",
+        )
+        s21filter = np.array(
+            np.zeros(
+                shape=S.shape,
+            ),
+            dtype="bool",
+        )
+        s22filter = np.array(
+            np.zeros(
+                shape=S.shape,
+            ),
+            dtype="bool",
+        )
         for index1 in range(0, len(Scoeff_inds)):
             for index2 in range(0, len(Scoeff_inds)):
                 if (Scoeff_type[index1] == 0) and (Scoeff_type[index2] == 0):
@@ -1120,7 +1343,9 @@ class Network(NetworkGenerator):
         S22 = np.extract(s22filter, S).reshape((ncd, ncd))
 
         # construct big P matrix
-        P = np.zeros(shape=(len(Pcoeff_inds), len(Pcoeff_inds)), dtype=np.complex_)
+        P = np.zeros(
+            shape=(len(Pcoeff_inds), len(Pcoeff_inds)), dtype=np.complex_
+        )
         for index1, (i, j) in enumerate(Pcoeff_inds):
             # node1 = self.get_node(i)
             # node2 = self.get_node(j)
@@ -1133,11 +1358,33 @@ class Network(NetworkGenerator):
                 P[index1, index2] = np.exp(1j * link.k * link.distance)
 
             if not np.isfinite(P[index1, index2]):
-                print('Warning: exponentials in propagation matrix are overflowing.')
-        p11filter = np.array(np.zeros(shape=P.shape, ), dtype='bool')
-        p12filter = np.array(np.zeros(shape=P.shape, ), dtype='bool')
-        p21filter = np.array(np.zeros(shape=P.shape, ), dtype='bool')
-        p22filter = np.array(np.zeros(shape=P.shape, ), dtype='bool')
+                print(
+                    "Warning: exponentials in propagation matrix are overflowing."
+                )
+        p11filter = np.array(
+            np.zeros(
+                shape=P.shape,
+            ),
+            dtype="bool",
+        )
+        p12filter = np.array(
+            np.zeros(
+                shape=P.shape,
+            ),
+            dtype="bool",
+        )
+        p21filter = np.array(
+            np.zeros(
+                shape=P.shape,
+            ),
+            dtype="bool",
+        )
+        p22filter = np.array(
+            np.zeros(
+                shape=P.shape,
+            ),
+            dtype="bool",
+        )
 
         sm_sorted_nodes = []
         for index1 in range(0, len(Pcoeff_inds)):
@@ -1174,7 +1421,17 @@ class Network(NetworkGenerator):
             list of node IDs matching order of scattering matrix
 
         """
-        S11, S12, S21, S22, P11, P12, P21, P22, sm_sorted_nodes = self.generate_SP_matrices()
+        (
+            S11,
+            S12,
+            S21,
+            S22,
+            P11,
+            P12,
+            P21,
+            P22,
+            sm_sorted_nodes,
+        ) = self.generate_SP_matrices()
 
         invfac = np.linalg.inv(np.identity(S11.shape[0]) - S11 @ P11)
         scattering_matrix = (P21 @ (invfac @ (S11 @ P12))) + P22
@@ -1198,7 +1455,17 @@ class Network(NetworkGenerator):
             list of node IDs matching order of scattering matrix
 
         """
-        S11, S12, S21, S22, P11, P12, P21, P22, sm_sorted_nodes = self.generate_SP_matrices(inverse=True)
+        (
+            S11,
+            S12,
+            S21,
+            S22,
+            P11,
+            P12,
+            P21,
+            P22,
+            sm_sorted_nodes,
+        ) = self.generate_SP_matrices(inverse=True)
         iS22 = np.linalg.inv(S22)
         Q = S11 - (S12 @ (iS22 @ S21))  # schur complement
 
@@ -1215,7 +1482,7 @@ class Network(NetworkGenerator):
         # iAB = -iP11 @ P12
         # CiA = -P21 @ iP11
         # iPt11 = iP11 - (iAB) @ fac2 @ (CiA)
-        # iPt12 = - iAB @ fac2 
+        # iPt12 = - iAB @ fac2
         # iPt21 = - fac2 @ CiA
         # iPt22 = - fac2
 
@@ -1230,7 +1497,9 @@ class Network(NetworkGenerator):
 
         return inverse_scattering_matrix, sm_sorted_nodes
 
-    def scattering_matrix_recursive(self, n_iterations=1000, converge=True, period=200, threshold=0.01):
+    def scattering_matrix_recursive(
+        self, n_iterations=1000, converge=True, period=200, threshold=0.01
+    ):
         """
         Calculates the scattering matrix of the network using a forward recursive solution of the matrix
         transport equations
@@ -1263,14 +1532,19 @@ class Network(NetworkGenerator):
 
 
         """
-        scattering_matrix = np.zeros(shape=(self.exit_nodes, self.exit_nodes), dtype=np.complex_)
+        scattering_matrix = np.zeros(
+            shape=(self.exit_nodes, self.exit_nodes), dtype=np.complex_
+        )
 
         # excite each input node individually with a wave of unitary amplitude
         # and store the output wave amplitude into the correct column of the
         # scattering matrix of the entire system
         node_order = None
         for i in range(self.exit_nodes):
-            update_progress(i / self.exit_nodes, 'Calculating SM for I/O node {}...'.format(i))
+            update_progress(
+                i / self.exit_nodes,
+                "Calculating SM for I/O node {}...".format(i),
+            )
 
             exit_out = [0] * self.exit_nodes
             exit_out[i] = 1
@@ -1281,7 +1555,7 @@ class Network(NetworkGenerator):
 
             node_order = []
             for nodes in self.nodes:
-                if nodes.node_type == 'exit':
+                if nodes.node_type == "exit":
                     node_order.append(nodes.number)
                     for b in nodes.inwave:
                         scattering_matrix[index1, i] = nodes.inwave[b]
@@ -1293,7 +1567,9 @@ class Network(NetworkGenerator):
 
         return scattering_matrix, node_order
 
-    def inverse_scattering_matrix_recursive(self, n_iterations=1000, converge=True, period=200, threshold=0.01):
+    def inverse_scattering_matrix_recursive(
+        self, n_iterations=1000, converge=True, period=200, threshold=0.01
+    ):
         """
         Calculates the inverse scattering matrix of the network using a backward recursive solution of the
         matrix transport equations
@@ -1325,24 +1601,35 @@ class Network(NetworkGenerator):
 
         """
 
-        inverse_scattering_matrix = np.zeros(shape=(self.exit_nodes, self.exit_nodes), dtype=np.complex_)
+        inverse_scattering_matrix = np.zeros(
+            shape=(self.exit_nodes, self.exit_nodes), dtype=np.complex_
+        )
 
         # consider each outpt node individually with a wave of unitary amplitude
         # and store the corresponding input  wave amplitude into the correct column of the
         # inverse scattering matrix of the entire system
         node_order = None
         for i in range(self.exit_nodes):
-            update_progress(i / self.exit_nodes, 'Calculating SM for I/O node {}...'.format(i))
+            update_progress(
+                i / self.exit_nodes,
+                "Calculating SM for I/O node {}...".format(i),
+            )
             exit_out = [0] * self.exit_nodes
             exit_out[i] = 1
 
             index1 = 0
             self.reset_network(output_amp=exit_out)
-            self.run_network(n_iterations, converge, period, threshold, direction='backwards')
+            self.run_network(
+                n_iterations,
+                converge,
+                period,
+                threshold,
+                direction="backwards",
+            )
 
             node_order = []
             for nodes in self.nodes:
-                if nodes.node_type == 'exit':
+                if nodes.node_type == "exit":
                     node_order.append(nodes.number)
                     for b in nodes.outwave:
                         inverse_scattering_matrix[index1, i] = nodes.outwave[b]
@@ -1368,30 +1655,44 @@ class Network(NetworkGenerator):
         networkdict = load_dict_from_hdf5(filename)
         self.dict_to_network(networkdict)
 
-    def network_to_dict(self, ):
+    def network_to_dict(
+        self,
+    ):
         # save nodes
-        allnodes = {i: node.node_to_dict() for i, node in enumerate(self.nodes)}
+        allnodes = {
+            i: node.node_to_dict() for i, node in enumerate(self.nodes)
+        }
 
         # save links
-        alllinks = {i: link.link_to_dict() for i, link in enumerate(self.links)}
+        alllinks = {
+            i: link.link_to_dict() for i, link in enumerate(self.links)
+        }
 
         # save other network properties
         varnames = self.get_default_properties().keys()
 
-        networkprops = dict((v, eval('self.' + v)) for v in varnames
-                            if hasattr(self, v))
+        networkprops = dict(
+            (v, eval("self." + v)) for v in varnames if hasattr(self, v)
+        )
 
         # store exit node data separately
-        exitpos = [node.position for node in self.nodes if node.node_type == 'exit']
+        exitpos = [
+            node.position for node in self.nodes if node.node_type == "exit"
+        ]
         exitids = self.get_exit_node_ids()
 
-        networkprops.update({"exit_ids": exitids,
-                             "exit_positions": exitpos,
-                             })
+        networkprops.update(
+            {
+                "exit_ids": exitids,
+                "exit_positions": exitpos,
+            }
+        )
 
-        networkdict = {"NODES": allnodes,
-                       "LINKS": alllinks,
-                       "NETWORK": networkprops}
+        networkdict = {
+            "NODES": allnodes,
+            "LINKS": alllinks,
+            "NETWORK": networkprops,
+        }
 
         return networkdict
 
@@ -1402,7 +1703,7 @@ class Network(NetworkGenerator):
         self.nodenumber_indices = {}
 
         # reset all network attributes
-        networkprops = networkdict['NETWORK']
+        networkprops = networkdict["NETWORK"]
         for v, d in self.get_default_properties().items():
             if hasattr(self, v):
                 setattr(self, v, d)
@@ -1411,12 +1712,12 @@ class Network(NetworkGenerator):
             setattr(self, key, val)
 
         # load nodes
-        nodedict = networkdict['NODES']
-        for js in nodedict.values():
-            self.add_node(nodedict=js)
+        node_dict = networkdict["NODES"]
+        for js in node_dict.values():
+            self.add_node(node_dict=js)
 
         # load links
-        linkdict = networkdict['LINKS']
+        linkdict = networkdict["LINKS"]
         for js in linkdict.values():
             self.add_connection(linkdict=js)
 
@@ -1425,21 +1726,22 @@ class Network(NetworkGenerator):
 
     @staticmethod
     def get_default_properties() -> dict:
-        default_values = {'scat_loss': 0,  # parameter describing fractional scattering loss
-                          'input': None,  # array of input wave amplitudes
-                          'output': None,  # array of output wave amplitudes
-                          'k': 1.0,  # vacuum wavenumber of wave propagating in link
-                          'n': 1.0,  # effective refractive index of link
-                          'total_nodes': 0,  # total number of nodes in network
-                          'internal_nodes': 0,  # number of internal nodes in network
-                          'exit_nodes': 0,  # number of exit nodes in network
-                          'scattering_matrix': None,  # network scattering matrix
-                          'sm_node_order': None,  # list of exit node ids corresponding to SM order
-                          'network_spec': None,  # dictionary specifying network properties
-                          'network_type': None,  # type of network
-                          'node_spec': None,  # dictionary specifying node properties
-                          'seed_number': 0  # seed number used for network generation
-                          }
+        default_values = {
+            "scat_loss": 0,  # parameter describing fractional scattering loss
+            "input": None,  # array of input wave amplitudes
+            "output": None,  # array of output wave amplitudes
+            "k": 1.0,  # vacuum wavenumber of wave propagating in link
+            "n": 1.0,  # effective refractive index of link
+            "total_nodes": 0,  # total number of nodes in network
+            "internal_nodes": 0,  # number of internal nodes in network
+            "exit_nodes": 0,  # number of exit nodes in network
+            "scattering_matrix": None,  # network scattering matrix
+            "sm_node_order": None,  # list of exit node ids corresponding to SM order
+            "network_spec": None,  # dictionary specifying network properties
+            "network_type": None,  # type of network
+            "node_spec": None,  # dictionary specifying node properties
+            "seed_number": 0,  # seed number used for network generation
+        }
 
         return default_values
 
@@ -1447,13 +1749,13 @@ class Network(NetworkGenerator):
     # %% Plotting Functions
     ##########################
 
-    def draw(self, draw_mode='', fig=None):
+    def draw(self, draw_mode="", fig=None):
         if fig is None:
             plt.figure()
 
         # ###  INTENSITY
         # ### TO DO - finish writing this function
-        if draw_mode == 'intensity':
+        if draw_mode == "intensity":
             xc = np.array([])
             yc = np.array([])
             Ic = np.array([])
@@ -1475,11 +1777,18 @@ class Network(NetworkGenerator):
 
                 x = np.linspace(node1.position[0], node2.position[0], Np)
                 y = np.linspace(node1.position[1], node2.position[1], Np)
-                d = np.array([self.calculate_distance(node1.position, (x[i], y[i])) for i in
-                              range(0, Np)])  # avoid end points and thus repeated points
+                d = np.array(
+                    [
+                        self.calculate_distance(node1.position, (x[i], y[i]))
+                        for i in range(0, Np)
+                    ]
+                )  # avoid end points and thus repeated points
                 # calculate intensity along link
-                field = connection.inwave[0] * np.exp(1j * self.k * d) + connection.inwave[1] * np.exp(
-                    - 1j * self.k * (connection.distance - d))
+                field = connection.inwave[0] * np.exp(
+                    1j * self.k * d
+                ) + connection.inwave[1] * np.exp(
+                    -1j * self.k * (connection.distance - d)
+                )
                 intensity = np.abs(field) ** 2
                 xc = np.concatenate((xc, x))
                 yc = np.concatenate((yc, y))
@@ -1495,56 +1804,93 @@ class Network(NetworkGenerator):
             maxi = np.max(Ic)
             mini = np.min(Ic)
             for nn in con_Np:
-                xcp = xc[current_start_ind:(current_start_ind + nn)]
-                ycp = yc[current_start_ind:(current_start_ind + nn)]
-                icp = Ic[current_start_ind:(current_start_ind + nn)]
+                xcp = xc[current_start_ind : (current_start_ind + nn)]
+                ycp = yc[current_start_ind : (current_start_ind + nn)]
+                icp = Ic[current_start_ind : (current_start_ind + nn)]
                 current_start_ind = current_start_ind + nn
                 plot_colourline(xcp, ycp, icp, mini, maxi)
             tt = np.linspace(0, 2 * np.pi, 250)
-            plt.plot(self.network_size * np.cos(tt), self.network_size * np.sin(tt), '--')
-            plt.plot(self.exit_size * np.cos(tt), self.exit_size * np.sin(tt), '--')
-            plt.axis('equal')
+            plt.plot(
+                self.network_size * np.cos(tt),
+                self.network_size * np.sin(tt),
+                "--",
+            )
+            plt.plot(
+                self.exit_size * np.cos(tt), self.exit_size * np.sin(tt), "--"
+            )
+            plt.axis("equal")
 
             # for node in self.nodes:
             #     plt.text(node.position[0], node.position[1],node.number, size =2 ,color='black',alpha=0.7)
             ms = 3
             for node in self.nodes:
-                if node.node_type == 'internal':
-                    plt.plot(node.position[0], node.position[1], 'o', color='#9678B4', markersize=ms)
+                if node.node_type == "internal":
+                    plt.plot(
+                        node.position[0],
+                        node.position[1],
+                        "o",
+                        color="#9678B4",
+                        markersize=ms,
+                    )
 
-                elif node.node_type == 'exit':
+                elif node.node_type == "exit":
                     for i in node.outwave:
                         if node.outwave[i] == 0:
-                            plt.plot(node.position[0], node.position[1], 'o', color='#85C27F', markersize=ms)
+                            plt.plot(
+                                node.position[0],
+                                node.position[1],
+                                "o",
+                                color="#85C27F",
+                                markersize=ms,
+                            )
                             # plt.text(node.position[0], node.position[1],"EXIT",bbox=dict(facecolor='red',alpha=0.5),
                             # size =15 ,color='white')
                         else:
-                            plt.plot(node.position[0], node.position[1], 'o', color='red', markersize=ms)
+                            plt.plot(
+                                node.position[0],
+                                node.position[1],
+                                "o",
+                                color="red",
+                                markersize=ms,
+                            )
                             # plt.text(node.position[0], node.position[1],"INJECTION",bbox=dict(facecolor='green',
                             # alpha=0.5), size =15 ,color='white')
 
-        elif draw_mode == '':
+        elif draw_mode == "":
             for connection in self.links:
                 node1 = self.get_node(connection.node1)
                 node2 = self.get_node(connection.node2)
-                if (node1.node_type == 'exit') or (node2.node_type == 'exit'):
-                    linecol = '#85C27F'
+                if (node1.node_type == "exit") or (node2.node_type == "exit"):
+                    linecol = "#85C27F"
                 else:
-                    linecol = '#9678B4'
+                    linecol = "#9678B4"
 
-                plt.plot([node1.position[0], node2.position[0]],
-                         [node1.position[1], node2.position[1]], color=linecol)
+                plt.plot(
+                    [node1.position[0], node2.position[0]],
+                    [node1.position[1], node2.position[1]],
+                    color=linecol,
+                )
 
             for node in self.nodes:
                 # plt.text(node.position[0], node.position[1], node.number, size=13, color='black', alpha=0.7)
-                if node.node_type == 'internal':
-                    plt.plot(node.position[0], node.position[1], 'o', color='#9678B4')
+                if node.node_type == "internal":
+                    plt.plot(
+                        node.position[0],
+                        node.position[1],
+                        "o",
+                        color="#9678B4",
+                    )
                     # plt.text(node.position[0], node.position[1],str(node.number),
                     # bbox=dict(facecolor='blue',alpha=0.5),
                     # size =15 ,color='white')
 
-                elif node.node_type == 'exit':
-                    plt.plot(node.position[0], node.position[1], 'o', color='#85C27F')
+                elif node.node_type == "exit":
+                    plt.plot(
+                        node.position[0],
+                        node.position[1],
+                        "o",
+                        color="#85C27F",
+                    )
                     # plt.text(node.position[0], node.position[1],str(node.number),
                     # bbox=dict(facecolor='red',alpha=0.5),
                     # size =15 ,color='white')

@@ -7,48 +7,52 @@ Created on Wed Nov  9 09:53:54 2022
 Network generator class
 """
 
-import numpy as np
-import math
-
-import random
-import warnings
-from scipy.spatial import Delaunay, Voronoi, ConvexHull
-# from line_profiler_pycharm import profile
-
-from typing import Union
-from .node import NODE
-from .link import LINK
-
 # setup code logging
 import logging
+import math
+import random
+import warnings
+from typing import Union
+
+import numpy as np
+from scipy.spatial import ConvexHull, Delaunay, Voronoi
+
 import logconfig
+
+from .link import Link
+from .node import Node
+
+# from line_profiler_pycharm import profile
+
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 
 class NetworkGenerator:
-    def __init__(self, network_type: str, network_spec: dict, seed_number: int = 0) -> None:
+    def __init__(
+        self, network_type: str, network_spec: dict, seed_number: int = 0
+    ) -> None:
         """
-            Initialise a network object with nodes and links between them.
+        Initialise a network object with nodes and links between them.
 
-            Parameters
-            ----------
-                network_type: str
-                    Specify the type of network to be generated.
-                    Currently supported types are 'delaunay', 'voronoi', 'buffon' or 'linear'
-                network_spec: dict
-                    Store the network specification
-                seed_number: int
-                    Seed for the random number generator
+        Parameters
+        ----------
+            network_type: str
+                Specify the type of network to be generated.
+                Currently supported types are 'delaunay', 'voronoi', 'buffon' or 'linear'
+            network_spec: dict
+                Store the network specification
+            seed_number: int
+                Seed for the random number generator
 
         """
         # seed random number generator
         np.random.seed(seed_number)
 
         # initialise
-        self.nodes: list[NODE] = []
-        self.links: list[LINK] = []
+        self.nodes: list[Node] = []
+        self.links: list[Link] = []
         self.node_indices: list[int] = []
         self.nodenumber_indices: dict = {}
 
@@ -57,25 +61,32 @@ class NetworkGenerator:
         self.total_nodes: int = 0
         self.network_spec: dict = network_spec
 
-        self.k: Union[float, complex] = network_spec['wavenumber'] if 'wavenumber' in network_spec.keys() else 1.0
-        self.n: Union[float, complex] = network_spec[
-            'refractive_index'] if 'refractive_index' in network_spec.keys() else 1.0
+        self.k: Union[float, complex] = (
+            network_spec["wavenumber"]
+            if "wavenumber" in network_spec.keys()
+            else 1.0
+        )
+        self.n: Union[float, complex] = (
+            network_spec["refractive_index"]
+            if "refractive_index" in network_spec.keys()
+            else 1.0
+        )
 
-        if network_type == 'delaunay':
+        if network_type == "delaunay":
             self.generate_delaunay(network_spec)
-        elif network_type == 'voronoi':
+        elif network_type == "voronoi":
             self.generate_voronoi(network_spec)
-        elif network_type == 'buffon':
+        elif network_type == "buffon":
             self.generate_buffon(network_spec)
-        elif network_type == 'linear':
+        elif network_type == "linear":
             self.generate_linear(network_spec)
-        elif network_type == 'archimedean':
+        elif network_type == "archimedean":
             self.generate_archimedean(network_spec)
-        elif network_type == 'empty':
+        elif network_type == "empty":
             pass
         else:
             # we can add extra code here for generating different networks at a later point
-            raise (ValueError, 'Unknown network type')
+            raise (ValueError, "Unknown network type")
 
         # we initialise the connected node list for each node in network
         self.count_nodes()
@@ -105,16 +116,16 @@ class NetworkGenerator:
                     of a slab network. Not needed for circular
         """
 
-        self.internal_nodes = spec['internal_nodes']
-        self.exit_nodes = spec['exit_nodes']
+        self.internal_nodes = spec["internal_nodes"]
+        self.exit_nodes = spec["exit_nodes"]
         self.total_nodes = self.internal_nodes + self.exit_nodes
 
         points = None
-        if spec['shape'] == 'circular':
-            network_size = spec['network_size']
-            exit_size = spec['exit_size']
+        if spec["shape"] == "circular":
+            network_size = spec["network_size"]
+            exit_size = spec["exit_size"]
             if exit_size <= network_size:
-                raise ValueError('exit_size must be larger than network_size')
+                raise ValueError("exit_size must be larger than network_size")
 
             # generate exit node positions
             tout = 2 * math.pi * np.random.random(self.exit_nodes)
@@ -122,26 +133,33 @@ class NetworkGenerator:
             rio = np.array([network_size] * self.exit_nodes)
 
             # generate random internal points
-            tint = 2 * math.pi * np.random.random(self.internal_nodes - self.exit_nodes)
-            rint = network_size * np.sqrt(np.random.random(
-                self.internal_nodes - self.exit_nodes))  # square root gives a more uniform distribution of points
+            tint = (
+                2
+                * math.pi
+                * np.random.random(self.internal_nodes - self.exit_nodes)
+            )
+            rint = network_size * np.sqrt(
+                np.random.random(self.internal_nodes - self.exit_nodes)
+            )  # square root gives a more uniform distribution of points
 
             t = np.concatenate((tout, tint, tout))
             r = np.concatenate((rio, rint, rout))
 
             points = np.array([r * np.cos(t), r * np.sin(t)]).T
-        if spec['shape'] == 'slab':
-            network_length = spec['network_size'][0]
-            network_width = spec['network_size'][1]
-            exit_size = spec['exit_size']
-            lhs_frac = spec['left_exit_fraction']
+        if spec["shape"] == "slab":
+            network_length = spec["network_size"][0]
+            network_width = spec["network_size"][1]
+            exit_size = spec["exit_size"]
+            lhs_frac = spec["left_exit_fraction"]
             lhs_exits = int(np.floor(self.exit_nodes * lhs_frac))
             rhs_exits = self.exit_nodes - lhs_exits
 
             if exit_size <= network_length:
-                raise ValueError('exit_size must be larger than network_size[0] (length)')
+                raise ValueError(
+                    "exit_size must be larger than network_size[0] (length)"
+                )
             if (lhs_frac < 0) or (lhs_frac > 1):
-                raise ValueError('left_exit_fraction must be between 0 and 1')
+                raise ValueError("left_exit_fraction must be between 0 and 1")
 
             # generate exit node positions
             xoutL = -np.array([exit_size / 2] * lhs_exits)
@@ -155,8 +173,12 @@ class NetworkGenerator:
             yintL = youtL
             yintR = youtR
 
-            xint = network_length * (np.random.random(self.internal_nodes - self.exit_nodes) - 0.5)
-            yint = network_width * (np.random.random(self.internal_nodes - self.exit_nodes) - 0.5)
+            xint = network_length * (
+                np.random.random(self.internal_nodes - self.exit_nodes) - 0.5
+            )
+            yint = network_width * (
+                np.random.random(self.internal_nodes - self.exit_nodes) - 0.5
+            )
 
             x = np.concatenate((xintL, xintR, xint, xoutL, xoutR))
             y = np.concatenate((yintL, yintR, yint, youtL, youtR))
@@ -166,7 +188,9 @@ class NetworkGenerator:
         tri = Delaunay(points)
 
         # loop over triangles adding relevant connections and nodes to network class
-        for cc, simplex in enumerate(tri.simplices):  # For 2-D, the points are oriented counterclockwise.
+        for cc, simplex in enumerate(
+            tri.simplices
+        ):  # For 2-D, the points are oriented counterclockwise.
             for index in range(0, 3):
                 cur_node = simplex[index]
                 next_node = simplex[(index + 1) % 3]
@@ -176,9 +200,20 @@ class NetworkGenerator:
                 y2 = tri.points[next_node][1]
                 distance = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
-                typestr = 'internal' if simplex[index] < self.internal_nodes else 'exit'
+                typestr = (
+                    "internal"
+                    if simplex[index] < self.internal_nodes
+                    else "exit"
+                )
                 self.add_node(simplex[index], (x1, y1), typestr)
-                self.add_connection(simplex[index], simplex[(index + 1) % 3], distance, self.k, self.n, typestr)
+                self.add_connection(
+                    simplex[index],
+                    simplex[(index + 1) % 3],
+                    distance,
+                    self.k,
+                    self.n,
+                    typestr,
+                )
 
         # remove duplicates nodes and links
         self.remove_duplicates()
@@ -214,9 +249,9 @@ class NetworkGenerator:
 
         """
 
-        if spec['shape'] == 'circular':
+        if spec["shape"] == "circular":
             self.generate_voronoi_circular(spec)
-        elif spec['shape'] == 'slab':
+        elif spec["shape"] == "slab":
             self.generate_voronoi_slab(spec)
 
         # remove duplicates nodes and links
@@ -229,17 +264,18 @@ class NetworkGenerator:
         self.connect_nodes()
 
     def generate_voronoi_circular(self, spec: dict) -> None:
-        seed_nodes = spec['seed_nodes']
-        network_size = spec['network_size']
-        exit_size = spec['exit_size']
+        seed_nodes = spec["seed_nodes"]
+        network_size = spec["network_size"]
+        exit_size = spec["exit_size"]
 
         # generate random internal points
         t = 2 * math.pi * np.random.random(seed_nodes)
         r = network_size * np.sqrt(
-            np.random.random(seed_nodes))  # square root gives a more uniform distribution of points
+            np.random.random(seed_nodes)
+        )  # square root gives a more uniform distribution of points
         points = np.array([r * np.cos(t), r * np.sin(t)]).T
         if exit_size <= network_size:
-            raise ValueError('exit_size must be larger than network_size')
+            raise ValueError("exit_size must be larger than network_size")
 
         # do Voronoi meshing
         vor = Voronoi(points)
@@ -254,7 +290,7 @@ class NetworkGenerator:
         for number, vertex in enumerate(vor_vertices):
             # only add points lying within specified network size
             if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:
-                self.add_node(number, (vertex[0], vertex[1]), 'internal')
+                self.add_node(number, (vertex[0], vertex[1]), "internal")
                 self.internal_nodes += 1
             else:
                 # find vertices outside exit_size
@@ -263,17 +299,29 @@ class NetworkGenerator:
         # remove any ridges that lie wholly outside exit_size
         ridge_inds_to_delete = []
         for number, ridge in enumerate(vor_ridges):
-            sortridge = np.sort(ridge)  # will mean -1 is always first if it exists, otherwise doesn't matter
+            sortridge = np.sort(
+                ridge
+            )  # will mean -1 is always first if it exists, otherwise doesn't matter
             if sortridge[0] == -1:
                 if np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size:
-                    ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
-            elif (np.linalg.norm(vor_vertices[sortridge[0]]) > exit_size) and \
-                    (np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size):
+                    ridge_inds_to_delete = np.append(
+                        ridge_inds_to_delete, number
+                    )
+            elif (np.linalg.norm(vor_vertices[sortridge[0]]) > exit_size) and (
+                np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size
+            ):
                 ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
 
-        vor_ridge_points = [vor_ridge_points[num] for num, ridge in enumerate(vor_ridges) if
-                            num not in ridge_inds_to_delete]
-        vor_ridges = [ridge for num, ridge in enumerate(vor_ridges) if num not in ridge_inds_to_delete]
+        vor_ridge_points = [
+            vor_ridge_points[num]
+            for num, ridge in enumerate(vor_ridges)
+            if num not in ridge_inds_to_delete
+        ]
+        vor_ridges = [
+            ridge
+            for num, ridge in enumerate(vor_ridges)
+            if num not in ridge_inds_to_delete
+        ]
 
         # loop over ridges and mark ridges with one vertex outsize network as being infinite
         for number, ridge in enumerate(vor_ridges):
@@ -287,7 +335,9 @@ class NetworkGenerator:
                 ridge.remove(-1)
                 id0 = ridge[0]
                 vertex = vor_vertices[id0]
-                if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:  # lies within network size
+                if (
+                    np.linalg.norm([vertex[0], vertex[1]]) < exit_size
+                ):  # lies within network size
                     self.exit_nodes += 1
                     id1 = len(vor_vertices) + self.exit_nodes
 
@@ -301,12 +351,15 @@ class NetworkGenerator:
                     midy = mid[1]
                     grad = (pos[1] - midy) / (pos[0] - midx)
 
-                    sqrtfac = np.sqrt((1 + grad ** 2) * exit_size ** 2 - (-grad * mid[0] + mid[1]) ** 2)
-                    denom = (1 + grad ** 2)
+                    sqrtfac = np.sqrt(
+                        (1 + grad**2) * exit_size**2
+                        - (-grad * mid[0] + mid[1]) ** 2
+                    )
+                    denom = 1 + grad**2
 
                     # one solution of y - y1 = m (x - x1) and x^2 + y^2 = r^2
-                    x1 = (grad ** 2 * midx - grad * midy + sqrtfac) / denom
-                    x2 = (grad ** 2 * midx - grad * midy - sqrtfac) / denom
+                    x1 = (grad**2 * midx - grad * midy + sqrtfac) / denom
+                    x2 = (grad**2 * midx - grad * midy - sqrtfac) / denom
 
                     y1 = (grad * sqrtfac - grad * midx + midy) / denom
                     y2 = (-grad * sqrtfac - grad * midx + midy) / denom
@@ -322,49 +375,70 @@ class NetworkGenerator:
                         y = y2
                         distance = d2
 
-                    self.add_node(id1, (x, y), 'exit')
-                    self.add_connection(id0, id1, distance, self.k, self.n, 'exit')
-            elif any([r in vertices_outside for r in ridge]):  # one of vertices is outside
+                    self.add_node(id1, (x, y), "exit")
+                    self.add_connection(
+                        id0, id1, distance, self.k, self.n, "exit"
+                    )
+            elif any(
+                [r in vertices_outside for r in ridge]
+            ):  # one of vertices is outside
                 pass
             else:  # finite ridge in network
                 id0 = ridge[0]
                 id1 = ridge[1]
-                distance = self.calculate_distance(self.get_node(id0).position, self.get_node(id1).position)
-                self.add_connection(id0, id1, distance, self.k, self.n, 'internal')
+                distance = self.calculate_distance(
+                    self.get_node(id0).position, self.get_node(id1).position
+                )
+                self.add_connection(
+                    id0, id1, distance, self.k, self.n, "internal"
+                )
 
     @staticmethod
-    def plot_lines(line1: tuple[tuple[float, float], tuple[float, float]],
-                   line2: tuple[tuple[float, float], tuple[float, float]],
-                   intersection: tuple[float, float] = None) -> None:
+    def plot_lines(
+        line1: tuple[tuple[float, float], tuple[float, float]],
+        line2: tuple[tuple[float, float], tuple[float, float]],
+        intersection: tuple[float, float] = None,
+    ) -> None:
         """
-            The plot_lines function takes two lines and plots them on a graph.
-            It also optionally takes an intersection point, which it will plot as well.
+        The plot_lines function takes two lines and plots them on a graph.
+        It also optionally takes an intersection point, which it will plot as well.
 
-            Parameters
-            ----------
-                line1: tuple of tuples ((x1,y1),(x2,y2))
-                    End points of first line
-                line2: tuple of tuples ((x1,y1),(x2,y2))
-                    End points of second line
-                intersection: tuple (x,y), optional
-                    Coordinate of intersection point (no check made that this is actual intersection)
+        Parameters
+        ----------
+            line1: tuple of tuples ((x1,y1),(x2,y2))
+                End points of first line
+            line2: tuple of tuples ((x1,y1),(x2,y2))
+                End points of second line
+            intersection: tuple (x,y), optional
+                Coordinate of intersection point (no check made that this is actual intersection)
         """
         import matplotlib.pyplot as plt
+
         fig, ax = plt.subplots()
-        ax.plot([line1[0][0], line1[1][0]], [line1[0][1], line1[1][1]], label='Line 1')
-        ax.plot([line2[0][0], line2[1][0]], [line2[0][1], line2[1][1]], label='Line 2')
+        ax.plot(
+            [line1[0][0], line1[1][0]],
+            [line1[0][1], line1[1][1]],
+            label="Line 1",
+        )
+        ax.plot(
+            [line2[0][0], line2[1][0]],
+            [line2[0][1], line2[1][1]],
+            label="Line 2",
+        )
         if intersection:
-            ax.plot(intersection[0], intersection[1], 'ro', label='Intersection')
+            ax.plot(
+                intersection[0], intersection[1], "ro", label="Intersection"
+            )
         ax.legend()
         plt.show()
 
     def generate_voronoi_slab(self, spec: dict) -> None:
-        seed_nodes = spec['seed_nodes']
-        exit_nodes = spec['exit_nodes']
-        exit_size = spec['exit_size']
-        network_length = spec['network_size'][0]
-        network_width = spec['network_size'][1]
-        lhs_frac = spec['left_exit_fraction']
+        seed_nodes = spec["seed_nodes"]
+        exit_nodes = spec["exit_nodes"]
+        exit_size = spec["exit_size"]
+        network_length = spec["network_size"][0]
+        network_width = spec["network_size"][1]
+        lhs_frac = spec["left_exit_fraction"]
         lhs_exits = int(np.floor(exit_nodes * lhs_frac))
         rhs_exits = exit_nodes - lhs_exits
 
@@ -387,7 +461,9 @@ class NetworkGenerator:
             y = np.concatenate((ys, youtL, youtR, youtinf))
             points = np.array([x, y]).T
             if exit_size <= network_length:
-                raise ValueError('exit_size must be larger than network_size[0]')
+                raise ValueError(
+                    "exit_size must be larger than network_size[0]"
+                )
 
             # do Voronoi meshing
             vor = Voronoi(points)
@@ -405,7 +481,7 @@ class NetworkGenerator:
             self.internal_nodes = 0
             self.exit_nodes = 0
             for number, vertex in enumerate(vor_vertices):
-                self.add_node(number, (vertex[0], vertex[1]), 'internal')
+                self.add_node(number, (vertex[0], vertex[1]), "internal")
                 self.internal_nodes += 1
 
             for number, ridge in enumerate(vor_ridges):
@@ -414,7 +490,9 @@ class NetworkGenerator:
                     ridge.remove(-1)
                     id0 = ridge[0]
                     vertex = vor_vertices[id0]
-                    if np.abs(vertex[1]) < network_width / 2:  # lies within network size
+                    if (
+                        np.abs(vertex[1]) < network_width / 2
+                    ):  # lies within network size
                         self.exit_nodes += 1
                         id1 = len(vor_vertices) + self.exit_nodes + 1
 
@@ -423,14 +501,21 @@ class NetworkGenerator:
                         x = np.sign(vertex[0]) * exit_size / 2
                         y = vertex[1]
                         distance = self.calculate_distance((x, y), pos)
-                        self.add_node(id1, (x, y), 'exit')
-                        self.add_connection(id0, id1, distance, self.k, self.n, 'exit')
+                        self.add_node(id1, (x, y), "exit")
+                        self.add_connection(
+                            id0, id1, distance, self.k, self.n, "exit"
+                        )
                     pass
                 else:  # finite ridge in network
                     id0 = ridge[0]
                     id1 = ridge[1]
-                    distance = self.calculate_distance(self.get_node(id0).position, self.get_node(id1).position)
-                    self.add_connection(id0, id1, distance, self.k, self.n, 'internal')
+                    distance = self.calculate_distance(
+                        self.get_node(id0).position,
+                        self.get_node(id1).position,
+                    )
+                    self.add_connection(
+                        id0, id1, distance, self.k, self.n, "internal"
+                    )
 
             self.count_nodes()
             self.connect_nodes()
@@ -464,8 +549,9 @@ class NetworkGenerator:
                 int_ptU = self.intersection(lineupper, lineridge)
                 int_ptL = self.intersection(linelower, lineridge)
 
-                if (int_ptU is not None) and \
-                        (int_ptL is not None):  # intersect with upper and lower boundary
+                if (int_ptU is not None) and (
+                    int_ptL is not None
+                ):  # intersect with upper and lower boundary
                     # upper node
                     intersect_node_idU = self.gen_unique_node_id()
                     edge_node_ids_upper.append(intersect_node_idU)
@@ -477,20 +563,28 @@ class NetworkGenerator:
                     self.add_node(intersect_node_idL, int_ptL)
 
                     # connection within network
-                    self.add_connection(intersect_node_idU, intersect_node_idL,
-                                        self.calculate_distance(int_ptU, int_ptL), self.k, self.n, 'internal')
+                    self.add_connection(
+                        intersect_node_idU,
+                        intersect_node_idL,
+                        self.calculate_distance(int_ptU, int_ptL),
+                        self.k,
+                        self.n,
+                        "internal",
+                    )
 
-                    intersectionsU[intersect_node_idU] = {'ridge': ii,
-                                                          'position': int_ptU,
-                                                          'node1': intersect_node_idU,
-                                                          'node2': intersect_node_idL,
-                                                          }
+                    intersectionsU[intersect_node_idU] = {
+                        "ridge": ii,
+                        "position": int_ptU,
+                        "node1": intersect_node_idU,
+                        "node2": intersect_node_idL,
+                    }
 
-                    intersectionsL[intersect_node_idL] = {'ridge': ii,
-                                                          'position': int_ptL,
-                                                          'node1': intersect_node_idL,
-                                                          'node2': intersect_node_idU,
-                                                          }
+                    intersectionsL[intersect_node_idL] = {
+                        "ridge": ii,
+                        "position": int_ptL,
+                        "node1": intersect_node_idL,
+                        "node2": intersect_node_idU,
+                    }
                 elif int_ptU is not None:  # intersect with upper boundary
                     # get id for node within bounding rectangle
                     if (abs(Ax) <= xb) and (abs(Ay) <= yb):
@@ -501,13 +595,20 @@ class NetworkGenerator:
                     intersect_node_id = self.gen_unique_node_id()
                     edge_node_ids_upper.append(intersect_node_id)
                     self.add_node(intersect_node_id, int_ptU)
-                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_ptU), self.k,
-                                        self.n, 'internal')
-                    intersectionsU[intersect_node_id] = {'ridge': ii,
-                                                         'position': int_ptU,
-                                                         'node1': intersect_node_id,
-                                                         'node2': initnode,
-                                                         }
+                    self.add_connection(
+                        intersect_node_id,
+                        initnode,
+                        self.calculate_distance(A, int_ptU),
+                        self.k,
+                        self.n,
+                        "internal",
+                    )
+                    intersectionsU[intersect_node_id] = {
+                        "ridge": ii,
+                        "position": int_ptU,
+                        "node1": intersect_node_id,
+                        "node2": initnode,
+                    }
                 elif int_ptL is not None:  # intersect with lower boundary
                     # get id for node within bounding rectangle
                     if (abs(Ax) <= xb) and (abs(Ay) <= yb):
@@ -518,13 +619,20 @@ class NetworkGenerator:
                     intersect_node_id = self.gen_unique_node_id()
                     edge_node_ids_lower.append(intersect_node_id)
                     self.add_node(intersect_node_id, int_ptL)
-                    self.add_connection(intersect_node_id, initnode, self.calculate_distance(A, int_ptL), self.k,
-                                        self.n, 'internal')
-                    intersectionsL[intersect_node_id] = {'ridge': ii,
-                                                         'position': int_ptL,
-                                                         'node1': intersect_node_id,
-                                                         'node2': initnode,
-                                                         }
+                    self.add_connection(
+                        intersect_node_id,
+                        initnode,
+                        self.calculate_distance(A, int_ptL),
+                        self.k,
+                        self.n,
+                        "internal",
+                    )
+                    intersectionsL[intersect_node_id] = {
+                        "ridge": ii,
+                        "position": int_ptL,
+                        "node1": intersect_node_id,
+                        "node2": initnode,
+                    }
 
             self.count_nodes()
             self.connect_nodes()
@@ -540,10 +648,18 @@ class NetworkGenerator:
                 self.remove_node(nid)
 
             # get ids of nodes on upper boundary
-            uppernode_ids = [interx['node1'] for interx in intersectionsU.values()]
-            lowernode_ids = [interx['node1'] for interx in intersectionsL.values()]
-            uppernode_xpos = np.array([intersectionsU[nid]['position'][0] for nid in uppernode_ids])
-            lowernode_xpos = np.array([intersectionsL[nid]['position'][0] for nid in lowernode_ids])
+            uppernode_ids = [
+                interx["node1"] for interx in intersectionsU.values()
+            ]
+            lowernode_ids = [
+                interx["node1"] for interx in intersectionsL.values()
+            ]
+            uppernode_xpos = np.array(
+                [intersectionsU[nid]["position"][0] for nid in uppernode_ids]
+            )
+            lowernode_xpos = np.array(
+                [intersectionsL[nid]["position"][0] for nid in lowernode_ids]
+            )
             sort_indexu = np.argsort(uppernode_xpos)
             sort_indexl = np.argsort(lowernode_xpos)
             sorted_ids_upper = [uppernode_ids[ii] for ii in sort_indexu]
@@ -557,28 +673,56 @@ class NetworkGenerator:
                     print(id2)
                 pos1 = self.get_node(id1).position
                 pos2 = self.get_node(id2).position
-                self.add_connection(id1, id2, self.calculate_distance(pos1, pos2), self.k, self.n, 'internal')
+                self.add_connection(
+                    id1,
+                    id2,
+                    self.calculate_distance(pos1, pos2),
+                    self.k,
+                    self.n,
+                    "internal",
+                )
 
             for jj in range(0, len(sorted_ids_lower) - 1):
                 id1 = sorted_ids_lower[jj]
                 id2 = sorted_ids_lower[jj + 1]
                 pos1 = self.get_node(id1).position
                 pos2 = self.get_node(id2).position
-                self.add_connection(id1, id2, self.calculate_distance(pos1, pos2), self.k, self.n, 'internal')
+                self.add_connection(
+                    id1,
+                    id2,
+                    self.calculate_distance(pos1, pos2),
+                    self.k,
+                    self.n,
+                    "internal",
+                )
 
             self.count_nodes()
             self.connect_nodes()
 
             # # check number of exit nodes
             exit_nodesids = self.get_exit_node_ids()
-            nodes_l = sum([1 if self.get_node(nodeid).position[0] < 0 else 0 for nodeid in exit_nodesids])
-            nodes_r = sum([1 if self.get_node(nodeid).position[0] > 0 else 0 for nodeid in exit_nodesids])
+            nodes_l = sum(
+                [
+                    1 if self.get_node(nodeid).position[0] < 0 else 0
+                    for nodeid in exit_nodesids
+                ]
+            )
+            nodes_r = sum(
+                [
+                    1 if self.get_node(nodeid).position[0] > 0 else 0
+                    for nodeid in exit_nodesids
+                ]
+            )
             nodes_t = len(exit_nodesids)
 
-            if (nodes_l == lhs_exits) and (nodes_r == rhs_exits) and (nodes_t == exit_nodes):
+            if (
+                (nodes_l == lhs_exits)
+                and (nodes_r == rhs_exits)
+                and (nodes_t == exit_nodes)
+            ):
                 correct_exits = True
             else:
-                logger.info('Regnerating unsuitable network')
+                logger.info("Regnerating unsuitable network")
 
                 # from scipy.spatial import voronoi_plot_2d
                 # import matplotlib.pyplot as plt
@@ -613,17 +757,21 @@ class NetworkGenerator:
                 'fully_connected': True,
 
         """
-        total_lines = spec['lines']
+        total_lines = spec["lines"]
         external_link_number = 2 * total_lines
-        external_link_number = external_link_number + external_link_number % 2  # round up to nearest multilpe of 2
+        external_link_number = (
+            external_link_number + external_link_number % 2
+        )  # round up to nearest multilpe of 2
 
-        if spec['shape'] == 'circular':
-            network_size = spec['network_size']
-        elif spec['shape'] == 'slab':
-            network_length = spec['network_size'][0]
-            network_width = spec['network_size'][1]
+        if spec["shape"] == "circular":
+            network_size = spec["network_size"]
+        elif spec["shape"] == "slab":
+            network_length = spec["network_size"][0]
+            network_width = spec["network_size"][1]
         else:
-            raise ValueError('"shape" in network spec should be either "circular" or "slab"')
+            raise ValueError(
+                '"shape" in network spec should be either "circular" or "slab"'
+            )
 
         self.exit_nodes = 0  # external_link_number
         iternum = 0
@@ -635,30 +783,39 @@ class NetworkGenerator:
             # determine missing number of exit nodes
             missing_nodes = external_link_number - self.exit_nodes
             number_of_lines = int(missing_nodes / 2)
-            available_node_ids = [i for i in range(0, total_lines) if i not in self.node_indices]
+            available_node_ids = [
+                i for i in range(0, total_lines) if i not in self.node_indices
+            ]
             # generate random pairs of points
 
             # fibres = self.links
             intersections = {}
             for nn in range(0, number_of_lines):
-                if spec['shape'] == 'circular':
+                if spec["shape"] == "circular":
                     t = 2 * math.pi * np.random.random(2)
                     xn = network_size * np.cos(t)
                     yn = network_size * np.sin(t)
-                elif spec['shape'] == 'slab':
-                    xn = np.array([- network_length / 2, network_length / 2])
+                elif spec["shape"] == "slab":
+                    xn = np.array([-network_length / 2, network_length / 2])
                     yn = network_width * (np.random.random(2) - 0.5)
                 points = np.array([xn, yn]).T
 
                 nodeid = available_node_ids[nn]
 
-                self.add_node(nodeid, (points[0, 0], points[0, 1]), 'exit')
-                self.add_node(total_lines + nodeid, (points[1, 0], points[1, 1]), 'exit')
+                self.add_node(nodeid, (points[0, 0], points[0, 1]), "exit")
+                self.add_node(
+                    total_lines + nodeid, (points[1, 0], points[1, 1]), "exit"
+                )
 
-                distance = self.calculate_distance((points[0, 0], points[0, 1]),
-                                                   (points[1, 0], points[1, 1]))
+                distance = self.calculate_distance(
+                    (points[0, 0], points[0, 1]), (points[1, 0], points[1, 1])
+                )
 
-                fibres.append(LINK(nodeid, total_lines + nodeid, distance, self.k, self.n))
+                fibres.append(
+                    Link(
+                        nodeid, total_lines + nodeid, distance, self.k, self.n
+                    )
+                )
 
             # construct array of all intersections and track which fibres these points correspond to
             for ii in range(0, len(fibres)):
@@ -676,37 +833,62 @@ class NetworkGenerator:
                     if int_pt is not None:  # lines intersect
                         intersect_node_id = len(self.nodes)
                         self.add_node(intersect_node_id, int_pt)
-                        intersections[intersect_node_id] = {'line1': ii, 'line2': jj, 'position': int_pt}
+                        intersections[intersect_node_id] = {
+                            "line1": ii,
+                            "line2": jj,
+                            "position": int_pt,
+                        }
 
             # construct connections
             for ii in range(0, len(fibres)):
                 endpos = self.get_node(fibres[ii].node1).position
                 # find nodes which lie along this fibre
-                nodes = [inter for inter in intersections if
-                         ((intersections[inter]['line1'] == ii) or (intersections[inter]['line2'] == ii))]
+                nodes = [
+                    inter
+                    for inter in intersections
+                    if (
+                        (intersections[inter]["line1"] == ii)
+                        or (intersections[inter]["line2"] == ii)
+                    )
+                ]
                 # order them in ascending distance from one end
-                distances = [self.calculate_distance(endpos, intersections[jj]['position']) for jj in nodes]
+                distances = [
+                    self.calculate_distance(
+                        endpos, intersections[jj]["position"]
+                    )
+                    for jj in nodes
+                ]
                 orderednodes = [x for _, x in sorted(zip(distances, nodes))]
 
                 orderednodes.insert(0, fibres[ii].node1)
                 orderednodes.append(fibres[ii].node2)
                 # form connections
                 for jj in range(0, len(orderednodes) - 1):
-                    distance = self.calculate_distance(self.get_node(orderednodes[jj]).position,
-                                                       self.get_node(orderednodes[jj + 1]).position)
-                    self.add_connection(orderednodes[jj], orderednodes[jj + 1], distance, self.k, self.n)
+                    distance = self.calculate_distance(
+                        self.get_node(orderednodes[jj]).position,
+                        self.get_node(orderednodes[jj + 1]).position,
+                    )
+                    self.add_connection(
+                        orderednodes[jj],
+                        orderednodes[jj + 1],
+                        distance,
+                        self.k,
+                        self.n,
+                    )
 
             # loop through the connections and reset those that are connected to exit nodes
             for link in self.links:
-                if (self.get_node(link.node1).node_type == 'exit') or (self.get_node(link.node2).node_type == 'exit'):
-                    link.link_type = 'exit'
+                if (self.get_node(link.node1).node_type == "exit") or (
+                    self.get_node(link.node2).node_type == "exit"
+                ):
+                    link.link_type = "exit"
                     link.reset_link(link.distance, link.k, link.n)
 
             self.connect_nodes()
             self.count_nodes()
 
             # check to see if network is fully connected network request and if generated matrix is thus.
-            if spec['fully_connected'] is True:
+            if spec["fully_connected"] is True:
                 (nc, components) = self.connected_component_nodes()
                 if nc == 1:
                     return
@@ -716,12 +898,22 @@ class NetworkGenerator:
                 largest = np.argmax(comp_size)
 
                 # construct list of nodes to remove
-                nodes_to_remove = [comp for index, comp in enumerate(components) if index != largest]
+                nodes_to_remove = [
+                    comp
+                    for index, comp in enumerate(components)
+                    if index != largest
+                ]
 
                 # also remove node indices corersponding to intersections as these will be regenerated
-                intersection_nodes = [node.number for node in self.nodes if node.number >= external_link_number]
+                intersection_nodes = [
+                    node.number
+                    for node in self.nodes
+                    if node.number >= external_link_number
+                ]
                 nodes_to_remove.append(intersection_nodes)
-                nodes_to_remove_flat = [item for sublist in nodes_to_remove for item in sublist]
+                nodes_to_remove_flat = [
+                    item for sublist in nodes_to_remove for item in sublist
+                ]
 
                 # cycle through links and get indices of those connected to unwanted nodes
                 fibres_to_remove_flat = []
@@ -733,9 +925,21 @@ class NetworkGenerator:
 
                 # remove links and nodes
                 # NB we maintain fibres list incase we have to do another iteration. This is cleaner and faster
-                fibres = [link for index, link in enumerate(fibres) if index not in fibres_to_remove_flat]
-                newnodes = [node for node in self.nodes if node.number not in nodes_to_remove_flat]
-                ids = [idn for idn in self.node_indices if idn not in nodes_to_remove_flat]
+                fibres = [
+                    link
+                    for index, link in enumerate(fibres)
+                    if index not in fibres_to_remove_flat
+                ]
+                newnodes = [
+                    node
+                    for node in self.nodes
+                    if node.number not in nodes_to_remove_flat
+                ]
+                ids = [
+                    idn
+                    for idn in self.node_indices
+                    if idn not in nodes_to_remove_flat
+                ]
 
                 self.links = []  # these will be regenerated
                 self.nodes = newnodes
@@ -755,12 +959,12 @@ class NetworkGenerator:
                 exit_size: two exit nodes placed at +/-exit_size/2
 
         """
-        node_number = spec['internal_nodes']
-        network_size = spec['network_size']
-        exit_size = spec['exit_size']
+        node_number = spec["internal_nodes"]
+        network_size = spec["network_size"]
+        exit_size = spec["exit_size"]
 
         if exit_size < network_size:
-            raise ValueError('exit_size must be larger than network_size.')
+            raise ValueError("exit_size must be larger than network_size.")
 
         # generate random positions
         x = network_size * (np.random.random(node_number) - 0.5)
@@ -772,15 +976,24 @@ class NetworkGenerator:
 
         for index in range(0, len(xs)):
             if index == 0 or index == len(xs) - 1:
-                self.add_node(index, (xs[index], 0), 'exit')
+                self.add_node(index, (xs[index], 0), "exit")
             else:
-                self.add_node(index, (xs[index], 0), 'internal')
+                self.add_node(index, (xs[index], 0), "internal")
 
         for index in range(0, len(xs) - 1):
             if index == 0 or index == len(xs) - 2:
-                self.add_connection(index, index + 1, xs[index + 1] - xs[index], self.k, self.n, 'exit')
+                self.add_connection(
+                    index,
+                    index + 1,
+                    xs[index + 1] - xs[index],
+                    self.k,
+                    self.n,
+                    "exit",
+                )
             else:
-                self.add_connection(index, index + 1, xs[index + 1] - xs[index], self.k, self.n)
+                self.add_connection(
+                    index, index + 1, xs[index + 1] - xs[index], self.k, self.n
+                )
 
         self.count_nodes()
 
@@ -812,12 +1025,18 @@ class NetworkGenerator:
         None.
 
         """
-        external_link_number = spec['exit_nodes']
+        external_link_number = spec["exit_nodes"]
 
         network_size, exit_size = self.generate_tiling(spec)
 
-        points = [np.array(node.position) for node in self.nodes if node.node_type == 'internal']
-        numbers = [node.number for node in self.nodes if node.node_type == 'internal']
+        points = [
+            np.array(node.position)
+            for node in self.nodes
+            if node.node_type == "internal"
+        ]
+        numbers = [
+            node.number for node in self.nodes if node.node_type == "internal"
+        ]
         node_number = max(numbers) + 1
 
         # find network nodes on convex hull
@@ -827,7 +1046,7 @@ class NetworkGenerator:
             theta = 2 * math.pi * np.random.random(1)
             exitx = exit_size * np.cos(theta)[0]
             exity = exit_size * np.sin(theta)[0]
-            self.add_node(node_number + ii, (exitx, exity), 'exit')
+            self.add_node(node_number + ii, (exitx, exity), "exit")
 
             # find appropriate connection to closest point on convex hull
             min_distance = 2 * exit_size
@@ -835,13 +1054,23 @@ class NetworkGenerator:
             for number in hullids.vertices:
                 node = self.get_node(numbers[number])
 
-                newdistance = np.sqrt((exitx - node.position[0]) ** 2 + (exity - node.position[1]) ** 2)
+                newdistance = np.sqrt(
+                    (exitx - node.position[0]) ** 2
+                    + (exity - node.position[1]) ** 2
+                )
 
                 if newdistance < min_distance:
                     min_distance = newdistance
                     nearest_id = node.number
 
-            self.add_connection(node_number + ii, nearest_id, min_distance, self.k, self.n, 'exit')
+            self.add_connection(
+                node_number + ii,
+                nearest_id,
+                min_distance,
+                self.k,
+                self.n,
+                "exit",
+            )
 
     ##########################################################################
     # %%  utility functions for generating networks
@@ -850,8 +1079,13 @@ class NetworkGenerator:
         maxid = max(self.node_indices)
         return maxid + 1
 
-    def add_node(self, number: int = 0, position: tuple[float, float] = (0, 0), node_type: str = 'internal',
-                 nodedict: Union[dict, None] = None) -> None:
+    def add_node(
+        self,
+        number: int = 0,
+        position: tuple[float, float] = (0, 0),
+        node_type: str = "internal",
+        node_dict: Union[dict, None] = None,
+    ) -> None:
         """
         Adds node to node collection
 
@@ -864,14 +1098,27 @@ class NetworkGenerator:
         node_type : str, optional
             'exit' or 'internal' to distinguish different nodes.
             The default is 'internal'.
-        nodedict : dict, optional
+        node_dict : dict, optional
             supply dictionary to set node parameters from previously stored values
         """
-        self.nodes.append(NODE(number, position, node_type, nodedict))
+        if node_dict is None:
+            new_node = Node(number, position, node_type)
+        else:
+            new_node = Node.from_spec(node_dict)
+
+        self.nodes.append(new_node)
         self.node_indices.append(number)
 
-    def add_connection(self, node1: int = 0, node2: int = 0, distance: float = 0.0, k: Union[float, complex] = 1.0,
-                       n: Union[float, complex] = 1.0, link_type: str = 'internal', linkdict: Union[dict, None] = None):
+    def add_connection(
+        self,
+        node1: int = 0,
+        node2: int = 0,
+        distance: float = 0.0,
+        k: Union[float, complex] = 1.0,
+        n: Union[float, complex] = 1.0,
+        link_type: str = "internal",
+        linkdict: Union[dict, None] = None,
+    ):
         """
         Adds edge to collection of links
 
@@ -892,22 +1139,25 @@ class NetworkGenerator:
             Default is None
 
         """
-        self.links.append(LINK(node1, node2, distance, k, n, link_type, linkdict))
+        self.links.append(
+            Link(node1, node2, distance, k, n, link_type, linkdict)
+        )
 
     def remove_duplicates(self) -> None:
         """
-         Removes duplicate connections between the same nodes and
-         duplicate node ids from the corresponding collections
+        Removes duplicate connections between the same nodes and
+        duplicate node ids from the corresponding collections
 
-         """
-        newnodes: list[NODE] = []
-        newlinks: list[LINK] = []
+        """
+        newnodes: list[Node] = []
+        newlinks: list[Link] = []
         ids: list[int] = []
         pairs: list[tuple[int, int]] = []
 
         for connection in self.links:
-            if (((connection.node1, connection.node2) not in pairs)
-                    and ((connection.node2, connection.node1) not in pairs)):
+            if ((connection.node1, connection.node2) not in pairs) and (
+                (connection.node2, connection.node1) not in pairs
+            ):
                 newlinks.append(connection)
                 pairs.append((connection.node1, connection.node2))
 
@@ -920,7 +1170,7 @@ class NetworkGenerator:
         self.nodes = newnodes
         self.node_indices = ids
 
-    def get_node(self, number: int) -> NODE:
+    def get_node(self, number: int) -> Node:
         """
         Returns the Node object from the network node collection with the
         specified identifying number
@@ -943,15 +1193,17 @@ class NetworkGenerator:
 
         return self.nodes[self.nodenumber_indices[number]]
 
-    def get_exit_node_ids(self, ) -> list[int]:
+    def get_exit_node_ids(
+        self,
+    ) -> list[int]:
         """
         Returns a list of the node numbers of the exit nodes
 
         """
-        ids = [node.number for node in self.nodes if node.node_type == 'exit']
+        ids = [node.number for node in self.nodes if node.node_type == "exit"]
         return ids
 
-    def get_link(self, i: int, j: int) -> LINK:
+    def get_link(self, i: int, j: int) -> Link:
         """
         Returns the link connection nodes with ids i,j
 
@@ -972,7 +1224,9 @@ class NetworkGenerator:
                 return index
 
     @staticmethod
-    def calculate_distance(pos1: tuple[float, float], pos2: tuple[float, float]) -> float:
+    def calculate_distance(
+        pos1: tuple[float, float], pos2: tuple[float, float]
+    ) -> float:
         """
         Calculates Euclidean distance between two positions defined by pos1,pos2
         """
@@ -1012,10 +1266,12 @@ class NetworkGenerator:
 
                 # # reinitialise scattering matrix of node if needed
                 # # this should also reset input/output wave vectors
-                if hasattr(cnode, 'S_mat') and cnode.S_mat is not None:
-                    warnings.warn("Remove node after nodal scattering matrices were initialised. Ensure you "
-                                  "reinitialise your nodes correctly.")
-                #     cnode.init_Smat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
+                if hasattr(cnode, "S_mat") and cnode.S_mat is not None:
+                    warnings.warn(
+                        "Remove node after nodal scattering matrices were initialised. Ensure you "
+                        "reinitialise your nodes correctly."
+                    )
+                #     cnode.init_S_mat(cnode.scat_mat_type, cnode.scat_loss, cnode.kwargs)
 
             # remove node
             del self.nodes[self.nodenumber_indices[number]]
@@ -1026,12 +1282,18 @@ class NetworkGenerator:
                 if rnode.n_connect == 0:
                     nodes_to_remove.append(index)
 
-            self.nodes = [node for j, node in enumerate(self.nodes) if j not in nodes_to_remove]
+            self.nodes = [
+                node
+                for j, node in enumerate(self.nodes)
+                if j not in nodes_to_remove
+            ]
 
             # update network node counts
             self.count_nodes()
 
-    def connect_nodes(self, ) -> None:
+    def connect_nodes(
+        self,
+    ) -> None:
         """
         Cycles through all nodes in network and determines number and ID of
         connected nodes. Also initialise each node to have the right number
@@ -1050,21 +1312,29 @@ class NetworkGenerator:
 
             # determine which links connect to this node and identify the connected nodes
             for connection in self.links:
-                if node.number == connection.node1 or node.number == connection.node2:
+                if (
+                    node.number == connection.node1
+                    or node.number == connection.node2
+                ):
                     empty = [connection.node1, connection.node2]
                     node.n_connect += 1
 
                     for othernode in empty:
                         if othernode != node.number:
                             connected_nodes.append(
-                                othernode)  # create a list of the nodes that this node connected with
+                                othernode
+                            )  # create a list of the nodes that this node connected with
 
-            sorted_connected_nodes = sorted(connected_nodes)  # sort the nodes im connected to from small to large
+            sorted_connected_nodes = sorted(
+                connected_nodes
+            )  # sort the nodes im connected to from small to large
             node.sorted_connected_nodes = sorted_connected_nodes
             node.inwave = {n: (0 + 0j) for n in sorted_connected_nodes}
             node.outwave = {n: (0 + 0j) for n in sorted_connected_nodes}
 
-    def count_nodes(self, ) -> tuple[int, int, int]:
+    def count_nodes(
+        self,
+    ) -> tuple[int, int, int]:
         """
         Counts and returns the node count class attributes
         Also resets node index tracking lists
@@ -1087,7 +1357,7 @@ class NetworkGenerator:
         self.nodenumber_indices = {}
 
         for index, node in enumerate(self.nodes):
-            if node.node_type == 'internal':
+            if node.node_type == "internal":
                 self.internal_nodes += 1
             else:
                 self.exit_nodes += 1
@@ -1097,7 +1367,9 @@ class NetworkGenerator:
 
         return self.internal_nodes, self.exit_nodes, self.total_nodes
 
-    def connected_component_nodes(self, ) -> tuple:
+    def connected_component_nodes(
+        self,
+    ) -> tuple:
         """
         Returns
         -------
@@ -1234,10 +1506,12 @@ class NetworkGenerator:
             # ... and remove
             self.remove_node(to_remove)
 
-    def trim_extra_exit_node_connections(self, ):
+    def trim_extra_exit_node_connections(
+        self,
+    ):
         """
-            Removes all but one connection originating from an exit node. The link
-            that remains is chosen based on the shortest distance to an internal node.
+        Removes all but one connection originating from an exit node. The link
+        that remains is chosen based on the shortest distance to an internal node.
         """
 
         # loop over exit nodes and remove all but one of the links
@@ -1252,8 +1526,17 @@ class NetworkGenerator:
             exitnodepos = exitnode.position
 
             # get connected nodes distances
-            cids = [cid for cid in exitnode.sorted_connected_nodes if self.get_node(cid).node_type == 'internal']
-            distances = [self.calculate_distance(exitnodepos, self.get_node(cid).position) for cid in cids]
+            cids = [
+                cid
+                for cid in exitnode.sorted_connected_nodes
+                if self.get_node(cid).node_type == "internal"
+            ]
+            distances = [
+                self.calculate_distance(
+                    exitnodepos, self.get_node(cid).position
+                )
+                for cid in cids
+            ]
             mindistid = np.argmin(distances)
 
             # store necessary info for later
@@ -1265,9 +1548,11 @@ class NetworkGenerator:
         for eid in exit_ids:
             self.remove_node(eid)
 
-        for eid, cid, pos, d in zip(exit_ids, exit_connect_ids, exit_position, exit_distances):
-            self.add_node(eid, pos, 'exit')
-            self.add_connection(eid, cid, d, self.k, self.n, 'exit')
+        for eid, cid, pos, d in zip(
+            exit_ids, exit_connect_ids, exit_position, exit_distances
+        ):
+            self.add_node(eid, pos, "exit")
+            self.add_connection(eid, cid, d, self.k, self.n, "exit")
 
         self.connect_nodes()
         self.count_nodes()
@@ -1276,12 +1561,16 @@ class NetworkGenerator:
         self.internal_nodes = 0
         self.exit_nodes = 0
 
-        septol = 1e-6 * params['scale']
-        if params['type'] == 'square':
-            layers = params['num_layers']
-            scale = params['scale']
-            centerx = np.linspace(-(layers - 1), (layers - 1), 2 * (layers - 1) + 1)
-            centery = np.linspace(-(layers - 1), (layers - 1), 2 * (layers - 1) + 1)
+        septol = 1e-6 * params["scale"]
+        if params["type"] == "square":
+            layers = params["num_layers"]
+            scale = params["scale"]
+            centerx = np.linspace(
+                -(layers - 1), (layers - 1), 2 * (layers - 1) + 1
+            )
+            centery = np.linspace(
+                -(layers - 1), (layers - 1), 2 * (layers - 1) + 1
+            )
             CX, CY = np.meshgrid(centerx, centery)
 
             # vectors of coordinates of all vertices of 'element' of lattice
@@ -1301,7 +1590,9 @@ class NetworkGenerator:
                 # order of node indices used internally by add_tile_element matches that of
                 # coordinates in xv,yv.
                 connections = [(0, 1), (1, 3), (3, 2), (2, 0)]
-                nodeid = self.add_tile_element(xv, yv, connections, nodeid, septol)
+                nodeid = self.add_tile_element(
+                    xv, yv, connections, nodeid, septol
+                )
 
             # remove duplicate connections
             self.remove_duplicates()
@@ -1309,16 +1600,22 @@ class NetworkGenerator:
             exit_size = scale * (layers + 0.5) * np.sqrt(2)
 
             # add some exit nodes to those nodes on exit ring
-            edge_nodes = [node for node in self.nodes if
-                          (np.abs(np.linalg.norm(node.position) - network_size) <= septol)]
+            edge_nodes = [
+                node
+                for node in self.nodes
+                if (
+                    np.abs(np.linalg.norm(node.position) - network_size)
+                    <= septol
+                )
+            ]
             for node in edge_nodes:
                 pass  # future me - seems i might not have finished this function - TO DO // check
 
             self.total_nodes = self.internal_nodes + self.exit_nodes
 
-        elif params['type'] == 'triangular':
-            layers = params['num_layers']
-            scale = params['scale']
+        elif params["type"] == "triangular":
+            layers = params["num_layers"]
+            scale = params["scale"]
 
             centerx = [0]
             centery = [0]
@@ -1344,9 +1641,23 @@ class NetworkGenerator:
             for ix in range(0, len(centerx)):  # loop over elements
                 # vertex coordinates within elements
                 xv = scale * np.array(
-                    [centerx[ix] + np.sqrt(3) / 3 * np.cos(i * 2 * np.pi / 3 + np.pi / 2) for i in range(0, 3)])
+                    [
+                        centerx[ix]
+                        + np.sqrt(3)
+                        / 3
+                        * np.cos(i * 2 * np.pi / 3 + np.pi / 2)
+                        for i in range(0, 3)
+                    ]
+                )
                 yv = scale * np.array(
-                    [centery[ix] + np.sqrt(3) / 3 * np.sin(i * 2 * np.pi / 3 + np.pi / 2) for i in range(0, 3)])
+                    [
+                        centery[ix]
+                        + np.sqrt(3)
+                        / 3
+                        * np.sin(i * 2 * np.pi / 3 + np.pi / 2)
+                        for i in range(0, 3)
+                    ]
+                )
                 # xv =[ centerx[ix]]
                 # yv =[ centery[ix]]
                 #       0
@@ -1358,7 +1669,9 @@ class NetworkGenerator:
                 # coordinates in xv,yv.
                 connections = [(0, 1), (1, 2), (2, 0)]
                 # connections = []
-                nodeid = self.add_tile_element(xv, yv, connections, nodeid, septol)
+                nodeid = self.add_tile_element(
+                    xv, yv, connections, nodeid, septol
+                )
 
             # remove duplicate connections
             self.remove_duplicates()
@@ -1366,16 +1679,22 @@ class NetworkGenerator:
             network_size = scale * layers * np.sqrt(3) / 3
             exit_size = network_size + scale
             self.total_nodes = self.internal_nodes + self.exit_nodes
-        elif params['type'] == 'honeycomb':
-            layers = params['num_layers']
-            scale = params['scale']
+        elif params["type"] == "honeycomb":
+            layers = params["num_layers"]
+            scale = params["scale"]
             # adjust scale so that input value corresponds to the length of the side of the hexagon
             scale = scale * np.sqrt(3)
 
             centerx = [0]
             centery = [0]
-            deltas = [(1 / 2, np.sqrt(3) / 2), (-1 / 2, np.sqrt(3) / 2), (-1, 0),
-                      (-1 / 2, -np.sqrt(3) / 2), (1 / 2, -np.sqrt(3) / 2), (1, 0)]
+            deltas = [
+                (1 / 2, np.sqrt(3) / 2),
+                (-1 / 2, np.sqrt(3) / 2),
+                (-1, 0),
+                (-1 / 2, -np.sqrt(3) / 2),
+                (1 / 2, -np.sqrt(3) / 2),
+                (1, 0),
+            ]
 
             for r in range(2, layers + 1):
                 x = (r - 1) / 2
@@ -1396,11 +1715,23 @@ class NetworkGenerator:
             for ix in range(0, len(centerx)):  # loop over elements
                 # vertex coordinates within elements
                 xv = scale * np.array(
-                    [centerx[ix] + 1 / (2 * np.cos(np.pi / 6)) * np.cos(i * np.pi / 3 + np.pi / 6) for i in
-                     range(0, 6)])
+                    [
+                        centerx[ix]
+                        + 1
+                        / (2 * np.cos(np.pi / 6))
+                        * np.cos(i * np.pi / 3 + np.pi / 6)
+                        for i in range(0, 6)
+                    ]
+                )
                 yv = scale * np.array(
-                    [centery[ix] + 1 / (2 * np.cos(np.pi / 6)) * np.sin(i * np.pi / 3 + np.pi / 6) for i in
-                     range(0, 6)])
+                    [
+                        centery[ix]
+                        + 1
+                        / (2 * np.cos(np.pi / 6))
+                        * np.sin(i * np.pi / 3 + np.pi / 6)
+                        for i in range(0, 6)
+                    ]
+                )
                 #      /1\
                 #    /     \
                 #   2       0
@@ -1412,7 +1743,9 @@ class NetworkGenerator:
                 # order of node indices used internally by add_tile_element matches that of
                 # coordinates in xv,yv.
                 connections = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)]
-                nodeid = self.add_tile_element(xv, yv, connections, nodeid, septol)
+                nodeid = self.add_tile_element(
+                    xv, yv, connections, nodeid, septol
+                )
 
             # remove duplicate connections
             self.remove_duplicates()
@@ -1424,17 +1757,22 @@ class NetworkGenerator:
             exit_size = network_size + scale
             self.total_nodes = self.internal_nodes + self.exit_nodes
         else:
-            raise (ValueError, 'Unknown tiling type')
+            raise (ValueError, "Unknown tiling type")
             pass
 
         return network_size, exit_size
 
-    def add_tile_element(self, xv: np.array, yv: np.array,
-                         connections: list[tuple[int, int]], nodeid: int, septol: float = 1e-6) -> int:
-
+    def add_tile_element(
+        self,
+        xv: np.array,
+        yv: np.array,
+        connections: list[tuple[int, int]],
+        nodeid: int,
+        septol: float = 1e-6,
+    ) -> int:
         # add nodes if they don't already exist
         currentelement_nodes = []
-        for (x, y) in zip(xv, yv):  # loop over each potentially new node
+        for x, y in zip(xv, yv):  # loop over each potentially new node
             node_exists = False
             for node in self.nodes:  # check if it exists
                 if self.calculate_distance(node.position, (x, y)) <= septol:
@@ -1443,7 +1781,7 @@ class NetworkGenerator:
                     continue
 
             if node_exists is False:
-                self.add_node(nodeid, (x, y), 'internal')
+                self.add_node(nodeid, (x, y), "internal")
                 currentelement_nodes.append(nodeid)
                 self.internal_nodes += 1
                 nodeid += 1
@@ -1452,9 +1790,13 @@ class NetworkGenerator:
         for connect in connections:
             node1 = currentelement_nodes[connect[0]]
             node2 = currentelement_nodes[connect[1]]
-            distance = self.calculate_distance(self.get_node(node1).position, self.get_node(node2).position)
+            distance = self.calculate_distance(
+                self.get_node(node1).position, self.get_node(node2).position
+            )
 
             # we don't check if connection exists since we remove duplicates later
-            self.add_connection(node1, node2, distance, self.k, self.n, link_type='internal')
+            self.add_connection(
+                node1, node2, distance, self.k, self.n, link_type="internal"
+            )
 
         return nodeid  # return so we can keep a running id

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 import logging
 import sys
-import numpy as np
-from scipy.ndimage.filters import maximum_filter
-from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
-from skimage import measure
+
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.morphology import binary_erosion, generate_binary_structure
+from skimage import measure
 
 
 def plot_colourline(x, y, c, minc=None, maxc=None):

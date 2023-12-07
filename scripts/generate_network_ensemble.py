@@ -7,8 +7,10 @@ Created on Mon Nov 14 14:08:40 2022
 
 Generate ensembles of networks and store for later analysis
 """
-import numpy as np
 import os
+
+import numpy as np
+
 from complexnetworklibrary.ensemble import NetworkEnsemble
 
 # %% Setup physical parameters
@@ -79,14 +81,14 @@ for ns in numseeds:
     })
 
     # node specification
-    node_spec = {'Smat_type': 'COE',
+    node_spec = {'S_mat_type': 'COE',
                  'scat_loss': 0,
                  'subunitary_factor': 1
                  # 'delta':2*np.pi*np.random.rand(40),
                  }
 
     # ensemble generation
-    # runid = 'delaunay_slab_{}_i{}_e{}_dim{}_su{}_lf{}'.format(node_spec['Smat_type'],
+    # runid = 'delaunay_slab_{}_i{}_e{}_dim{}_su{}_lf{}'.format(node_spec['S_mat_type'],
     #                                                  network_spec['internal_nodes'],
     #                                                  network_spec['exit_nodes'],
     #                                                  np.array(network_spec['network_size'])*1e6,
@@ -94,14 +96,14 @@ for ns in numseeds:
     #                                                  length_scal_factor)
     runid = 'debug'
 
-    # runid = 'buffon_slab_{}_e{}_dim{}_su{}_lf{}'.format(node_spec['Smat_type'],
+    # runid = 'buffon_slab_{}_e{}_dim{}_su{}_lf{}'.format(node_spec['S_mat_type'],
     #                                                  int(network_spec['lines']*2),
     #                                                  np.array(network_spec['network_size'])*1e6,
     #                                                  node_spec['subunitary_factor'],
     #                                                  length_scal_factor)
 
     # runid = 'voronoi_slab_{}_ns{}_dim{}_su{}_lf{}'.format(
-    #     node_spec['Smat_type'],
+    #     node_spec['S_mat_type'],
     #     network_spec['seed_nodes'],
     #     np.array(network_spec['network_size']) * 1e6,
     #     node_spec['subunitary_factor'],

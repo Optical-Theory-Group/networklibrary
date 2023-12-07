@@ -8,17 +8,19 @@ Class for generating, storing and retrieving network ensemble data
 
 """
 
-import multiprocessing as mp
-import h5py
-from datetime import datetime, timedelta
-
-from .util import update_progress
-from ._dict_hdf5 import recursively_save_dict_contents_to_group, load_dict_from_hdf5
-from complexnetworklibrary.network import Network
-
 # setup code logging
 import logging
+import multiprocessing as mp
+from datetime import datetime, timedelta
+
+import h5py
+
 import logconfig
+from complexnetworklibrary.network import Network
+
+from ._dict_hdf5 import (load_dict_from_hdf5,
+                         recursively_save_dict_contents_to_group)
+from .util import update_progress
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)

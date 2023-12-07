@@ -1,13 +1,15 @@
-import multiprocessing as mp
 import concurrent.futures as cf
-from typing import Any, Union, Iterator, Generator
-
-import h5py
-from complexnetworklibrary._dict_hdf5 import recursively_save_dict_contents_to_group
-import cloudpickle
+import multiprocessing as mp
 import os
-from datetime import datetime, timedelta
 import sys
+from datetime import datetime, timedelta
+from typing import Any, Generator, Iterator, Union
+
+import cloudpickle
+import h5py
+
+from complexnetworklibrary._dict_hdf5 import \
+    recursively_save_dict_contents_to_group
 
 
 # ------------------------------------------------------

@@ -8,17 +8,19 @@ Performs statistical analysis of network ensemble as created using generate_netw
 Plots accompanying graphs from preprocessed datafile.
 """
 
-import numpy as np
 import os
+
 import h5py
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from complexnetworklibrary._dict_hdf5 import load_dict_from_hdf5, recursively_load_dict_contents_from_group, \
-    save_dict_to_hdf5
-from complexnetworklibrary.util import update_progress
+from complexnetworklibrary._dict_hdf5 import (
+    load_dict_from_hdf5, recursively_load_dict_contents_from_group,
+    save_dict_to_hdf5)
 from complexnetworklibrary.network import Network
+from complexnetworklibrary.util import update_progress
 
 obj = os.scandir('../data/')
 dirs = [entry.name for entry in obj if entry.is_dir()]

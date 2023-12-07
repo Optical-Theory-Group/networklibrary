@@ -1,13 +1,12 @@
+# setup code logging
+import logging
 import unittest
 
 import numpy as np
 
+import logconfig
 from complexnetworklibrary.node import NODE
 from complexnetworklibrary.util import compare_dict
-
-# setup code logging
-import logging
-import logconfig
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)

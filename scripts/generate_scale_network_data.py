@@ -15,18 +15,17 @@ Generates a single random network and calculates the |S| complex spectrum
 as a specified node is perturbed
 
 """
-import numpy as np
+import os
+
+import dill
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
+import numpy as np
 import seaborn as sns
 from matplotlib.animation import FFMpegFileWriter
-import os
-import dill
+from matplotlib.collections import LineCollection
 
 from complexnetworklibrary.network import Network
 from complexnetworklibrary.util import update_progress
-
-
 
 # #################################################
 # %% define simulation parameters
@@ -59,7 +58,7 @@ if case == 'delaunay':
 # node specification
 
 scattering_loss = 0
-node_spec = {'Smat_type': 'unitary_cyclic',
+node_spec = {'S_mat_type': 'unitary_cyclic',
              'scat_loss': scattering_loss,
              # leave 'delta' out to get random phases across all nodes
              }
@@ -69,7 +68,7 @@ node_spec = {'Smat_type': 'unitary_cyclic',
 # #################################################
 size0 = 100e-6
 runid = 'scale_network_{}_{}_i{}_e{}_dim{}'.format(network_type,
-                                        node_spec['Smat_type'],
+                                        node_spec['S_mat_type'],
                                         network_spec['internal_nodes'],
                                         network_spec['exit_nodes'],
                                         size0*1e6)

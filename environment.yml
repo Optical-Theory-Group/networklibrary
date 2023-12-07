@@ -1,0 +1,11 @@
+name: network
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - numpy
+  - scipy
+  - matplotlib
+  - seaborn
+  - scikit-image
+  - h5py

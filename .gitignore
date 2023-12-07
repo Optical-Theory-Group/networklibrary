@@ -6,6 +6,8 @@
 *.h5
 *conflicted*
 simulation.log
+.gitignore
+
 #
 ## Ignore the following directories
 *pycache*/
@@ -13,3 +15,4 @@ data/*/
 output/*
 .idea/
 complexnetworklibrary/defunct/
+/.mypy_cache

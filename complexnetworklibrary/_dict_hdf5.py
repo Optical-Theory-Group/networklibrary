@@ -4,8 +4,8 @@ Created on Fri Nov 11 14:21:33 2022
 
 @author: Matthew Foreman
 """
-import numpy as np
 import h5py
+import numpy as np
 
 
 def save_dict_to_hdf5(dic, filename):
