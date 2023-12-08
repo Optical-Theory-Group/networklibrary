@@ -11,7 +11,7 @@ Link class functions
 # setup code logging
 import logging
 from typing import Union
-
+from complexnetworklibrary.spec import LinkSpec
 import numpy as np
 
 import logconfig
@@ -50,57 +50,43 @@ class Link:
         inverse propagation matrix
     """
 
-    _ATTR_NAMES = [
-        "node1",
-        "node2",
-        "link_type",
-        "length",
-        "n",
-        "k0",
-        "inwave",
-        "outwave",
-        "S_mat",
-        "iS_mat",
-    ]
-
     def __init__(
         self,
         node1: None | int = 0,
         node2: None | int = 1,
-        length: float = 0.0,
-        k0: Union[complex, float] = 1.0,
-        n: Union[complex, float] = 1.0,
         link_type: str = "internal",
-        linkdict: Union[dict, None] = None,
+        link_spec: LinkSpec | None = None,
     ):
-        # Validate node IDs
-        if node1 is None:
-            raise ValueError("Node 1 ID must be supplied")
-        if node2 is None:
-            raise ValueError("Node 2 ID must be supplied")
+        self._validate_args(node1, node2, link_type)
+        self.node1 = node1
+        self.node2 = node2
+        self._link_type = link_type
 
-        # Set default values
-        # This will be overriden if from_spec method is used
-        self._link_type: str = link_type
-        self.node1: int = node1
-        self.node2: int = node2
-        self.length: float = length
-        self.n: float | complex = n
-        self.k0: float | complex = k0
-        self.inwave_np: np.ndarray[np.complex64] = np.array([0 + 0j, 0 + 0j])
-        self.outwave_np: np.ndarray[np.complex64] = np.array([0 + 0j, 0 + 0j])
-        self.S_mat: np.ndarray[np.complex64] = np.array(
-            [
-                [0, np.exp(1j * n * k0 * length)],
-                [np.exp(1j * n * k0 * length), 0],
-            ]
-        )
-        self.iS_mat: np.ndarray[np.complex64] = np.array(
-            [
-                [0, np.exp(-1j * n * k0 * length)],
-                [np.exp(-1j * n * k0 * length), 0],
-            ]
-        )
+        # Set attributes from NodeSpec object
+        if link_spec is None:
+            link_spec = LinkSpec()
+        for attr_name in LinkSpec.attr_names:
+            setattr(self, attr_name, getattr(link_spec, attr_name))
+
+    def _validate_args(
+        self,
+        node1: int | None,
+        node2: int | None,
+        link_type: str | None,
+    ) -> None:
+        """Check that args are given"""
+        if node1 is None:
+            raise ValueError(
+                "Node 1 ID has not been supplied, but is required."
+            )
+        if node2 is None:
+            raise ValueError(
+                "Node 2 ID has not been supplied, but is required."
+            )
+        if link_type is None:
+            raise ValueError(
+                "Link type has not been supplied, but is required."
+            )
 
     @property
     def link_type(self):
@@ -114,24 +100,14 @@ class Link:
             )
         self._link_type = value
 
-    @classmethod
-    def from_spec(cls, link_spec: dict):
-        """Factory method where attributes are given via a dictionary"""
-        # Create node with default attributes
-        new_link = cls(
-            node1=link_spec.get("node1"),
-            node2=link_spec.get("node2"),
-            length=link_spec.get("length"),
-            k0=link_spec.get("k0"),
-            n=link_spec.get("n"),
-            link_type=link_spec.get("link_type"),
-        )
+    @property
+    def required_attr_names(self) -> list[str]:
+        return ["node1", "node2", "link_type"]
 
-        # Add on other properties in the node_spec
-        for key, val in link_spec.items():
-            setattr(new_link, key, val)
-
-        return new_link
+    @property
+    def attr_names(self) -> list[str]:
+        """List of attributes for Node objects"""
+        return self.required_attr_names + LinkSpec.attr_names
 
     def reset_link(
         self,
@@ -188,13 +164,13 @@ class Link:
     def to_dict(self) -> dict:
         """Return a dictionary of the link attributes"""
         return {
-            v: getattr(self, v) for v in self._ATTR_NAMES if hasattr(self, v)
+            v: getattr(self, v) for v in self.attr_names if hasattr(self, v)
         }
 
     def __str__(self):
         attr_values = [
             f"{attr}: {getattr(self, attr)}"
-            for attr in self._ATTR_NAMES
+            for attr in self.attr_names
             if hasattr(self, attr)
         ]
         return ",\n".join(attr_values)

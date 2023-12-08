@@ -2,7 +2,7 @@
 """
 Created on Wed Nov  9 09:44:38 2022
 
-@author: Matthew Foreman
+@author: Matthew Foreman, Niall Byrnes
 
 Node class functions
 """
@@ -13,6 +13,7 @@ import logging
 import numpy as np
 
 import logconfig
+from complexnetworklibrary.spec import NodeSpec
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)
@@ -57,32 +58,38 @@ class Node:
         numpy array specifying inverse scattering matrix
     """
 
-    _ATTR_NAMES = [
-        "number",
-        "position",
-        "node_type",
-        "n_connect",
-        "sorted_connected_nodes",
-        "S_mat_type",
-        "scat_loss",
-        "S_mat_params",
-        "inwave",
-        "outwave",
-        "inwave_np",
-        "outwave_np",
-        "S_mat",
-        "iS_mat",
-    ]
-
     def __init__(
         self,
         number: int | None = None,
         position: tuple[float, float] | None = None,
         node_type: str = "internal",
+        node_spec: NodeSpec | None = None,
     ) -> None:
+        # Tell logger mode was made from input vars
         logging.info("Initialising node...")
+        logging.info(
+            f"...from input arguments: {node_type} node #{number} @ {position}"
+        )
 
-        # Check required args
+        # Set default values
+        self._validate_args(number, position, node_type)
+        self.number = number
+        self.position = np.array(position)
+        self._node_type = node_type
+
+        # Set attributes from NodeSpec object
+        if node_spec is None:
+            node_spec = NodeSpec()
+        for attr_name in NodeSpec.attr_names:
+            setattr(self, attr_name, getattr(node_spec, attr_name))
+
+    def _validate_args(
+        self,
+        number: int | None,
+        position: tuple[float, float] | None,
+        node_type: str | None,
+    ) -> None:
+        """Check that args are given"""
         if number is None:
             raise ValueError(
                 "Node ID number has not been supplied, but is required."
@@ -95,28 +102,6 @@ class Node:
             raise ValueError(
                 "Node type has not been supplied, but is required."
             )
-
-        # Tell logger mode was made from input vars
-        logging.info(
-            f"...from input arguments: {node_type} node #{number} @ {position}"
-        )
-
-        # Set default values
-        # These are overriden if from_spec factory method is used
-        self.number: int = int(number)
-        self.position: tuple[float, float] = np.array(position)
-        self._node_type: str = node_type
-        self.n_connect: int = 0
-        self.sorted_connected_nodes: list[int] = []
-        self.S_mat_type: None | str = None
-        self._scat_loss: float = 0.0
-        self.S_mat_params: None | dict = {}
-        self.inwave: None | dict[str | int, float | complex] = {}
-        self.outwave: None | dict[str | int, float | complex] = {}
-        self.inwave_np: None | np.ndarray[np.complex64] = None
-        self.outwave_np: None | np.ndarray[np.complex64] = None
-        self.S_mat: None | np.ndarray[np.complex64] = None
-        self.iS_mat: None | np.ndarray[np.complex64] = None
 
     @property
     def node_type(self):
@@ -145,21 +130,14 @@ class Node:
         """Alias for n_connect"""
         return self.n_connect
 
-    @classmethod
-    def from_spec(cls, node_spec: dict):
-        """Factory method where attributes are given via a dictionary"""
-        # Create node with default attributes
-        new_node = cls(
-            number=node_spec.get("number"),
-            position=node_spec.get("position"),
-            node_type=node_spec.get("node_type"),
-        )
+    @property
+    def required_attr_names(self) -> list[str]:
+        return ["number", "position", "node_type"]
 
-        # Add on other properties in the node_spec
-        for key, val in node_spec.items():
-            setattr(new_node, key, val)
-
-        return new_node
+    @property
+    def attr_names(self) -> list[str]:
+        """List of attributes for Node objects"""
+        return self.required_attr_names + NodeSpec.attr_names
 
     def update(self, direction: str = "forward") -> None:
         """
@@ -185,6 +163,7 @@ class Node:
             self.sorted_connected_nodes = sorted(self.inwave.keys())
 
         if direction == "forward":
+            # Use S matrix to find outgoing waves at node
             outwave_np = np.matmul(self.S_mat, self.inwave_np).T
             outwave = {
                 node_id: val
@@ -195,6 +174,7 @@ class Node:
             self.outwave = outwave
             self.outwave_np = outwave_np
         elif direction == "backward":
+            # Use inverse S matrix to find incoming waves at node
             inwave_np = np.matmul(self.iS_mat, self.outwave_np).T
             inwave = {
                 node_id: val
@@ -211,13 +191,14 @@ class Node:
     def to_dict(self) -> dict:
         """Return a dictionary of the node attributes"""
         return {
-            v: getattr(self, v) for v in self._ATTR_NAMES if hasattr(self, v)
+            v: getattr(self, v) for v in self.attr_names if hasattr(self, v)
         }
 
     def __str__(self):
+        """String representation of the object. Prints all attributes."""
         attr_values = [
             f"{attr}: {getattr(self, attr)}"
-            for attr in self._ATTR_NAMES
+            for attr in self.attr_names
             if hasattr(self, attr)
         ]
         return ",\n".join(attr_values)
