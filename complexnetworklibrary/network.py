@@ -22,7 +22,6 @@ from scipy.linalg import dft, null_space
 
 import logconfig
 
-# from ._numpy_json import dump, load, dumps, loads, json_numpy_obj_hook,NumpyJSONEncoder
 from ._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
 from ._generator import NetworkGenerator
 from .link import Link
@@ -222,29 +221,29 @@ class Network(NetworkGenerator):
         node.S_mat_params = kwargs
 
         if scat_loss != 0 and node.node_type == "internal":
-            node.inwave_np = np.array([0 + 0j] * (2 * node.n_connect))
-            node.outwave_np = np.array([0 + 0j] * (2 * node.n_connect))
+            node.inwave_np = np.array([0 + 0j] * (2 * node.num_connect))
+            node.outwave_np = np.array([0 + 0j] * (2 * node.num_connect))
         else:
-            node.inwave_np = np.array([0 + 0j] * node.n_connect)
-            node.outwave_np = np.array([0 + 0j] * node.n_connect)
+            node.inwave_np = np.array([0 + 0j] * node.num_connect)
+            node.outwave_np = np.array([0 + 0j] * node.num_connect)
 
         # scattering matrix for exit node is identity
         if node.node_type == "exit":
-            node.S_mat = np.identity(node.n_connect, dtype=np.complex_)
-            node.iS_mat = np.identity(node.n_connect, dtype=np.complex_)
+            node.S_mat = np.identity(node.num_connect, dtype=np.complex_)
+            node.iS_mat = np.identity(node.num_connect, dtype=np.complex_)
             return
 
         # scattering matrix for internal node
         if node.S_mat_type == "identity":
             node.S_mat = np.identity(
-                node.n_connect, dtype=np.complex_
+                node.num_connect, dtype=np.complex_
             )  # identity matrix
         elif node.S_mat_type == "uniform_random":
             node.S_mat = np.random.rand(
-                node.n_connect, node.n_connect
+                node.num_connect, node.num_connect
             )  # RANDOM SCATTEING MATRIX (nXn)
         elif node.S_mat_type == "isotropic_unitary":
-            node.S_mat = (1 / node.n_connect) ** 0.5 * dft(node.n_connect)
+            node.S_mat = (1 / node.num_connect) ** 0.5 * dft(node.num_connect)
         elif node.S_mat_type == "CUE":
             gamma = (
                 1
@@ -253,8 +252,8 @@ class Network(NetworkGenerator):
             )
             x = (
                 np.identity(1, dtype=np.complex_)
-                if node.n_connect == 1
-                else stats.unitary_group.rvs(node.n_connect)
+                if node.num_connect == 1
+                else stats.unitary_group.rvs(node.num_connect)
             )
             node.S_mat = gamma * x
         elif node.S_mat_type == "COE":
@@ -265,40 +264,40 @@ class Network(NetworkGenerator):
             )
             x = (
                 np.identity(1, dtype=np.complex_)
-                if node.n_connect == 1
-                else stats.unitary_group.rvs(node.n_connect)
+                if node.num_connect == 1
+                else stats.unitary_group.rvs(node.num_connect)
             )
             node.S_mat = gamma * (x.T @ x)
         elif node.S_mat_type == "permute_identity":
-            mat = np.identity(node.n_connect, dtype=np.complex_)
-            inds = [(i - 1) % node.n_connect for i in range(0, node.n_connect)]
+            mat = np.identity(node.num_connect, dtype=np.complex_)
+            inds = [(i - 1) % node.num_connect for i in range(0, node.num_connect)]
             node.S_mat = mat[:, inds]
         elif node.S_mat_type == "custom":
             mat = kwargs["S_mat"]
             # dimension checking
-            if mat.shape != (node.n_connect, node.n_connect):
+            if mat.shape != (node.num_connect, node.num_connect):
                 raise RuntimeError(
                     "Supplied scattering matrix is of incorrect dimensions: "
                     "{} supplied, {} expected".format(
-                        mat.shape, (node.n_connect, node.n_connect)
+                        mat.shape, (node.num_connect, node.num_connect)
                     )
                 )
             else:
                 node.S_mat = mat
         elif node.S_mat_type == "unitary_cyclic":
             if "delta" in kwargs.keys():
-                ll = np.exp(1j * kwargs["delta"][0 : node.n_connect])
+                ll = np.exp(1j * kwargs["delta"][0 : node.num_connect])
             else:
-                ll = np.exp(1j * 2 * np.pi * np.random.rand(node.n_connect))
-            s = np.matmul((1 / node.n_connect) * dft(node.n_connect), ll)
+                ll = np.exp(1j * 2 * np.pi * np.random.rand(node.num_connect))
+            s = np.matmul((1 / node.num_connect) * dft(node.num_connect), ll)
             node.S_mat = np.zeros(
-                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+                shape=(node.num_connect, node.num_connect), dtype=np.complex_
             )
-            for jj in range(0, node.n_connect):
+            for jj in range(0, node.num_connect):
                 node.S_mat[jj, :] = np.concatenate(
                     (
-                        s[(node.n_connect - jj) : node.n_connect],
-                        s[0 : node.n_connect - jj],
+                        s[(node.num_connect - jj) : node.num_connect],
+                        s[0 : node.num_connect - jj],
                     )
                 )
 
@@ -309,12 +308,12 @@ class Network(NetworkGenerator):
         if scat_loss != 0:
             S11 = (np.sqrt(1 - scat_loss**2)) * node.S_mat
             S12 = np.zeros(
-                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+                shape=(node.num_connect, node.num_connect), dtype=np.complex_
             )
             S21 = np.zeros(
-                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+                shape=(node.num_connect, node.num_connect), dtype=np.complex_
             )
-            S22 = scat_loss * np.identity(node.n_connect, dtype=np.complex_)
+            S22 = scat_loss * np.identity(node.num_connect, dtype=np.complex_)
 
             S_mat_top_row = np.concatenate((S11, S12), axis=1)
             S_mat_bot_row = np.concatenate((S21, S22), axis=1)
@@ -322,10 +321,10 @@ class Network(NetworkGenerator):
 
             iS11 = node.iS_mat / np.sqrt(1 - scat_loss**2)
             iS12 = np.zeros(
-                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+                shape=(node.num_connect, node.num_connect), dtype=np.complex_
             )
             iS21 = np.zeros(
-                shape=(node.n_connect, node.n_connect), dtype=np.complex_
+                shape=(node.num_connect, node.num_connect), dtype=np.complex_
             )
             iS22 = scat_loss * node.iS_mat / np.sqrt(1 - scat_loss**2)
 
@@ -404,12 +403,12 @@ class Network(NetworkGenerator):
     ):
         total_var = 1
 
-        if converge is False:
+        if not converge:
             for niter in range(1, n_iterations + 1):
                 # update_progress(niter/n_iterations,'Iterating network...'.format(total_var))
                 self.update_network(direction)  # updates and iterate
 
-        elif converge is True:
+        else:
             new_coeffs = self.get_node_amplitudes(conv_nodes)
             coeffs = np.zeros((period, len(new_coeffs)), dtype=np.complex128)
             coeffs[0, :] = new_coeffs

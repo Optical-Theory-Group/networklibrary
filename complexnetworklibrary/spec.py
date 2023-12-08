@@ -3,94 +3,53 @@ components of the networks.
 """
 
 import numpy as np
-import dataclasses
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 
 
 @dataclass
-class Spec:
-    """Base spec class.
+class NetworkSpec:
+    """Parameters associated with the construction of the network. Note that
+    values can 
 
-    Has a few useful methods.
+    Attributes:
+    ----------
+
+    node_S_mat_type:
+        Specifies type of scattering matrix to use. Options are:
+
+        'identity':
+            identity matrix - complete reflection at each input
+        'permute_identity' :
+            permuted identity matrix - rerouting to next edge
+        'uniform':
+            each element takes a value in [0,1)
+        'isotropic_unitary':
+            unitary isotropic SM, implemented through DFT matrix of correct
+            dimension
+        'COE' :
+            drawn from circular orthogonal ensemble
+        'CUE' :
+            drawn from circular unitary ensemble
+        'unitary_cyclic':
+            unitary cyclic SM constructed through specifying phases of
+            eigenvalues using 'delta'
+        'to_the_lowest_index':
+            reroutes all energy to connected node of lowest index
+        'custom' :
+            Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
+
+    node_scat_loss:
+        Specify scattering loss parameter for node, i.e. fraction of power
+        lost from the network.
+
     """
+
+    # Scattering at the nodes
+    node_S_mat_type: str = "COE"
+    node_scat_loss: float = 0.0
+
+    geometry_type: str = "delaunay"
 
     @property
     def attr_names(self) -> list[str]:
-        return [field.name for field in fields(self)]
-
-
-@dataclass
-class NodeSpec(Spec):
-    """Parameters for creating node objects.
-
-    See node.py documentation for more information.
-    """
-
-    n_connect: int = 0
-    sorted_connected_nodes: list[int] = field(default_factory=list)
-    S_mat_type: None | str = None
-    scat_loss: float = 0.0
-    S_mat_params: dict = field(default_factory=dict)
-    inwave: dict[str | int, float | complex] = field(default_factory=dict)
-    outwave: dict[str | int, float | complex] = field(default_factory=dict)
-    inwave_np: None | np.ndarray[np.complex64] = None
-    outwave_np: None | np.ndarray[np.complex64] = None
-    S_mat: None | np.ndarray[np.complex64] = None
-    iS_mat: None | np.ndarray[np.complex64] = None
-
-
-@dataclass
-class LinkSpec(Spec):
-    """Parameters for creating link objects.
-
-    See link.py documentation for more information.
-    """
-
-    length: float = 0.0
-    n: float | complex = 1.0
-    k0: float | complex = 1.0
-    inwave_np: np.ndarray[np.complex64] = np.array(
-        [[0.0 + 0.0 * 1j, 0.0 + 0.0 * 1j]]
-    )
-    outwave_np: np.ndarray[np.complex64] = np.array(
-        [[0.0 + 0.0 * 1j, 0.0 + 0.0 * 1j]]
-    )
-    S_mat: np.ndarray[np.complex64] | None = None
-    iS_mat: np.ndarray[np.complex64] | None = None
-
-    def __post_init__(self):
-        """Calculate S matrices from the other paramteres if not given"""
-        if self.S_mat is None:
-            self.S_mat = np.array(
-                [
-                    [0, np.exp(1j * self.n * self.k0 * self.length)],
-                    [np.exp(1j * self.n * self.k0 * self.length), 0],
-                ]
-            )
-        if self.iS_mat is None:
-            self.iS_mat = np.array(
-                [
-                    [0, np.exp(-1j * self.n * self.k0 * self.length)],
-                    [np.exp(-1j * self.n * self.k0 * self.length), 0],
-                ]
-            )
-
-
-@dataclass
-class NetworkSpec(Spec):
-    """Parameters for creating network objects.
-
-    See network.py documentation for more information.
-    """
-
-    n_connect: int = 0
-    sorted_connected_nodes: list[int] = field(default_factory=list)
-    S_mat_type: None | str = None
-    scat_loss: float = 0.0
-    S_mat_params: dict = field(default_factory=dict)
-    inwave: dict[str | int, float | complex] = field(default_factory=dict)
-    outwave: dict[str | int, float | complex] = field(default_factory=dict)
-    inwave_np: None | np.ndarray[np.complex64] = None
-    outwave_np: None | np.ndarray[np.complex64] = None
-    S_mat: None | np.ndarray[np.complex64] = None
-    iS_mat: None | np.ndarray[np.complex64] = None
+        return [f.name for f in fields(self)]

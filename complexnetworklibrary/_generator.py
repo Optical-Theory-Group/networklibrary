@@ -1261,7 +1261,7 @@ class NetworkGenerator:
                 # remove reference to node from connected node
                 cnode = self.get_node(cn)
 
-                cnode.n_connect -= 1
+                cnode.num_connect -= 1
                 cnode.sorted_connected_nodes.remove(number)
 
                 # # reinitialise scattering matrix of node if needed
@@ -1279,7 +1279,7 @@ class NetworkGenerator:
             # remove any nodes that are left floating i.e. without any connections
             nodes_to_remove = []
             for index, rnode in enumerate(self.nodes):
-                if rnode.n_connect == 0:
+                if rnode.num_connect == 0:
                     nodes_to_remove.append(index)
 
             self.nodes = [
@@ -1305,7 +1305,7 @@ class NetworkGenerator:
 
         """
         for node in self.nodes:
-            node.n_connect = 0
+            node.num_connect = 0
             connected_nodes = []
             node.inwave = {}
             node.outwave = {}
@@ -1317,7 +1317,7 @@ class NetworkGenerator:
                     or node.number == connection.node2
                 ):
                     empty = [connection.node1, connection.node2]
-                    node.n_connect += 1
+                    node.num_connect += 1
 
                     for othernode in empty:
                         if othernode != node.number:

@@ -31,7 +31,7 @@ class Node:
         Coordinates of node position
     node_type:
         Nature of node ("internal" or "exit")
-    n_connect:
+    num_connect:
         number of connecting links/edges
     sorted_connected_nodes:
         list of ids of nodes that are connected.
@@ -60,10 +60,11 @@ class Node:
 
     def __init__(
         self,
-        number: int | None = None,
-        position: tuple[float, float] | None = None,
-        node_type: str = "internal",
-        node_spec: NodeSpec | None = None,
+        number: int,
+        position: tuple[float, float],
+        node_type: str,
+        num_connect: int = 0,
+        
     ) -> None:
         # Tell logger mode was made from input vars
         logging.info("Initialising node...")
@@ -71,17 +72,14 @@ class Node:
             f"...from input arguments: {node_type} node #{number} @ {position}"
         )
 
-        # Set default values
+        # Enforce mandatory arguments
         self._validate_args(number, position, node_type)
         self.number = number
         self.position = np.array(position)
         self._node_type = node_type
 
-        # Set attributes from NodeSpec object
-        if node_spec is None:
-            node_spec = NodeSpec()
-        for attr_name in NodeSpec.attr_names:
-            setattr(self, attr_name, getattr(node_spec, attr_name))
+
+        self.links: list[int] = []
 
     def _validate_args(
         self,
@@ -127,8 +125,8 @@ class Node:
 
     @property
     def degree(self) -> int:
-        """Alias for n_connect"""
-        return self.n_connect
+        """Alias for num_connect"""
+        return self.num_connect
 
     @property
     def required_attr_names(self) -> list[str]:
