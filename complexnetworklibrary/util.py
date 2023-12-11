@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import sys
-
+from typing import Any
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,8 +12,10 @@ from skimage import measure
 
 def plot_colourline(x, y, c, minc=None, maxc=None):
     plt.figure(1)
-    if maxc is None: maxc = np.max(c)
-    if minc is None: minc = np.min(c)
+    if maxc is None:
+        maxc = np.max(c)
+    if minc is None:
+        minc = np.min(c)
     c = cm.hot((c - minc) / (maxc - minc))
     ax = plt.gca()
     for i in np.arange(len(x) - 1):
@@ -29,6 +31,7 @@ def convert_seconds_to_hms(seconds):
     seconds %= 60
 
     return "%d:%02d:%02d" % (hour, minutes, seconds)
+
 
 def compare_dict(dict1, dict2):
     """
@@ -60,7 +63,7 @@ def compare_dict(dict1, dict2):
     #             print(val2)
     # Check if the dictionaries have the same keys
     if set(dict1.keys()) != set(dict2.keys()):
-        print('Different keys')
+        print("Different keys")
         return False
 
     # Compare each value in the dictionaries
@@ -74,21 +77,25 @@ def compare_dict(dict1, dict2):
 
         if isinstance(val1, np.ndarray) and isinstance(val2, np.ndarray):
             if not np.array_equal(val1, val2):
-                print('Unequal numpy arrays {} vs {} in {}'.format(val1, val2, key))
+                print(
+                    "Unequal numpy arrays {} vs {} in {}".format(
+                        val1, val2, key
+                    )
+                )
                 return False
         elif isinstance(val1, dict) and isinstance(val2, dict):
             if not compare_dict(val1, val2):
-                print('In nested dictionary {}'.format(key))
+                print("In nested dictionary {}".format(key))
                 return False
         else:
             if np.array(val1 != val2).all():
-                print('Unequal values {} vs {} in {}'.format(val1, val2, key))
+                print("Unequal values {} vs {} in {}".format(val1, val2, key))
                 return False
 
     return True
 
 
-def update_progress(progress, status='', barlength=20):
+def update_progress(progress, status="", barlength=20):
     """
     Prints a progress bar to console
 
@@ -106,15 +113,17 @@ def update_progress(progress, status='', barlength=20):
         progress = float(progress)
     if not isinstance(progress, float):
         progress = 0
-        status = 'error: progress var must be float\r\n'
+        status = "error: progress var must be float\r\n"
     if progress < 0:
         progress = 0
-        status = 'Halt...\r\n'
+        status = "Halt...\r\n"
     if progress >= 1:
         progress = 1
-        status += ' Done.\r\n'
+        status += " Done.\r\n"
     block = int(round(barlength * progress))
-    text = '\rPercent: [{0}] {1:.2f}% {2}'.format('#' * block + '-' * (barlength - block), progress * 100, status)
+    text = "\rPercent: [{0}] {1:.2f}% {2}".format(
+        "#" * block + "-" * (barlength - block), progress * 100, status
+    )
     sys.stdout.write(text)
     sys.stdout.flush()
 
@@ -137,12 +146,14 @@ def detect_peaks(image):
     # In order to isolate the peaks we must remove the background from the mask.
 
     # we create the mask of the background
-    background = (image == 0)
+    background = image == 0
 
     # a little technicality: we must erode the background in order to
     # successfully subtract it form local_max, otherwise a line will
     # appear along the background border (artifact of the local maximum filter)
-    eroded_background = binary_erosion(background, structure=neighborhood, border_value=1)
+    eroded_background = binary_erosion(
+        background, structure=neighborhood, border_value=1
+    )
 
     # we obtain the final mask, containing only peaks,
     # by removing the background from the local_max mask (xor operation)
@@ -150,6 +161,9 @@ def detect_peaks(image):
 
     labels = measure.label(detected_peaks)
     props = measure.regionprops(labels)
-    peak_inds = [(int(prop.centroid[0]), int(prop.centroid[1])) for prop in props]
+    peak_inds = [
+        (int(prop.centroid[0]), int(prop.centroid[1])) for prop in props
+    ]
 
     return peak_inds
+

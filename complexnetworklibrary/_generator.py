@@ -19,8 +19,8 @@ from scipy.spatial import ConvexHull, Delaunay, Voronoi
 
 import logconfig
 
-from .link import Link
-from .node import Node
+from .components.link import Link
+from .components.node import Node
 
 # from line_profiler_pycharm import profile
 

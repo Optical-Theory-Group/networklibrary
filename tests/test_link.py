@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 import logconfig
-from complexnetworklibrary.link import LINK
+from complexnetworklibrary.components.link import LINK
 from complexnetworklibrary.util import compare_dict
 
 logconfig.setup_logging()

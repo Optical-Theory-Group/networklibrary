@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 import logconfig
-from complexnetworklibrary.node import NODE
+from complexnetworklibrary.components.node import NODE
 from complexnetworklibrary.util import compare_dict
 
 logconfig.setup_logging()

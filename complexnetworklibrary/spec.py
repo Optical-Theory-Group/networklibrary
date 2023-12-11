@@ -3,53 +3,41 @@ components of the networks.
 """
 
 import numpy as np
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
 class NetworkSpec:
     """Parameters associated with the construction of the network. Note that
-    values can 
+    values can
 
     Attributes:
     ----------
+    network_type: str
 
-    node_S_mat_type:
-        Specifies type of scattering matrix to use. Options are:
 
-        'identity':
-            identity matrix - complete reflection at each input
-        'permute_identity' :
-            permuted identity matrix - rerouting to next edge
-        'uniform':
-            each element takes a value in [0,1)
-        'isotropic_unitary':
-            unitary isotropic SM, implemented through DFT matrix of correct
-            dimension
-        'COE' :
-            drawn from circular orthogonal ensemble
-        'CUE' :
-            drawn from circular unitary ensemble
-        'unitary_cyclic':
-            unitary cyclic SM constructed through specifying phases of
-            eigenvalues using 'delta'
-        'to_the_lowest_index':
-            reroutes all energy to connected node of lowest index
-        'custom' :
-            Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
 
-    node_scat_loss:
-        Specify scattering loss parameter for node, i.e. fraction of power
-        lost from the network.
+    node_S_mat_params:
+        S_mat_type: str
+            Type of scattering matrix used. See get_S_mat in network_factory for
+            details.
+        scat_loss: float
+            Specify scattering loss parameter for node, i.e. fraction of power
+            lost from the network.
+        subunitary_factor: float
+            Used for CUE and COE cases.
+        S_mat:
+            Used in custom case.
+        delta:
+            Used in unitary_cyclic case
 
     """
 
-    # Scattering at the nodes
-    node_S_mat_type: str = "COE"
-    node_scat_loss: float = 0.0
-
-    geometry_type: str = "delaunay"
-
-    @property
-    def attr_names(self) -> list[str]:
-        return [f.name for f in fields(self)]
+    network_type: str
+    num_internal_nodes: int
+    num_exit_nodes: int
+    network_shape: str
+    network_size: float | tuple[float, float]
+    exit_size: float
+    node_S_mat_params: dict[str, Any]

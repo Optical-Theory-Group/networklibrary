@@ -5,14 +5,14 @@ import logging
 import math
 import random
 import warnings
-from typing import Union
+from typing import Any
 
 import numpy as np
 import scipy
 from scipy.spatial import ConvexHull, Voronoi
 from complexnetworklibrary.spec import NetworkSpec
-from complexnetworklibrary.node import Node
-from complexnetworklibrary.link import Link
+from complexnetworklibrary.components.node import Node
+from complexnetworklibrary.components.link import Link
 from complexnetworklibrary.network import Network
 import logconfig
 
@@ -24,35 +24,107 @@ logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 
-def generate_network(network_spec: NetworkSpec | None = None) -> Network:
-    """Main method for building a network from its spec object"""
-
-    if network_spec is None:
-        network_spec = NetworkSpec()
+def generate_network(spec: NetworkSpec) -> Network:
+    """Main method for building a network"""
 
     # Get nodes and links
-    match network_spec.network_type:
+    # Links will have
+    match spec.network_type:
         case "delaunay":
-            return _generate_delaunay_network(network_spec)
-        case "voronoi":
-            return _generate_voronoi_network(network_spec)
-        case "buffon":
-            return _generate_buffon_network(network_spec)
-        case "linear":
-            return _generate_linear_network(network_spec)
-        case "archimedian":
-            return _generate_archimedian_network(network_spec)
-        case "empty":
-            return None
+            nodes, links = _generate_delaunay_nodes_links(spec)
         case _:
-            raise ValueError("Unknown network type")
+            raise ValueError(f"network_type '{spec.network_type}' is invalid.")
 
-    # Set node scattering matrices
+    _initialise_links(nodes, links, spec)
+    _initialise_nodes(nodes, links, spec)
+    return Network(nodes, links)
 
-    #
+
+def _initialise_nodes(
+    nodes: dict[str, Node], links: dict[str, Link], spec: NetworkSpec
+) -> None:
+    """Set initial values for links in the network"""
+    # First, tell the nodes which links and nodes are connected to them
+    for link in links.values():
+        node_index_one, node_index_two = link.node_indices
+
+        # Both links are connected to the node
+        nodes[str(node_index_one)].sorted_connected_links.append(link.index)
+        nodes[str(node_index_two)].sorted_connected_links.append(link.index)
+
+        # Both nodes are also connected to each other
+        nodes[str(node_index_one)].sorted_connected_nodes.append(
+            node_index_two
+        )
+        nodes[str(node_index_two)].sorted_connected_nodes.append(
+            node_index_one
+        )
+
+    for node in nodes.values():
+        # Add "ghost" exit channel for exit nodes
+        if node.node_type == "exit":
+            node.sorted_connected_nodes.append(-1)
+
+        # Sort lists and get the length
+        node.sorted_connected_links = sorted(node.sorted_connected_links)
+        node.sorted_connected_nodes = sorted(node.sorted_connected_nodes)
+        num_connect = len(node.sorted_connected_nodes)
+        node.num_connect = num_connect
+        size = num_connect
+
+        # Set up in and out waves
+
+        for second_node in node.sorted_connected_nodes:
+            node.inwave[str(second_node)] = 0 + 0j
+            node.outwave[str(second_node)] = 0 + 0j
+
+        node.inwave_np = np.zeros(size, dtype=np.complex128)
+        node.outwave_np = np.zeros(size, dtype=np.complex128)
+
+        # Set up scattering matrices
+        if node.node_type == "exit":
+            # This matrix just transfers power onwards
+            node.S_mat = np.array(
+                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
+            )
+            node.iS_mat = np.array(
+                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
+            )
+            continue
+
+        node.S_mat_params = spec.node_S_mat_params
+        node.S_mat = get_S_mat(spec.node_S_mat_params, size)
+        node.iS_mat = np.linalg.inv(node.S_mat)
 
 
-def _generate_delaunay_network(network_spec: NetworkSpec):
+def _initialise_links(
+    nodes: dict[str, Node], links: dict[str, Link], spec: NetworkSpec
+) -> None:
+    """Set initial values for links in the network"""
+    for link in links.values():
+        # Get nodes
+        node_index_one, node_index_two = link.node_indices
+        node_one = nodes[str(node_index_one)]
+        node_two = nodes[str(node_index_two)]
+
+        # Determine the link length
+        length = np.linalg.norm(node_two.position - node_one.position)
+        link.length = length
+
+        link.sorted_connected_nodes = sorted(link.node_indices)
+
+        link.inwave = {
+            str(node_index_one): 0 + 0j,
+            str(node_index_two): 0 + 0j,
+        }
+        link.outwave = {
+            str(node_index_one): 0 + 0j,
+            str(node_index_two): 0 + 0j,
+        }
+        link.update_S_matrices()
+
+
+def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     """
     Generates a Delaunay type network formed from delaunay triangulation
 
@@ -65,29 +137,29 @@ def _generate_delaunay_network(network_spec: NetworkSpec):
             'shape': 'circular' or 'slab'
             'network_size':
                 for 'circular': radius of network
-                for 'slab': tuple defining (length,width) of rectangular network
+                for 'slab': tuple defining (length,width) of rectangular
+                             network
             'wavenumber': k,
             'refractive_index': n,
             'exit_size':
                 for 'circular': radius of exit nodes from network center
-                for 'slab': exit nodes placed at +/-exit_size/2 randomly within width
+                for 'slab': exit nodes placed at +/-exit_size/2 randomly
+                             within width
 
-            'left_exit_fraction': in range [0,1]. Fraction of exit nodes on lefthand side
+            'left_exit_fraction': in range [0,1]. Fraction of exit nodes on
+                                 lefthand side
                 of a slab network. Not needed for circular
     """
-    # Unpack network sepc
-    node_spec = network_spec.node_spec
 
-    num_internal_nodes = network_spec.num_internal_nodes
-    num_exit_nodes = network_spec.num_exit_nodes
+    num_internal_nodes = spec.num_internal_nodes
+    num_exit_nodes = spec.num_exit_nodes
 
-    network_shape = network_spec.network_shape
-    network_size = network_spec.network_size
-    exit_size = network_spec.exit_size
+    network_shape = spec.network_shape
+    network_size = spec.network_size
+    exit_size = spec.exit_size
 
-    exit_node_dict = {}
-    internal_node_dict = {}
-    node_dict = {}
+    nodes = {}
+    links = {}
 
     if network_shape == "circular":
         # Check type of network_size
@@ -104,123 +176,65 @@ def _generate_delaunay_network(network_spec: NetworkSpec):
         if exit_size <= network_size:
             raise ValueError("exit_size must be larger than network_size")
 
-        # Generate exit node positions
-        theta_out = 2 * np.pi * np.random.random(num_exit_nodes)
-        r_out = np.array([exit_size] * num_exit_nodes)
-        points_out = np.array(
-            [r_out * np.cos(theta_out), r_out * np.sin(theta_out)]
+        # Generate random points
+        # Points on the outer circles
+        theta_exit = 2 * np.pi * np.random.random(num_exit_nodes)
+        points_exit = (
+            exit_size * np.array([np.cos(theta_exit), np.sin(theta_exit)]).T
+        )
+        points_edge = (
+            network_size * np.array([np.cos(theta_exit), np.sin(theta_exit)]).T
+        )
+
+        # Points in the interior
+        theta_int = (
+            2 * np.pi * np.random.random(num_internal_nodes - num_exit_nodes)
+        )
+        r_int = network_size * np.sqrt(
+            np.random.random(num_internal_nodes - num_exit_nodes)
+        )
+        points_int = np.array(
+            [r_int * np.cos(theta_int), r_int * np.sin(theta_int)]
         ).T
-        for point in points_out:
-            new_exit_node_index = len(exit_node_dict)
-            exit_node_dict[str(new_exit_node_index)] = Node(
-                new_exit_node_index, point, "exit"
-            )
 
-    #     r_internal_edge = np.array([network_size] * num_exit_nodes)
+        # All non-exit points
+        points_internal = np.vstack((points_edge, points_int))
+        for i, point in enumerate(points_internal):
+            nodes[str(i)] = Node(i, "internal", point)
 
-    #     # generate random internal points
-    #     theta_int = (
-    #         2 * np.pi * np.random.random(num_internal_nodes - num_exit_nodes)
-    #     )
+        # Triangulate nodes
+        delaunay = scipy.spatial.Delaunay(points_internal)
 
-    #     # square root gives a more uniform distribution of points
-    #     r_int = network_size * np.sqrt(
-    #         np.random.random(num_internal_nodes - num_exit_nodes)
-    #     )
+        # Loop over triangles adding relevant links
+        link_index = 0
+        created_links = set()
+        for i, simplex in enumerate(delaunay.simplices):
+            for index in range(0, 3):
+                cur_node = simplex[index]
+                next_node = simplex[(index + 1) % 3]
+                node_pair = tuple(sorted((cur_node, next_node)))
 
-    #     theta = np.concatenate((t_out, t_int, t_out))
-    #     r = np.concatenate((rio, r_int, r_out))
-    #     points = np.array([r * np.cos(t), r * np.sin(t)]).T
+                # Add new node and link to list
+                if node_pair not in created_links:
+                    links[str(link_index)] = Link(
+                        link_index, "internal", node_pair
+                    )
+                    link_index += 1
+                    created_links.add(node_pair)
 
-    # elif network_shape == "slab":
-    #     # Check type of network_size
-    #     if not isinstance(network_size, tuple) or len(network_size) != 2:
-    #         raise ValueError(
-    #             "network_size must be a tuple of two floats for a "
-    #             "slab delaunay network"
-    #         )
-    #     # Check type of exit_size
-    #     if not isinstance(exit_size, float):
-    #         raise ValueError(
-    #             "exit_size must be a float for a circular delaunay " "network"
-    #         )
-    #     # Radius of exit nodes must be bigger than radius of internal nodes
-    #     if exit_size <= network_size:
-    #         raise ValueError("exit_size must be larger than network_size")
+        # Finally, add exit nodes and link them to the edge nodes
+        node_start = len(nodes)
+        link_start = len(links)
+        for i, point_exit in enumerate(points_exit):
+            node_index = node_start + i
+            link_index = link_start + i
+            # Note that node i is the i'th edge mode, which lines up with the
+            # i'th exit ndoe
+            node_pair = tuple(sorted((node_index, i)))
+            nodes[str(node_index)] = Node(node_index, "exit", point_exit)
+            links[str(link_index)] = Link(link_index, "exit", node_pair)
 
-    #     network_length, network_width = network_spec.network_size
-    #     lhs_frac = network_spec.lhs_frac
-    #     lhs_exits = int(np.floor(num_exit_nodes * lhs_frac))
-    #     rhs_exits = num_exit_nodes - lhs_exits
-
-    #     if exit_size <= network_length:
-    #         raise ValueError(
-    #             "exit_size must be larger than network_size[0] (length)"
-    #         )
-    #     if (lhs_frac < 0) or (lhs_frac > 1):
-    #         raise ValueError("left_exit_fraction must be between 0 and 1")
-
-    #     # generate exit node positions
-    #     xoutL = -np.array([exit_size / 2] * lhs_exits)
-    #     xoutR = np.array([exit_size / 2] * rhs_exits)
-    #     youtL = network_width * (np.random.random(lhs_exits) - 0.5)
-    #     youtR = network_width * (np.random.random(rhs_exits) - 0.5)
-
-    #     # generate random internal points
-    #     xintL = -np.array([network_length / 2] * lhs_exits)
-    #     xintR = np.array([network_length / 2] * rhs_exits)
-    #     yintL = youtL
-    #     yintR = youtR
-
-    #     xint = network_length * (
-    #         np.random.random(num_internal_nodes - num_exit_nodes) - 0.5
-    #     )
-    #     yint = network_width * (
-    #         np.random.random(num_internal_nodes - num_exit_nodes) - 0.5
-    #     )
-
-    #     x = np.concatenate((xintL, xintR, xint, xoutL, xoutR))
-    #     y = np.concatenate((yintL, yintR, yint, youtL, youtR))
-    #     points = np.array([x, y]).T
-
-    # # Do delaunay meshing
-    # tri = scipy.spatial.Delaunay(points)
-    # node_list = []
-    # node_indices = []
-    # link_list = []
-
-    # # Loop over triangles adding relevant links and nodes
-    # for cc, simplex in enumerate(tri.simplices):
-    #     for index in range(0, 3):
-    #         cur_node = simplex[index]
-    #         next_node = simplex[(index + 1) % 3]
-    #         x1 = tri.points[cur_node][0]
-    #         y1 = tri.points[cur_node][1]
-    #         x2 = tri.points[next_node][0]
-    #         y2 = tri.points[next_node][1]
-    #         distance = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
-
-    #         typestr = "internal" if cur_node < num_internal_nodes else "exit"
-
-    #         # Add new node and link to list
-    #         node_list.append(
-    #             Node(cur_node, (x1, y1), typestr, network_spec.node_spec)
-    #         )
-    #         node_indices.append(cur_node)
-    #         link_list.append(
-    #             Link(cur_node, next_node, typestr, network_spec.link_spec)
-    #         )
-
-    # # remove duplicates nodes and links
-    # node_list, link_list, node_indices = _remove_duplicates(
-    #     node_list, link_list
-    # )
-    # self.count_nodes()
-    # self.connect_nodes()
-
-    # self.trim_extra_exit_node_connections()
-    # self.count_nodes()
-    # self.connect_nodes()
+    return nodes, links
 
 
 def _generate_voronoi_network(network_spec: NetworkSpec):
@@ -237,6 +251,115 @@ def _generate_linear_network(network_spec: NetworkSpec):
 
 def _generate_archimedian_network(network_spec: NetworkSpec):
     pass
+
+
+# -----------------------------------------------------------------------------
+# Scattering matrices
+# -----------------------------------------------------------------------------
+def get_S_mat(S_mat_params: dict[str, Any], size: int) -> np.ndarray:
+    """Generate a random node scattering matrix of a given size.
+
+    S_mat_params must contain at least "S_mat_type". Options are
+        'identity':
+            identity matrix - complete reflection at each input
+        'permute_identity' :
+            permuted identity matrix - rerouting to next edge
+        'uniform':
+            each element takes a value in [0,1)
+        'isotropic_unitary':
+            unitary isotropic SM, implemented through DFT matrix of correct
+            dimension
+        'COE' :
+            drawn from circular orthogonal ensemble
+        'CUE' :
+            drawn from circular unitary ensemble
+        'unitary_cyclic':
+            unitary cyclic SM constructed through specifying phases of
+            eigenvalues using 'delta'
+        'to_the_lowest_index':
+            reroutes all energy to connected node of lowest index
+        'custom' :
+            Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
+    """
+    S_mat_type = S_mat_params.get("S_mat_type")
+    valid_S_mat_types = [
+        "identity",
+        "uniform_random",
+        "isotropic_unitary",
+        "CUE",
+        "COE",
+        "permute_identity",
+        "custom",
+        "unitary_cyclic",
+    ]
+
+    match S_mat_type:
+        case "identity":
+            S_mat = np.identity(size, dtype=np.complex128)
+
+        case "gaussian_random":
+            S_mat = np.random.random((size, size))
+
+        case "isotropic_unitary":
+            S_mat = scipy.linalg.dft(size) / np.sqrt(size)
+
+        case "CUE":
+            gamma = S_mat_params.get("subunitary_factor", 1.0)
+            S_mat = scipy.stats.unitary_group.rvs(size) * gamma
+
+        case "COE":
+            gamma = S_mat_params.get("subunitary_factor", 1.0)
+            S_mat = scipy.stats.unitary_group.rvs(size) * gamma
+
+            S_mat = S_mat @ S_mat.T
+        case "permute_identity":
+            mat = np.identity(size, dtype=np.complex_)
+            inds = [(i - 1) % size for i in range(size)]
+            S_mat = mat[:, inds]
+
+        case "custom":
+            S_mat = S_mat_params.get("S_mat", np.array(0))
+            if S_mat.shape != (size, size):
+                raise ValueError(
+                    "Supplied scattering matrix is of incorrect"
+                    f"Given: {S_mat.shape}"
+                    f"Expected: {(size, size)}"
+                )
+
+        case "unitary_cyclic":
+            delta = S_mat_params.get("delta")
+
+            if delta is not None:
+                ll = np.exp(1j * delta[0:size])
+            else:
+                ll = np.exp(1j * 2 * np.pi * np.random.rand(size))
+
+            s = 1 / size * scipy.linalg.dft(size) @ ll
+
+            S_mat = np.zeros((size, size), dtype=np.complex128)
+            for jj in range(0, size):
+                S_mat[jj, :] = np.concatenate(
+                    (s[(size - jj) : size], s[0 : size - jj])
+                )
+
+        case _:
+            raise ValueError(
+                f"Specified scattering matrix type is invalid. Please choose"
+                f" one from {valid_S_mat_types}"
+            )
+
+    # Introduce incoherent scattering loss
+    scat_loss = S_mat_params.get("scat_loss", 0.0)
+    if not np.isclose(scat_loss, 0.0):
+        S11 = (np.sqrt(1 - scat_loss**2)) * S_mat
+        S12 = np.zeros(shape=(size, size), dtype=np.complex128)
+        S21 = np.zeros(shape=(size, size), dtype=np.complex128)
+        S22 = scat_loss * np.identity(size, dtype=np.complex128)
+        S_mat_top_row = np.concatenate((S11, S12), axis=1)
+        S_mat_bot_row = np.concatenate((S21, S22), axis=1)
+        S_mat = np.concatenate((S_mat_top_row, S_mat_bot_row), axis=0)
+
+    return S_mat
 
 
 # -----------------------------------------------------------------------------
