@@ -9,7 +9,7 @@ Node class functions
 
 # setup code logging
 import logging
-
+import matplotlib.pyplot as plt
 import numpy as np
 from typing import Any
 import logconfig
@@ -96,6 +96,14 @@ class Node(Component):
         """Alias for num_connect"""
         return self.num_connect
 
+    @property
+    def x(self) -> float:
+        return self.position[0]
+
+    @property
+    def y(self) -> float:
+        return self.position[1]
+
     @staticmethod
     def get_default_values() -> dict[str, Any]:
         """Default values for the node"""
@@ -115,3 +123,13 @@ class Node(Component):
             "iS_mat": np.zeros(0, dtype=np.complex128),
         }
         return default_values
+
+    def plot(self, ax: plt.Axes, show_index: bool = False) -> None:
+        """Plot node on figure"""
+        if show_index:
+            ax.text(self.x, self.y, self.index)
+
+        if self.node_type == "internal":
+            ax.plot(self.x, self.y, "o", color="#9678B4")
+        elif self.node_type == "exit":
+            ax.plot(self.x, self.y, "o", color="#85C27F")

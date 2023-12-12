@@ -12,7 +12,7 @@ Link class functions
 import logging
 from typing import Any
 import numpy as np
-
+import matplotlib.pyplot as plt
 import logconfig
 
 from complexnetworklibrary.components.component import Component
@@ -114,3 +114,28 @@ class Link(Component):
                 [np.exp(-1j * self.n * self.k0 * self.length), 0],
             ]
         )
+
+    def plot(
+        self,
+        ax: plt.Axes,
+        node_1_pos: np.ndarray,
+        node_2_pos: np.ndarray,
+        show_index: bool = False,
+    ) -> None:
+        """Plot link on figure"""
+        node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
+        node_2_x, node_2_y = node_2_pos[0], node_2_pos[1]
+
+        if show_index:
+            ax.text(
+                (node_1_x + node_2_x) / 2,
+                (node_1_y + node_2_y) / 2,
+                self.index,
+                color="red",
+            )
+
+        if self.link_type == "exit":
+            linecol = "#85C27F"
+        else:
+            linecol = "#9678B4"
+        ax.plot([node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol)

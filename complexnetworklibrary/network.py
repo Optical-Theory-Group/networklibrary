@@ -11,7 +11,9 @@ Class file for Network object. Inherits from NetworkGenerator class
 # setup code logging
 import logging
 from copy import deepcopy
-from typing import Dict, Iterable, Union
+from typing import Any
+import warnings
+from tqdm.notebook import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,33 +35,68 @@ logger = logging.getLogger(__name__)
 
 
 class Network:
-    def __init__(self, nodes: dict[int, Node], links: dict[int, Link]) -> None:
+    def __init__(
+        self,
+        nodes: dict[int, Node],
+        links: dict[int, Link],
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        self.reset_values(data)
         self.node_dict = nodes
         self.link_dict = links
+        self.reset_fields()
 
     @property
     def nodes(self):
         return list(self.node_dict.values())
 
     @property
+    def num_nodes(self):
+        return len(self.nodes)
+
+    @property
     def exit_nodes(self):
         return [node for node in self.nodes if node.node_type == "exit"]
+
+    @property
+    def num_exit_nodes(self):
+        return len(self.exit_nodes)
+
+    @property
+    def exit_node_indices(self):
+        return [node.index for node in self.exit_nodes]
 
     @property
     def internal_nodes(self):
         return [node for node in self.nodes if node.node_type == "internal"]
 
     @property
+    def num_internal_nodes(self):
+        return len(self.internal_nodes)
+
+    @property
     def links(self):
         return list(self.link_dict.values())
+
+    @property
+    def num_links(self):
+        return list(self.links)
 
     @property
     def exit_links(self):
         return [link for link in self.links if link.node_type == "exit"]
 
     @property
+    def num_exit_links(self):
+        return list(self.exit_links)
+
+    @property
     def internal_links(self):
         return [link for link in self.links if link.node_type == "internal"]
+
+    @property
+    def num_internal_links(self):
+        return list(self.internal_links)
 
     @property
     def connections(self):
@@ -70,17 +107,65 @@ class Network:
         """Returns the node with the specified index identifying number"""
         return self.node_dict[str(index)]
 
-    def get_link(self, index: int | str) -> Node:
+    def get_link(self, index: int | str) -> Link:
         """Returns the link with the specified index identifying number"""
         return self.link_dict[str(index)]
 
+    def reset_values(self, data: dict[str, Any] | None = None) -> None:
+        """Reset values of network to defaults or those in provided data"""
+        default_values = self.get_default_values()
+        if data is not None:
+            default_values.update(data)
+        for key, value in default_values.items():
+            setattr(self, key, value)
+
+    def reset_fields(self) -> None:
+        """Reset the values of the incident and outgoing fields to be zero"""
+        # Reset all node and link values
+        for node in self.nodes:
+            node.reset_fields()
+        for link in self.links:
+            link.reset_fields()
+
+        # Set up keys
+        for node in self.exit_nodes:
+            self.inwave[str(node.index)] = 0 + 0j
+            self.outwave[str(node.index)] = 0 + 0j
+
+        # Set up np arrays
+        self.inwave_np = np.zeros(len(self.inwave.keys()), dtype=np.complex128)
+        self.outwave_np = np.zeros(
+            len(self.inwave.keys()), dtype=np.complex128
+        )
+
+    @staticmethod
+    def get_default_values() -> dict[str, Any]:
+        """Default values for the network"""
+        default_values: dict[str, Any] = {
+            "node_dict": {},
+            "link_dict": {},
+            "inwave": {},
+            "outwave": {},
+            "inwave_np": np.zeros(0, dtype=np.complex128),
+            "outwave_np": np.zeros(0, dtype=np.complex128),
+            "S_mat": np.zeros(0, dtype=np.complex128),
+            "iS_mat": np.zeros(0, dtype=np.complex128),
+        }
+        return default_values
+
     def update_wave_parameters(
-        self, n: float | complex, k0: float | complex
+        self,
+        n: float | complex | None = None,
+        k0: float | complex | None = None,
     ) -> None:
         """Update n and k0 throughout the network"""
+        if n is None and k0 is None:
+            return
         for link in self.links:
-            link.n = n
-            link.k0 = k0
+            if n is not None:
+                link.n = n
+            if k0 is not None:
+                link.k0 = k0
 
     def update_link_S_matrices(
         self,
@@ -88,10 +173,166 @@ class Network:
         k0: float | complex | None = None,
     ) -> None:
         """Update link scattering matrices throughout network"""
-        if n is not None and k0 is not None:
-            self.update_wave_parameters(n, k0)
+        self.update_wave_parameters(n, k0)
         for link in self.links:
             link.update_S_matrices()
+
+    # -------------------------------------------------------------------------
+    # Scattering methods
+    # -------------------------------------------------------------------------
+
+    def get_S_matrix_iterative(
+        self,
+        n: float | complex | None = None,
+        k0: float | complex | None = None,
+        direction: str = "forward",
+        max_num_steps: int = 10**5,
+        tolerance: float = 1e-8,
+        verbose: bool = True,
+    ) -> np.ndarray:
+        """Calculate the network scattering matrix iteratively"""
+        # Update network with given wave parameters
+        self.update_link_S_matrices(n, k0)
+
+        matrix = np.zeros(
+            (self.num_exit_nodes, self.num_exit_nodes), dtype=np.complex128
+        )
+        if verbose:
+            node_pbar = tqdm(total=self.num_exit_nodes, desc="Exit nodes")
+
+        # Loop over exit nodes
+        for i in range(self.num_exit_nodes):
+            incident_field = np.zeros(self.num_exit_nodes, dtype=np.complex128)
+            incident_field[i] = 1.0 + 0j
+
+            scattered_field = self.scatter_iterative(
+                incident_field, direction, max_num_steps, tolerance, verbose
+            )
+
+            matrix[:, i] = scattered_field
+            if verbose:
+                node_pbar.update(1)
+
+        # Store matrix in network
+        if direction == "forward":
+            self.S_mat = matrix
+            self.iS_mat = np.linalg.inv(matrix)
+        else:
+            self.iS_mat = matrix
+            self.S_mat = np.linalg.inv(matrix)
+
+        return matrix
+
+    def scatter_iterative(
+        self,
+        incident_field: np.ndarray | None = None,
+        direction: str = "forward",
+        max_num_steps: int = 10**5,
+        tolerance: float = 1e-8,
+        verbose: bool = False,
+    ) -> np.ndarray:
+        """Scatter the incident field through the network"""
+        # Reset fields throughout the network
+        self.reset_fields()
+
+        # Set incident field if it is given
+        if incident_field is not None:
+            self.set_incident_field(incident_field, direction)
+
+        # Scatter recursively
+        has_converged = False
+
+        if verbose:
+            total_pbar = tqdm(total=max_num_steps, desc="Steps")
+            conv_pbar = tqdm(total=1, desc="Convergence")
+
+        for i in range(max_num_steps):
+            before = np.copy(self.get_outgoing_fields(direction))
+            self.scatter_step(direction)
+            after = np.copy(self.get_outgoing_fields(direction))
+
+            # Update progress bar
+            if verbose:
+                total_pbar.update(1)
+
+            # Scattered field has not yet reached the exit nodes
+            if np.isclose(np.linalg.norm(after), 0.0):
+                continue
+
+            # Check for convergence
+            diff = np.linalg.norm(after - before)
+            if verbose:
+                frac = min(np.log10(diff) / np.log10(tolerance), 1.0)
+                conv_pbar.update(frac - conv_pbar.n)
+
+            if diff <= tolerance:
+                has_converged = True
+                if verbose:
+                    print(f"Converged after {i} steps.")
+                break
+
+        # Close pbars
+        if verbose:
+            conv_pbar.close()
+            total_pbar.close()
+
+        # Throw warning if field has not converged
+        if not has_converged:
+            warnings.warn(
+                "Max number of steps has been reached, but field "
+                "has not converged! Consider increasing the maximum number of "
+                "steps.",
+                category=UserWarning,
+            )
+
+        return after
+
+    def set_incident_field(
+        self, incident_field: np.ndarray, direction: str = "forward"
+    ) -> None:
+        """Sets the incident field to the inwaves/outwaves"""
+        # Check size
+        if len(incident_field) != self.num_exit_nodes:
+            raise ValueError(
+                f"Incident field has incorrect size. "
+                f"It should be of size {self.num_exit_nodes}."
+            )
+
+        # Set values to nodes and network dictionaries
+        for i, exit_node in enumerate(self.exit_nodes):
+            if direction == "forward":
+                self.inwave[str(exit_node.index)] = incident_field[i]
+                exit_node.inwave["-1"] = incident_field[i]
+                exit_node.inwave_np[0] = incident_field[i]
+            elif direction == "backward":
+                self.outwave[str(exit_node.index)] = incident_field[i]
+                exit_node.outwave["-1"] = incident_field[i]
+                exit_node.outwave_np[0] = incident_field[i]
+
+        # Set values to network
+        if direction == "forward":
+            self.inwave_np = incident_field
+        if direction == "backward":
+            self.outwave_np = incident_field
+
+    def get_outgoing_fields(self, direction: str = "forward") -> np.ndarray:
+        """Get the current outgoinf field on the basis of the given
+        direction"""
+        if direction == "forward":
+            return self.outwave_np
+        else:
+            return self.inwave_np
+
+    def update_outgoing_fields(self, direction: str = "forward") -> None:
+        """Update the fields from the exit nodes and put them into the network
+        inwave/outwaves"""
+        for i, node in enumerate(self.exit_nodes):
+            if direction == "forward":
+                self.outwave[str(node.index)] = node.outwave["-1"]
+                self.outwave_np[i] = node.outwave["-1"]
+            if direction == "backward":
+                self.inwave[str(node.index)] = node.inwave["-1"]
+                self.inwave_np[i] = node.inwave["-1"]
 
     def scatter_step(self, direction: str = "forward") -> None:
         """Perform one step of scattering throughout the network"""
@@ -109,6 +350,9 @@ class Network:
 
         # Transfer fields to nodes
         self.links_to_nodes(direction)
+
+        # Update network outgoing fields
+        self.update_outgoing_fields(direction)
 
     def nodes_to_links(self, direction: str = "forward") -> None:
         """Transfer fields from nodes to links in given direction"""
@@ -1827,159 +2071,17 @@ class Network:
     # # %% Plotting Functions
     # ##########################
 
-    def draw(self, draw_mode="", fig=None):
-        if fig is None:
-            plt.figure()
+    def plot(self, plot_mode: str = "", show_indices=False) -> None:
+        """Draw network"""
+        fig, ax = plt.subplots()
 
-        # ###  INTENSITY
-        # ### TO DO - finish writing this function
-        if draw_mode == "intensity":
-            xc = np.array([])
-            yc = np.array([])
-            Ic = np.array([])
-            con_Np = []
+        # Plot links
+        for link in self.links:
+            node_1_index, node_2_index = link.node_indices
+            node_1_pos = self.get_node(node_1_index).position
+            node_2_pos = self.get_node(node_2_index).position
+            link.plot(ax, node_1_pos, node_2_pos, show_indices)
 
-            for connection in self.links:
-                node1 = self.get_node(connection.node_indices[0])
-                node2 = self.get_node(connection.node_indices[1])
-
-                # generate coordinate along the link - sample at five points per wavelength
-                # wl = 2 * np.pi / np.real(self.k)
-                # Np = int(20 * self.calculate_distance(node1.position, node2.position) / wl) + 1
-                # if Np < 50: # minimum number of sample points
-                Np = 20
-                # elif Np > 200:
-                # Np = 200
-
-                con_Np.append(Np)
-
-                x = np.linspace(node1.position[0], node2.position[0], Np)
-                y = np.linspace(node1.position[1], node2.position[1], Np)
-                d = np.array(
-                    [
-                        self.calculate_distance(node1.position, (x[i], y[i]))
-                        for i in range(0, Np)
-                    ]
-                )  # avoid end points and thus repeated points
-                # calculate intensity along link
-                field = connection.inwave[0] * np.exp(
-                    1j * self.k * d
-                ) + connection.inwave[1] * np.exp(
-                    -1j * self.k * (connection.distance - d)
-                )
-                intensity = np.abs(field) ** 2
-                xc = np.concatenate((xc, x))
-                yc = np.concatenate((yc, y))
-                Ic = np.concatenate((Ic, intensity))
-
-            # cmap = plt.get_cmap('hot')
-            # ax = plt.axes(projection ='3d')
-            # ax.view_init(elev=90., azim=90)
-            # ax.set_xlabel('x')
-            # ax.plot_trisurf(xc, yc, Ic,cmap=cmap)
-
-            current_start_ind = 0
-            maxi = np.max(Ic)
-            mini = np.min(Ic)
-            for nn in con_Np:
-                xcp = xc[current_start_ind : (current_start_ind + nn)]
-                ycp = yc[current_start_ind : (current_start_ind + nn)]
-                icp = Ic[current_start_ind : (current_start_ind + nn)]
-                current_start_ind = current_start_ind + nn
-                plot_colourline(xcp, ycp, icp, mini, maxi)
-            tt = np.linspace(0, 2 * np.pi, 250)
-            plt.plot(
-                self.network_size * np.cos(tt),
-                self.network_size * np.sin(tt),
-                "--",
-            )
-            plt.plot(
-                self.exit_size * np.cos(tt), self.exit_size * np.sin(tt), "--"
-            )
-            plt.axis("equal")
-
-            # for node in self.nodes:
-            #     plt.text(node.position[0], node.position[1],node.number, size =2 ,color='black',alpha=0.7)
-            ms = 3
-            for node in self.nodes:
-                if node.node_type == "internal":
-                    plt.plot(
-                        node.position[0],
-                        node.position[1],
-                        "o",
-                        color="#9678B4",
-                        markersize=ms,
-                    )
-                elif node.node_type == "exit":
-                    for i in node.outwave:
-                        if node.outwave[i] == 0:
-                            plt.plot(
-                                node.position[0],
-                                node.position[1],
-                                "o",
-                                color="#85C27F",
-                                markersize=ms,
-                            )
-                            # plt.text(node.position[0], node.position[1],"EXIT",bbox=dict(facecolor='red',alpha=0.5),
-                            # size =15 ,color='white')
-                        else:
-                            plt.plot(
-                                node.position[0],
-                                node.position[1],
-                                "o",
-                                color="red",
-                                markersize=ms,
-                            )
-                            # plt.text(node.position[0], node.position[1],"INJECTION",bbox=dict(facecolor='green',
-                            # alpha=0.5), size =15 ,color='white')
-
-        elif draw_mode == "":
-            for connection in self.links:
-                node1 = self.get_node(connection.node_indices[0])
-                node2 = self.get_node(connection.node_indices[1])
-                plt.text(
-                    (node1.position[0] + node2.position[0]) / 2,
-                    (node1.position[1] + node2.position[1]) / 2,
-                    connection.index,
-                    color="red",
-                )
-
-                if (node1.node_type == "exit") or (node2.node_type == "exit"):
-                    linecol = "#85C27F"
-                else:
-                    linecol = "#9678B4"
-
-                plt.plot(
-                    [node1.position[0], node2.position[0]],
-                    [node1.position[1], node2.position[1]],
-                    color=linecol,
-                )
-
-            for node in self.nodes:
-                plt.text(node.position[0], node.position[1], node.index)
-
-                # plt.text(node.position[0], node.position[1], node.number, size=13, color='black', alpha=0.7)
-                if node.node_type == "internal":
-                    plt.plot(
-                        node.position[0],
-                        node.position[1],
-                        "o",
-                        color="#9678B4",
-                    )
-
-                    # plt.text(node.position[0], node.position[1],str(node.number),
-                    # bbox=dict(facecolor='blue',alpha=0.5),
-                    # size =15 ,color='white')
-
-                elif node.node_type == "exit":
-                    plt.plot(
-                        node.position[0],
-                        node.position[1],
-                        "o",
-                        color="#85C27F",
-                    )
-                    # plt.text(node.position[0], node.position[1],str(node.number),
-                    # bbox=dict(facecolor='red',alpha=0.5),
-                    # size =15 ,color='white')
-
-        plt.show()
+        # Plot nodes
+        for node in self.nodes:
+            node.plot(ax, show_indices)
