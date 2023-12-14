@@ -93,7 +93,9 @@ def _initialise_nodes(
             continue
 
         node.S_mat_params = spec.node_S_mat_params
-        node.S_mat = get_S_mat(spec.node_S_mat_params, size)
+        node.S_mat = get_S_mat(
+            spec.node_S_mat_type, size, spec.node_S_mat_params
+        )
         node.iS_mat = np.linalg.inv(node.S_mat)
 
 
@@ -256,7 +258,11 @@ def _generate_archimedian_network(network_spec: NetworkSpec):
 # -----------------------------------------------------------------------------
 # Scattering matrices
 # -----------------------------------------------------------------------------
-def get_S_mat(S_mat_params: dict[str, Any], size: int) -> np.ndarray:
+
+
+def get_S_mat(
+    S_mat_type: str, size: int, S_mat_params: dict[str, Any] | None = None
+) -> np.ndarray:
     """Generate a random node scattering matrix of a given size.
 
     S_mat_params must contain at least "S_mat_type". Options are
@@ -281,7 +287,10 @@ def get_S_mat(S_mat_params: dict[str, Any], size: int) -> np.ndarray:
         'custom' :
             Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
     """
-    S_mat_type = S_mat_params.get("S_mat_type")
+
+    if S_mat_params is None:
+        S_mat_params = {}
+
     valid_S_mat_types = [
         "identity",
         "uniform_random",
@@ -392,37 +401,3 @@ def _remove_duplicates(
             ids.append(node.number)
 
     return new_nodes, new_links, ids
-
-
-def _count_nodes(node_list: list[Node]) -> tuple[int, int, int]:
-    """
-    Counts and returns the node count class attributes
-    Also resets node index tracking lists
-
-    Returns tuple (i,e,t)
-    ----------------------
-    i : int
-        Number of internal network nodes.
-    e : int
-        Number of external network nodes.
-    t : int
-        Total number of network nodes = i + e.
-
-    """
-    # count nodes
-    num_internal_nodes = 0
-    num_exit_nodes = 0
-    num_total_nodes = len(node_list)
-    node_indices = []
-    nodenumber_indices = {}
-
-    for index, node in enumerate(node_list):
-        if node.node_type == "internal":
-            num_internal_nodes += 1
-        else:
-            num_exit_nodes += 1
-
-        node_indices.append(node.number)
-        nodenumber_indices[node.number] = index
-
-    return num_internal_nodes, num_exit_nodes, num_total_nodes

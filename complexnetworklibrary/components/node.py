@@ -118,18 +118,23 @@ class Node(Component):
             "outwave": {},
             "inwave_np": np.zeros(0, dtype=np.complex128),
             "outwave_np": np.zeros(0, dtype=np.complex128),
+            "S_mat_type": "COE",
             "S_mat_params": {},
             "S_mat": np.zeros(0, dtype=np.complex128),
             "iS_mat": np.zeros(0, dtype=np.complex128),
         }
         return default_values
 
-    def plot(self, ax: plt.Axes, show_index: bool = False) -> None:
-        """Plot node on figure"""
+    def draw(
+        self, ax: plt.Axes, show_index: bool = False, color: str | None = None
+    ) -> None:
+        """Draw node on figure"""
         if show_index:
             ax.text(self.x, self.y, self.index)
 
-        if self.node_type == "internal":
+        if color is not None:
+            ax.plot(self.x, self.y, "o", color=color)
+        elif self.node_type == "internal":
             ax.plot(self.x, self.y, "o", color="#9678B4")
         elif self.node_type == "exit":
             ax.plot(self.x, self.y, "o", color="#85C27F")

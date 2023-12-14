@@ -10,6 +10,8 @@ Draw an example of different networks and save them to the output folder
 
 import os
 
+
+os.chdir("..")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -17,16 +19,39 @@ from complexnetworklibrary import network_factory
 from complexnetworklibrary.spec import NetworkSpec
 
 
-np.random.seed(0)
+np.random.seed(1)
 
 spec = NetworkSpec(
     network_type="delaunay",
-    num_internal_nodes=5,
+    num_internal_nodes=30,
     num_exit_nodes=3,
     network_shape="circular",
     network_size=1.0,
     exit_size=1.2,
-    node_S_mat_params={"S_mat_type": "COE"},
+    node_S_mat_type="COE",
+    node_S_mat_params={},
 )
 network = network_factory.generate_network(spec)
-network.plot()
+network.draw(show_indices=True)
+
+
+incident_field = np.zeros(network.num_exit_nodes, dtype=np.complex128)
+incident_field[0] = 1.0
+out = network.scatter_iterative(incident_field, verbose=True)
+
+
+network.plot_fields(title="Original network")
+
+# Perturb network
+perturbed_node = 8
+
+variance = 0.01
+num_changes = 5
+max_val = 0.225
+for i in range(num_changes):
+    network.random_scaled_node_perturbation(perturbed_node, variance=variance)
+    out = network.scatter_iterative(incident_field, verbose=True)
+    network.plot_fields(
+        highlight_nodes=[perturbed_node],
+        title=f"Node {perturbed_node} perturbed, i = {i}",
+    )

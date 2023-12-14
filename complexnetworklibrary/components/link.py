@@ -74,6 +74,20 @@ class Link(Component):
     def link_type(self, value):
         self.nature = value
 
+    @property
+    def power_diff(self):
+        """Difference in power flowing in both directions"""
+        return np.abs(
+            np.abs(self.inwave_np[0]) ** 2 - np.abs(self.outwave_np[0]) ** 2
+        )
+
+    @property
+    def power_direction(self):
+        """Direction in which net power flows within the link"""
+        return np.sign(
+            np.abs(self.inwave_np[0]) ** 2 - np.abs(self.outwave_np[0]) ** 2
+        )
+
     @staticmethod
     def get_default_values() -> dict[str, Any]:
         default_values: dict[str, Any] = {
@@ -115,14 +129,15 @@ class Link(Component):
             ]
         )
 
-    def plot(
+    def draw(
         self,
         ax: plt.Axes,
         node_1_pos: np.ndarray,
         node_2_pos: np.ndarray,
         show_index: bool = False,
+        color: None = None,
     ) -> None:
-        """Plot link on figure"""
+        """Draw link on figure"""
         node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
         node_2_x, node_2_y = node_2_pos[0], node_2_pos[1]
 
@@ -133,9 +148,11 @@ class Link(Component):
                 self.index,
                 color="red",
             )
-
-        if self.link_type == "exit":
-            linecol = "#85C27F"
+        if color is not None:
+            linecol = color
         else:
-            linecol = "#9678B4"
+            if self.link_type == "exit":
+                linecol = "#85C27F"
+            else:
+                linecol = "#9678B4"
         ax.plot([node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol)
