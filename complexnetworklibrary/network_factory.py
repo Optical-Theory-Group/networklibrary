@@ -199,42 +199,108 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
             [r_int * np.cos(theta_int), r_int * np.sin(theta_int)]
         ).T
 
-        # All non-exit points
-        points_internal = np.vstack((points_edge, points_int))
-        for i, point in enumerate(points_internal):
-            nodes[str(i)] = Node(i, "internal", point)
+    elif network_shape == "slab":
+        # Check type of network_size
+        if not isinstance(network_size, tuple) or len(network_size) != 2:
+            raise ValueError(
+                "network_size must be a tuple of two floats for a slab "
+                "delaunay network"
+            )
+        # Check type of network_size
+        if not isinstance(exit_size, float):
+            raise ValueError(
+                "exit_size must be a float for a circular delaunay network"
+            )
 
-        # Triangulate nodes
-        delaunay = scipy.spatial.Delaunay(points_internal)
+        # Unpack variables specific to the slab shaped networks
+        network_length, network_height = network_size
 
-        # Loop over triangles adding relevant links
-        link_index = 0
-        created_links = set()
-        for i, simplex in enumerate(delaunay.simplices):
-            for index in range(0, 3):
-                cur_node = simplex[index]
-                next_node = simplex[(index + 1) % 3]
-                node_pair = tuple(sorted((cur_node, next_node)))
+        if isinstance(num_exit_nodes, int):
+            num_left_exit_nodes, num_right_exit_nodes = (
+                num_exit_nodes,
+                num_exit_nodes,
+            )
+        else:
+            num_left_exit_nodes, num_right_exit_nodes = num_exit_nodes
 
-                # Add new node and link to list
-                if node_pair not in created_links:
-                    links[str(link_index)] = Link(
-                        link_index, "internal", node_pair
-                    )
-                    link_index += 1
-                    created_links.add(node_pair)
+        # Error check if total number of internal nodes is too small to make
+        # the network
+        if num_internal_nodes < num_left_exit_nodes + num_right_exit_nodes:
+            raise ValueError(
+                f"Number of internal nodes {num_internal_nodes} "
+                f"must be at least the total number of exit "
+                f"nodes {num_left_exit_nodes}+"
+                f"{num_right_exit_nodes}="
+                f"{num_left_exit_nodes+num_right_exit_nodes}"
+            )
 
-        # Finally, add exit nodes and link them to the edge nodes
-        node_start = len(nodes)
-        link_start = len(links)
-        for i, point_exit in enumerate(points_exit):
-            node_index = node_start + i
-            link_index = link_start + i
-            # Note that node i is the i'th edge mode, which lines up with the
-            # i'th exit ndoe
-            node_pair = tuple(sorted((node_index, i)))
-            nodes[str(node_index)] = Node(node_index, "exit", point_exit)
-            links[str(link_index)] = Link(link_index, "exit", node_pair)
+        # Generate edge and exit points
+        left_edge_points = np.column_stack(
+            (
+                np.zeros(num_left_exit_nodes),
+                np.random.uniform(0, network_height, num_left_exit_nodes),
+            )
+        )
+        left_exit_points = np.copy(left_edge_points)
+        left_exit_points[:, 0] = -exit_size
+
+        right_edge_points = np.column_stack(
+            (
+                np.full(num_right_exit_nodes, network_length),
+                np.random.uniform(0, network_height, num_right_exit_nodes),
+            )
+        )
+        right_exit_points = np.copy(right_edge_points)
+        right_exit_points[:, 0] = network_length + exit_size
+
+        points_edge = np.vstack((left_edge_points, right_edge_points))
+        points_exit = np.vstack((left_exit_points, right_exit_points))
+
+        # Points in the interior
+        num_internal = (
+            num_internal_nodes - num_left_exit_nodes - num_right_exit_nodes
+        )
+
+        points_int_x = np.random.uniform(0, network_length, num_internal)
+        points_int_y = np.random.uniform(0, network_height, num_internal)
+        points_int = np.column_stack((points_int_x, points_int_y))
+
+    # All non-exit points
+    points_internal = np.vstack((points_edge, points_int))
+    for i, point in enumerate(points_internal):
+        nodes[str(i)] = Node(i, "internal", point)
+
+    # Triangulate nodes
+    delaunay = scipy.spatial.Delaunay(points_internal)
+
+    # Loop over triangles adding relevant links
+    link_index = 0
+    created_links = set()
+    for i, simplex in enumerate(delaunay.simplices):
+        for index in range(0, 3):
+            cur_node = simplex[index]
+            next_node = simplex[(index + 1) % 3]
+            node_pair = tuple(sorted((cur_node, next_node)))
+
+            # Add new node and link to list
+            if node_pair not in created_links:
+                links[str(link_index)] = Link(
+                    link_index, "internal", node_pair
+                )
+                link_index += 1
+                created_links.add(node_pair)
+
+    # Finally, add exit nodes and link them to the edge nodes
+    node_start = len(nodes)
+    link_start = len(links)
+    for i, point_exit in enumerate(points_exit):
+        node_index = node_start + i
+        link_index = link_start + i
+        # Note that node i is the i'th edge mode, which lines up with the
+        # i'th exit ndoe
+        node_pair = tuple(sorted((node_index, i)))
+        nodes[str(node_index)] = Node(node_index, "exit", point_exit)
+        links[str(link_index)] = Link(link_index, "exit", node_pair)
 
     return nodes, links
 
