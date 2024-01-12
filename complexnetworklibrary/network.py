@@ -81,11 +81,11 @@ class Network:
 
     @property
     def num_links(self):
-        return list(self.links)
+        return len(list(self.links))
 
     @property
     def exit_links(self):
-        return [link for link in self.links if link.node_type == "exit"]
+        return [link for link in self.links if link.link_type == "exit"]
 
     @property
     def num_exit_links(self):
@@ -93,11 +93,11 @@ class Network:
 
     @property
     def internal_links(self):
-        return [link for link in self.links if link.node_type == "internal"]
+        return [link for link in self.links if link.link_type == "internal"]
 
     @property
     def num_internal_links(self):
-        return list(self.internal_links)
+        return len(list(self.internal_links))
 
     @property
     def connections(self):
@@ -177,6 +177,144 @@ class Network:
         self.update_wave_parameters(n, k0)
         for link in self.links:
             link.update_S_matrices()
+
+    # -------------------------------------------------------------------------
+    #  Methods for altering/perturbing the network
+    # -------------------------------------------------------------------------
+
+    def get_network_matrix(self):
+        """Get the 'infinite' order network matrix"""
+        step_matrix = self.get_network_step_matrix()
+        lam, v = np.linalg.eig(step_matrix)
+        modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
+        rebuilt = v @ np.diag(modified_lam) @ np.linalg.inv(v)
+        return rebuilt
+
+    def get_network_step_matrix(self):
+        """The network matrix satisfies
+
+        (O_e)       (0 0     |P_e    0)(O_e)
+        (I_e)       (0 1     |0      0)(I_e)
+        (---)   =   (-----------------)(---)
+        (O_i)       (0 S*P_e | S*P_i 0)(O_i)
+        (I_i)_n+1   (0 P_e   | P_i   0)(I_i)_n
+        """
+
+        exit_vector_length = self.num_exit_nodes
+        internal_vector_length = 0
+        for node in self.internal_nodes:
+            internal_vector_length += node.degree
+
+        # Maps for dealing with positoins of matrix elements
+        (
+            internal_scattering_map,
+            internal_scattering_slices,
+            exit_scattering_map,
+        ) = self._get_network_matrix_maps()
+
+        # Get the internal S
+        internal_S = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for node in self.internal_nodes:
+            node_index = node.index
+            node_S_mat = node.S_mat
+            new_slice = internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = node_S_mat
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor
+
+        # Get exit P
+        exit_P = np.zeros(
+            (exit_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.exit_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+            row = exit_scattering_map[f"{str(node_two_index)}"]
+            col = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            exit_P[row, col] = phase_factor
+
+        # Build up network matrix
+        # First define all the zero matrices to keep things simpler
+        z_ee = np.zeros(
+            (exit_vector_length, exit_vector_length),
+            dtype=np.complex128,
+        )
+        z_long = np.zeros(
+            (exit_vector_length, internal_vector_length), dtype=np.complex128
+        )
+        z_tall = z_long.T
+        z_ii = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        identity = np.identity(exit_vector_length, dtype=np.complex128)
+
+        network_matrix = np.block(
+            [
+                [z_ee, z_ee, exit_P, z_long],
+                [z_ee, identity, z_long, z_long],
+                [z_tall, internal_S @ exit_P.T, internal_S @ internal_P, z_ii],
+                [z_tall, exit_P.T, internal_P, z_ii],
+            ]
+        )
+
+        return network_matrix
+
+    def _get_network_matrix_maps(
+        self,
+    ) -> tuple[dict[str, int], dict[str, slice], dict[str, int]]:
+        internal_scattering_slices = {}
+        internal_scattering_map = {}
+        exit_scattering_map = {}
+        i = 0
+
+        for node in self.internal_nodes:
+            # Update the map. Loop through connected nodes and work out the
+            # indices
+            start = i
+            node_index = node.index
+            for new_index in node.sorted_connected_nodes:
+                internal_scattering_map[f"{node_index},{new_index}"] = i
+                i += 1
+            end = i
+            internal_scattering_slices[f"{node_index}"] = slice(start, end)
+
+        i = 0
+        for node in self.exit_nodes:
+            exit_scattering_map[f"{node.index}"] = i
+            i += 1
+
+        return (
+            internal_scattering_map,
+            internal_scattering_slices,
+            exit_scattering_map,
+        )
 
     # -------------------------------------------------------------------------
     #  Methods for altering/perturbing the network
@@ -385,7 +523,9 @@ class Network:
                 self.inwave_np[i] = node.inwave["-1"]
 
     def scatter_step(self, direction: str = "forward") -> None:
-        """Perform one step of scattering throughout the network"""
+        """Perform one step of scattering throughout the network.
+
+        This involves scattering once at the nodes and once in the links."""
 
         # Scatter at nodes
         for node in self.nodes:

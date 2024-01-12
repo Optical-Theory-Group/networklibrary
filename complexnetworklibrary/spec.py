@@ -37,8 +37,10 @@ class NetworkSpec:
     network_type: str
     num_internal_nodes: int
     num_exit_nodes: int
+    num_seed_nodes: int
     network_shape: str
     network_size: float | tuple[float, float]
     exit_size: float
+    exit_offset: float
     node_S_mat_type: str
     node_S_mat_params: dict[str, Any]

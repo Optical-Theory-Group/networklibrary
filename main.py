@@ -55,3 +55,17 @@ for i in range(num_changes):
         highlight_nodes=[perturbed_node],
         title=f"Node {perturbed_node} perturbed, i = {i}",
     )
+
+# Voronoi
+
+spec = NetworkSpec(
+    network_type="voronoi",
+    num_internal_nodes=30,
+    num_seed_nodes=30,
+    num_exit_nodes=3,
+    network_shape="circular",
+    network_size=1.0,
+    exit_size=1.1,
+    node_S_mat_type="COE",
+    node_S_mat_params={},
+)
