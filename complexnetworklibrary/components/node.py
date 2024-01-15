@@ -126,10 +126,17 @@ class Node(Component):
         return default_values
 
     def draw(
-        self, ax: plt.Axes, show_index: bool = False, color: str | None = None
+        self,
+        ax: plt.Axes,
+        show_index: bool = False,
+        show_exit_index: bool = False,
+        color: str | None = None,
     ) -> None:
         """Draw node on figure"""
         if show_index:
+            ax.text(self.x, self.y, self.index)
+
+        if show_exit_index and self.node_type == "exit":
             ax.text(self.x, self.y, self.index)
 
         if color is not None:

@@ -182,15 +182,32 @@ class Network:
     #  Methods for altering/perturbing the network
     # -------------------------------------------------------------------------
 
-    def get_network_matrix(self):
+    def get_S_matrix_direct(
+        self,
+        n: float | complex | None = None,
+        k0: float | complex | None = None,
+    ) -> np.ndarray:
+        """Calculate the network scattering matrix directly"""
+        # Update network with given wave parameters
+        self.update_link_S_matrices(n, k0)
+
+        network_matrix = self.get_network_matrix()
+        num_exit_nodes = self.num_exit_nodes
+        S_exit = network_matrix[
+            0:num_exit_nodes, num_exit_nodes : 2 * num_exit_nodes
+        ]
+        return S_exit
+
+    def get_network_matrix(self) -> np.ndarray:
         """Get the 'infinite' order network matrix"""
         step_matrix = self.get_network_step_matrix()
         lam, v = np.linalg.eig(step_matrix)
         modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
         rebuilt = v @ np.diag(modified_lam) @ np.linalg.inv(v)
+        self.network_matrix = rebuilt
         return rebuilt
 
-    def get_network_step_matrix(self):
+    def get_network_step_matrix(self) -> np.ndarray:
         """The network matrix satisfies
 
         (O_e)       (0 0     |P_e    0)(O_e)
@@ -275,7 +292,7 @@ class Network:
         )
         identity = np.identity(exit_vector_length, dtype=np.complex128)
 
-        network_matrix = np.block(
+        network_step_matrix = np.block(
             [
                 [z_ee, z_ee, exit_P, z_long],
                 [z_ee, identity, z_long, z_long],
@@ -283,8 +300,8 @@ class Network:
                 [z_tall, exit_P.T, internal_P, z_ii],
             ]
         )
-
-        return network_matrix
+        self.network_step_matrix = network_step_matrix
+        return network_step_matrix
 
     def _get_network_matrix_maps(
         self,
@@ -614,7 +631,9 @@ class Network:
     # Plotting methods
     # -------------------------------------------------------------------------
 
-    def draw(self, show_indices=False) -> None:
+    def draw(
+        self, show_indices: bool = False, show_exit_indices: bool = False
+    ) -> None:
         """Draw network"""
         fig, ax = plt.subplots()
         ax.set_aspect("equal")
@@ -628,7 +647,7 @@ class Network:
 
         # Plot nodes
         for node in self.nodes:
-            node.draw(ax, show_indices)
+            node.draw(ax, show_indices, show_exit_indices)
 
     def plot_fields(
         self,
