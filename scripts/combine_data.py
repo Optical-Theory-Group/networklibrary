@@ -11,7 +11,7 @@ from copy import deepcopy
 import dill
 import numpy as np
 
-from complexnetworklibrary.util import update_progress
+from complex_network.util import update_progress
 
 # #################################################
 # %% define simulation parameters

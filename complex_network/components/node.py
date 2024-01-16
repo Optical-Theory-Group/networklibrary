@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import Any
 import logconfig
-from complexnetworklibrary.components.component import Component
+from complex_network.components.component import Component
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)

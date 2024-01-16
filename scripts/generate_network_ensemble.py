@@ -11,7 +11,7 @@ import os
 
 import numpy as np
 
-from complexnetworklibrary.ensemble import NetworkEnsemble
+from complex_network.ensemble import NetworkEnsemble
 
 # %% Setup physical parameters
 wavelength = 1050e-9

@@ -16,11 +16,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from complexnetworklibrary._dict_hdf5 import (
+from complex_network._dict_hdf5 import (
     load_dict_from_hdf5, recursively_load_dict_contents_from_group,
     save_dict_to_hdf5)
-from complexnetworklibrary.network import Network
-from complexnetworklibrary.util import update_progress
+from complex_network.network import Network
+from complex_network.util import update_progress
 
 obj = os.scandir('../data/')
 dirs = [entry.name for entry in obj if entry.is_dir()]

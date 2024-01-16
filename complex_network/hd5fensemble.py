@@ -8,7 +8,7 @@ from typing import Any, Generator, Iterator, Union
 import cloudpickle
 import h5py
 
-from complexnetworklibrary._dict_hdf5 import \
+from complex_network._dict_hdf5 import \
     recursively_save_dict_contents_to_group
 
 

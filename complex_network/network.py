@@ -21,14 +21,14 @@ import scipy.stats as stats
 import seaborn as sns
 from scipy import optimize
 from scipy.linalg import dft, null_space
-
+from matplotlib.patches import FancyArrowPatch
 import logconfig
 
 from ._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
 from ._generator import NetworkGenerator
-from complexnetworklibrary import network_factory
-from complexnetworklibrary.components.link import Link
-from complexnetworklibrary.components.node import Node
+from complex_network import network_factory
+from complex_network.components.link import Link
+from complex_network.components.node import Node
 from .util import detect_peaks, plot_colourline, update_progress
 
 logconfig.setup_logging()
@@ -46,6 +46,10 @@ class Network:
         self.node_dict = nodes
         self.link_dict = links
         self.reset_fields()
+
+    # -------------------------------------------------------------------------
+    # Basic network properties
+    # -------------------------------------------------------------------------
 
     @property
     def nodes(self):
@@ -103,6 +107,48 @@ class Network:
     def connections(self):
         """Alias for links"""
         return self.links
+
+    # -------------------------------------------------------------------------
+    # Network matrix properties
+    # -------------------------------------------------------------------------
+
+    @property
+    def S_mat(self):
+        """The scattering matrix for the exit ports"""
+        if hasattr(self, "_S_mat") and self._S_mat is not None:
+            return self._S_mat
+        else:
+            return self.get_S_matrix_direct()
+
+    @S_mat.setter
+    def S_mat(self, value: np.ndarray) -> None:
+        self._S_mat = value
+
+    @property
+    def network_step_matrix(self):
+        """The network matrix for one step of iteration"""
+        if (
+            hasattr(self, "_network_step_matrix")
+            and self._network_step_matrix is not None
+        ):
+            return self._network_step_matrix
+        else:
+            return self.get_network_step_matrix()
+
+    @property
+    def network_matrix(self):
+        """The full network matrix"""
+        if (
+            hasattr(self, "_network_matrix")
+            and self._network_matrix is not None
+        ):
+            return self._network_matrix
+        else:
+            return self.get_network_matrix()
+
+    # -------------------------------------------------------------------------
+    # Basic utility functions
+    # -------------------------------------------------------------------------
 
     def get_node(self, index: int | str) -> Node:
         """Returns the node with the specified index identifying number"""
@@ -179,8 +225,131 @@ class Network:
             link.update_S_matrices()
 
     # -------------------------------------------------------------------------
-    #  Methods for altering/perturbing the network
+    #  Direct scattering methods
     # -------------------------------------------------------------------------
+
+    def scatter_direct(
+        self,
+        incident_field: np.ndarray,
+        direction: str = "forward",
+    ) -> None:
+        """Scatter the incident field through the network using the
+        network matrix"""
+
+        # Set up the matrix product
+        network_matrix = self.network_matrix
+        num_exits = self.num_exit_nodes
+        incident_vector = np.zeros((len(network_matrix)), dtype=np.complex128)
+        incident_vector[num_exits : 2 * num_exits] = incident_field
+        outgoing_vector = network_matrix @ incident_vector
+
+        # Reset fields throughout the network and set incident field
+        self.reset_fields()
+        self.set_network_fields(outgoing_vector)
+
+    def set_network_fields(self, vector: np.ndarray) -> None:
+        exit_vector_length = self.num_exit_nodes
+        internal_vector_length = 0
+        for node in self.internal_nodes:
+            internal_vector_length += node.degree
+
+        outgoing_exit = vector[0:exit_vector_length]
+        incoming_exit = vector[exit_vector_length : 2 * exit_vector_length]
+        outgoing_internal = vector[
+            2 * exit_vector_length : 2 * exit_vector_length
+            + internal_vector_length
+        ]
+        incoming_internal = vector[
+            2 * exit_vector_length + internal_vector_length :
+        ]
+
+        self.set_incident_field(incoming_exit)
+
+        count = 0
+        for node in self.exit_nodes:
+            # Set outgoing exit values
+            value = outgoing_exit[count]
+            node_index = node.index
+            connected_link_index = node.sorted_connected_links[0]
+            connected_link = self.get_link(connected_link_index)
+
+            node.outwave["-1"] = value
+            node.outwave_np[0] = value
+            node.inwave[str(connected_link)] = value
+            node.inwave[1] = value
+
+            connected_link.outwave[str(node_index)] = value
+            connected_link.outwave_np[1] = value
+
+            # Set incoming exit values
+            value = incoming_exit[count]
+            node_index = node.index
+            connected_link_index = node.sorted_connected_links[0]
+            connected_link = self.get_link(connected_link_index)
+
+            node.inwave["-1"] = value
+            node.inwave_np[0] = value
+            node.outwave[str(connected_link)] = value
+            node.outwave[1] = value
+
+            connected_link.inwave[str(node_index)] = value
+            connected_link.inwave_np[1] = value
+
+            count += 1
+
+        # Set internal node values
+        count = 0
+        for node in self.internal_nodes:
+            for i, connected_index in enumerate(node.sorted_connected_nodes):
+                incoming_value = incoming_internal[count]
+                node.inwave[str(connected_index)] = incoming_value
+                node.inwave_np[i] = incoming_value
+
+                outgoing_value = outgoing_internal[count]
+                node.outwave[str(connected_index)] = outgoing_value
+                node.outwave_np[i] = outgoing_value
+
+                count += 1
+
+        # Set internal link values
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            node_one = self.get_node(node_one_index)
+            node_two = self.get_node(node_two_index)
+
+            # Set link fields
+            link.inwave[str(node_one_index)] = node_one.outwave[
+                str(node_two_index)
+            ]
+            link.inwave_np[0] = node_one.outwave[str(node_two_index)]
+            link.inwave[str(node_two_index)] = node_two.outwave[
+                str(node_one_index)
+            ]
+            link.inwave_np[1] = node_two.outwave[str(node_one_index)]
+
+            # Outwaves
+            link.outwave[str(node_one_index)] = node_one.inwave[
+                str(node_two_index)
+            ]
+            link.outwave_np[0] = node_one.inwave[str(node_two_index)]
+            link.outwave[str(node_two_index)] = node_two.inwave[
+                str(node_one_index)
+            ]
+            link.outwave_np[1] = node_two.inwave[str(node_one_index)]
+
+        # Remaining exit links values
+        for link in self.exit_links:
+            exit_index, node_index = link.node_indices
+            node = self.get_node(node_index)
+
+            # Set link fields
+            link.inwave[str(node_index)] = node.outwave[str(exit_index)]
+            link.inwave_np[1] = node.outwave[str(exit_index)]
+
+            link.outwave[str(node_index)] = node.inwave[str(exit_index)]
+            link.outwave_np[1] = node.inwave[str(exit_index)]
+
+        self.update_outgoing_fields()
 
     def get_S_matrix_direct(
         self,
@@ -196,6 +365,7 @@ class Network:
         S_exit = network_matrix[
             0:num_exit_nodes, num_exit_nodes : 2 * num_exit_nodes
         ]
+        self._S_mat = S_exit
         return S_exit
 
     def get_network_matrix(self) -> np.ndarray:
@@ -204,7 +374,7 @@ class Network:
         lam, v = np.linalg.eig(step_matrix)
         modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
         rebuilt = v @ np.diag(modified_lam) @ np.linalg.inv(v)
-        self.network_matrix = rebuilt
+        self._network_matrix = rebuilt
         return rebuilt
 
     def get_network_step_matrix(self) -> np.ndarray:
@@ -300,7 +470,7 @@ class Network:
                 [z_tall, exit_P.T, internal_P, z_ii],
             ]
         )
-        self.network_step_matrix = network_step_matrix
+        self._network_step_matrix = network_step_matrix
         return network_step_matrix
 
     def _get_network_matrix_maps(
@@ -386,7 +556,7 @@ class Network:
         node.iS_mat = np.linalg.inv(new_S_mat)
 
     # -------------------------------------------------------------------------
-    # Scattering methods
+    # Iterative scattering methods
     # -------------------------------------------------------------------------
 
     def get_S_matrix_iterative(
@@ -632,11 +802,15 @@ class Network:
     # -------------------------------------------------------------------------
 
     def draw(
-        self, show_indices: bool = False, show_exit_indices: bool = False
+        self,
+        show_indices: bool = False,
+        show_exit_indices: bool = False,
+        equal_aspect: bool = False,
     ) -> None:
         """Draw network"""
         fig, ax = plt.subplots()
-        ax.set_aspect("equal")
+        if equal_aspect:
+            ax.set_aspect("equal")
 
         # Plot links
         for link in self.links:
@@ -660,7 +834,7 @@ class Network:
             highlight_nodes = []
 
         fig, ax = plt.subplots()
-        ax.set_aspect("equal")
+        # ax.set_aspect("equal")
         ax.set_title(title)
         # Get link intensities to define the colormap
         power_diffs = [link.power_diff for link in self.links]
@@ -690,17 +864,38 @@ class Network:
             dx /= 100
             dy /= 100
 
-            ax.arrow(
+            ax.quiver(
                 cx,
                 cy,
                 dx,
                 dy,
-                lw=0.0,
-                head_width=0.05,
-                head_length=0.05,
-                length_includes_head=False,
+                scale=0.1,
+                scale_units="xy",
+                angles="xy",
                 color=color,
             )
+
+            # arrow = FancyArrowPatch(
+            #     (cx, cy),  # Starting point of the arrowhead
+            #     (cx + dx, cy + dy),  # Ending point of the arrowhead
+            #     arrowstyle='->',  # Arrow style
+            #     mutation_scale=1e-6,  # Increase this value for a chunkier arrowhead
+            #     color=color,  # Arrow color
+            # )
+
+            # # Add the arrow to the axis
+            # ax.add_patch(arrow)
+            # arrowhead_size = 0.0000005 * length
+            # ax.arrow(
+            #     cx,
+            #     cy,
+            #     dx,
+            #     dy,
+            #     lw=0.0,
+            #     head_width=arrowhead_size,
+            #     head_length=arrowhead_size,
+            #     color=color,
+            # )
 
         # Add the colorbar
         sm = plt.cm.ScalarMappable(norm, cmap)

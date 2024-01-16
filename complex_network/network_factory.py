@@ -10,10 +10,10 @@ from typing import Any
 import numpy as np
 import scipy
 from scipy.spatial import ConvexHull, Voronoi
-from complexnetworklibrary.spec import NetworkSpec
-from complexnetworklibrary.components.node import Node
-from complexnetworklibrary.components.link import Link
-from complexnetworklibrary.network import Network
+from complex_network.spec import NetworkSpec
+from complex_network.components.node import Node
+from complex_network.components.link import Link
+from complex_network.network import Network
 import logconfig
 
 

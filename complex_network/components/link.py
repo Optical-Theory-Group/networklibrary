@@ -15,7 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import logconfig
 
-from complexnetworklibrary.components.component import Component
+from complex_network.components.component import Component
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)
@@ -155,4 +155,6 @@ class Link(Component):
                 linecol = "#85C27F"
             else:
                 linecol = "#9678B4"
-        ax.plot([node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol)
+        ax.plot(
+            [node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol, lw=1.0
+        )

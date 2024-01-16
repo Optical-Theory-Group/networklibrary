@@ -18,8 +18,8 @@ from matplotlib.animation import FFMpegFileWriter
 from matplotlib.collections import LineCollection
 from scipy.optimize import Bounds
 
-from complexnetworklibrary.network import Network
-from complexnetworklibrary.util import update_progress
+from complex_network.network import Network
+from complex_network.util import update_progress
 
     # #################################################
 # %% define simulation parameters

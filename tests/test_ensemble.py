@@ -1,4 +1,4 @@
-from complexnetworklibrary.hd5fensemble import generate_ensemble
+from complex_network.hd5fensemble import generate_ensemble
 from tests.demo import *
 
 if __name__ == '__main__':

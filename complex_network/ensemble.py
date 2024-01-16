@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import h5py
 
 import logconfig
-from complexnetworklibrary.network import Network
+from complex_network.network import Network
 
 from ._dict_hdf5 import (load_dict_from_hdf5,
                          recursively_save_dict_contents_to_group)

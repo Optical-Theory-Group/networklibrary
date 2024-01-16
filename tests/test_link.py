@@ -5,8 +5,8 @@ import unittest
 import numpy as np
 
 import logconfig
-from complexnetworklibrary.components.link import LINK
-from complexnetworklibrary.util import compare_dict
+from complex_network.components.link import LINK
+from complex_network.util import compare_dict
 
 logconfig.setup_logging()
 logger = logging.getLogger(__name__)
