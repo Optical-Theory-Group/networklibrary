@@ -360,7 +360,7 @@ class Network:
         # Update network with given wave parameters
         self.update_link_S_matrices(n, k0)
 
-        network_matrix = self.get_network_matrix()
+        network_matrix = self.get_network_matrix(n, k0)
         num_exit_nodes = self.num_exit_nodes
         S_exit = network_matrix[
             0:num_exit_nodes, num_exit_nodes : 2 * num_exit_nodes
@@ -368,16 +368,64 @@ class Network:
         self._S_mat = S_exit
         return S_exit
 
-    def get_network_matrix(self) -> np.ndarray:
+    def get_pole_matrix(self, n, k0) -> np.ndarray:
+        self.update_link_S_matrices(n, k0)
+
+        internal_vector_length = 0
+        for node in self.internal_nodes:
+            internal_vector_length += node.degree
+
+        # Maps for dealing with positoins of matrix elements
+        (
+            internal_scattering_map,
+            internal_scattering_slices,
+            exit_scattering_map,
+        ) = self._get_network_matrix_maps()
+
+        # Get the internal S
+        internal_S = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for node in self.internal_nodes:
+            node_index = node.index
+            node_S_mat = node.S_mat
+            new_slice = internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = node_S_mat
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor
+
+        return internal_S, internal_P, internal_S @ internal_P
+
+    def get_network_matrix(self, n, k0) -> np.ndarray:
         """Get the 'infinite' order network matrix"""
-        step_matrix = self.get_network_step_matrix()
+        step_matrix = self.get_network_step_matrix(n, k0)
         lam, v = np.linalg.eig(step_matrix)
         modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
         rebuilt = v @ np.diag(modified_lam) @ np.linalg.inv(v)
         self._network_matrix = rebuilt
         return rebuilt
 
-    def get_network_step_matrix(self) -> np.ndarray:
+    def get_network_step_matrix(self, n, k0) -> np.ndarray:
         """The network matrix satisfies
 
         (O_e)       (0 0     |P_e    0)(O_e)
@@ -386,6 +434,7 @@ class Network:
         (O_i)       (0 S*P_e | S*P_i 0)(O_i)
         (I_i)_n+1   (0 P_e   | P_i   0)(I_i)_n
         """
+        self.update_link_S_matrices(n, k0)
 
         exit_vector_length = self.num_exit_nodes
         internal_vector_length = 0
