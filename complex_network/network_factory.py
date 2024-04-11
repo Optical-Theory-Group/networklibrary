@@ -3,8 +3,6 @@
 # setup code logging
 import logging
 import math
-import random
-import warnings
 from typing import Any
 
 import numpy as np
@@ -27,16 +25,32 @@ logger = logging.getLogger(__name__)
 def generate_network(spec: NetworkSpec) -> Network:
     """Main method for building a network"""
 
-    # Get nodes and links
-    # Links will have
+    VALID_NETWORK_TYPES = [
+        "delaunay",
+        "voronoi",
+        "buffon",
+        "linear",
+        "archimedean",
+    ]
+
     match spec.network_type:
         case "delaunay":
             nodes, links = _generate_delaunay_nodes_links(spec)
         case "voronoi":
             nodes, links = _generate_voronoi_nodes_links(spec)
             nodes, links = _relabel_nodes_links(nodes, links)
+        case "buffon":
+            nodes, links = _generate_buffon_network(spec)
+            nodes, links = _relabel_nodes_links(nodes, links)
+        case "linear":
+            nodes, links = _generate_linear_network(spec)
+        case "archimedean":
+            nodes, links = _generate_archimedean_network(spec)
         case _:
-            raise ValueError(f"network_type '{spec.network_type}' is invalid.")
+            raise ValueError(
+                f"network_type '{spec.network_type}' is invalid."
+                f"Please choose one from {VALID_NETWORK_TYPES}."
+            )
 
     _initialise_links(nodes, links, spec)
     _initialise_nodes(nodes, links, spec)
@@ -163,7 +177,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     network_size = spec.network_size
     exit_size = spec.exit_size
     exit_offset = spec.exit_offset
-    
+
     nodes = {}
     links = {}
 
@@ -493,15 +507,330 @@ def _generate_voronoi_nodes_links(
 
 
 def _generate_buffon_network(network_spec: NetworkSpec):
-    pass
+    """
+    Generates a Buffon type network formed from intersecting line segments
+
+    Parameters
+    ----------
+    spec : Dictionary specifying properties of network:
+        Keys:
+            'lines': 30,
+            'shape': 'circular' or 'slab'
+            'network_size':
+                for 'circular': radius of network
+                for 'slab': tuple defining (length,width) of rectangular network
+            'wavenumber': k,
+            'refractive_index': n,
+            'fully_connected': True,
+
+    """
+    total_lines = spec["lines"]
+    external_link_number = 2 * total_lines
+    external_link_number = (
+        external_link_number + external_link_number % 2
+    )  # round up to nearest multilpe of 2
+
+    if spec["shape"] == "circular":
+        network_size = spec["network_size"]
+    elif spec["shape"] == "slab":
+        network_length = spec["network_size"][0]
+        network_width = spec["network_size"][1]
+    else:
+        raise ValueError(
+            '"shape" in network spec should be either "circular" or "slab"'
+        )
+
+    self.exit_nodes = 0  # external_link_number
+    iternum = 0
+    fibres = []
+
+    while self.exit_nodes != external_link_number:
+        iternum += 1
+
+        # determine missing number of exit nodes
+        missing_nodes = external_link_number - self.exit_nodes
+        number_of_lines = int(missing_nodes / 2)
+        available_node_ids = [
+            i for i in range(0, total_lines) if i not in self.node_indices
+        ]
+        # generate random pairs of points
+
+        # fibres = self.links
+        intersections = {}
+        for nn in range(0, number_of_lines):
+            if spec["shape"] == "circular":
+                t = 2 * math.pi * np.random.random(2)
+                xn = network_size * np.cos(t)
+                yn = network_size * np.sin(t)
+            elif spec["shape"] == "slab":
+                xn = np.array([-network_length / 2, network_length / 2])
+                yn = network_width * (np.random.random(2) - 0.5)
+            points = np.array([xn, yn]).T
+
+            nodeid = available_node_ids[nn]
+
+            self.add_node(nodeid, (points[0, 0], points[0, 1]), "exit")
+            self.add_node(
+                total_lines + nodeid, (points[1, 0], points[1, 1]), "exit"
+            )
+
+            distance = self.calculate_distance(
+                (points[0, 0], points[0, 1]), (points[1, 0], points[1, 1])
+            )
+
+            fibres.append(
+                LINK(nodeid, total_lines + nodeid, distance, self.k, self.n)
+            )
+
+        # construct array of all intersections and track which fibres these points correspond to
+        for ii in range(0, len(fibres)):
+            connection1 = fibres[ii]
+            A = self.get_node(connection1.node1).position
+            B = self.get_node(connection1.node2).position
+            for jj in range(ii + 1, len(fibres)):
+                connection2 = fibres[jj]
+                C = self.get_node(connection2.node1).position
+                D = self.get_node(connection2.node2).position
+
+                line1 = [A, B]
+                line2 = [C, D]
+                int_pt = self.intersection(line1, line2)
+                if int_pt is not None:  # lines intersect
+                    intersect_node_id = len(self.nodes)
+                    self.add_node(intersect_node_id, int_pt)
+                    intersections[intersect_node_id] = {
+                        "line1": ii,
+                        "line2": jj,
+                        "position": int_pt,
+                    }
+
+        # construct connections
+        for ii in range(0, len(fibres)):
+            endpos = self.get_node(fibres[ii].node1).position
+            # find nodes which lie along this fibre
+            nodes = [
+                inter
+                for inter in intersections
+                if (
+                    (intersections[inter]["line1"] == ii)
+                    or (intersections[inter]["line2"] == ii)
+                )
+            ]
+            # order them in ascending distance from one end
+            distances = [
+                self.calculate_distance(endpos, intersections[jj]["position"])
+                for jj in nodes
+            ]
+            orderednodes = [x for _, x in sorted(zip(distances, nodes))]
+
+            orderednodes.insert(0, fibres[ii].node1)
+            orderednodes.append(fibres[ii].node2)
+            # form connections
+            for jj in range(0, len(orderednodes) - 1):
+                distance = self.calculate_distance(
+                    self.get_node(orderednodes[jj]).position,
+                    self.get_node(orderednodes[jj + 1]).position,
+                )
+                self.add_connection(
+                    orderednodes[jj],
+                    orderednodes[jj + 1],
+                    distance,
+                    self.k,
+                    self.n,
+                )
+
+        # loop through the connections and reset those that are connected to exit nodes
+        for link in self.links:
+            if (self.get_node(link.node1).node_type == "exit") or (
+                self.get_node(link.node2).node_type == "exit"
+            ):
+                link.link_type = "exit"
+                link.reset_link(link.distance, link.k, link.n)
+
+        self.connect_nodes()
+        self.count_nodes()
+
+        # check to see if network is fully connected network request and if generated matrix is thus.
+        if spec["fully_connected"] is True:
+            (nc, components) = self.connected_component_nodes()
+            if nc == 1:
+                return
+            # find connected component with most components
+            # print("Trimming {} components...".format(nc))
+            comp_size = [len(comp) for comp in components]
+            largest = np.argmax(comp_size)
+
+            # construct list of nodes to remove
+            nodes_to_remove = [
+                comp
+                for index, comp in enumerate(components)
+                if index != largest
+            ]
+
+            # also remove node indices corersponding to intersections as these will be regenerated
+            intersection_nodes = [
+                node.number
+                for node in self.nodes
+                if node.number >= external_link_number
+            ]
+            nodes_to_remove.append(intersection_nodes)
+            nodes_to_remove_flat = [
+                item for sublist in nodes_to_remove for item in sublist
+            ]
+
+            # cycle through links and get indices of those connected to unwanted nodes
+            fibres_to_remove_flat = []
+            for index, link in enumerate(fibres):
+                for nid in nodes_to_remove_flat:
+                    if link.node1 == nid or link.node2 == nid:
+                        if index not in fibres_to_remove_flat:
+                            fibres_to_remove_flat.append(index)
+
+            # remove links and nodes
+            # NB we maintain fibres list incase we have to do another iteration. This is cleaner and faster
+            fibres = [
+                link
+                for index, link in enumerate(fibres)
+                if index not in fibres_to_remove_flat
+            ]
+            newnodes = [
+                node
+                for node in self.nodes
+                if node.number not in nodes_to_remove_flat
+            ]
+            ids = [
+                idn
+                for idn in self.node_indices
+                if idn not in nodes_to_remove_flat
+            ]
+
+            self.links = []  # these will be regenerated
+            self.nodes = newnodes
+            self.node_indices = ids
+            self.count_nodes()
 
 
 def _generate_linear_network(network_spec: NetworkSpec):
-    pass
+    """
+    Generates a linear network with all nodes on a straight line
+
+    Parameters
+    ----------
+    spec : Dictionary specifying properties of network:
+        Keys:
+            internal_nodes: number of internal nodes of network
+            network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
+            exit_size: two exit nodes placed at +/-exit_size/2
+
+    """
+    node_number = spec["internal_nodes"]
+    network_size = spec["network_size"]
+    exit_size = spec["exit_size"]
+
+    if exit_size < network_size:
+        raise ValueError("exit_size must be larger than network_size.")
+
+    # generate random positions
+    x = network_size * (np.random.random(node_number) - 0.5)
+    xs = sorted(x)
+
+    # add exit nodes
+    xs = np.insert(xs, 0, -exit_size / 2)
+    xs = np.append(xs, exit_size / 2)
+
+    for index in range(0, len(xs)):
+        if index == 0 or index == len(xs) - 1:
+            self.add_node(index, (xs[index], 0), "exit")
+        else:
+            self.add_node(index, (xs[index], 0), "internal")
+
+    for index in range(0, len(xs) - 1):
+        if index == 0 or index == len(xs) - 2:
+            self.add_connection(
+                index,
+                index + 1,
+                xs[index + 1] - xs[index],
+                self.k,
+                self.n,
+                "exit",
+            )
+        else:
+            self.add_connection(
+                index, index + 1, xs[index + 1] - xs[index], self.k, self.n
+            )
+
+    self.count_nodes()
 
 
-def _generate_archimedian_network(network_spec: NetworkSpec):
-    pass
+def _generate_archimedean_network(network_spec: NetworkSpec):
+    """
+    Generates a network formed from Euclidean uniform/Archimedean/Catalan tilings
+        see https://en.wikipedia.org/wiki/List_of_Euclidean_uniform_tilings
+
+    Parameters
+    ----------
+    spec : Dictionary specifying properties of network:
+        Keys:
+            internal_nodes: number of internal nodes of network
+            network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
+            exit_size: two exit nodes placed at +/-exit_size/2
+
+            num_layers':3,
+            'scale': network_rad,
+            'type': 'square',
+            'exit_nodes': 5} # square,triangular, honeycomb
+
+    Parameters
+    ----------
+    spec : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    external_link_number = spec["exit_nodes"]
+
+    network_size, exit_size = self.generate_tiling(spec)
+
+    points = [
+        np.array(node.position)
+        for node in self.nodes
+        if node.node_type == "internal"
+    ]
+    numbers = [
+        node.number for node in self.nodes if node.node_type == "internal"
+    ]
+    node_number = max(numbers) + 1
+
+    # find network nodes on convex hull
+    hullids = ConvexHull(points)
+    # add some external links
+    for ii in range(0, external_link_number):
+        theta = 2 * math.pi * np.random.random(1)
+        exitx = exit_size * np.cos(theta)[0]
+        exity = exit_size * np.sin(theta)[0]
+        self.add_node(node_number + ii, (exitx, exity), "exit")
+
+        # find appropriate connection to closest point on convex hull
+        min_distance = 2 * exit_size
+
+        for number in hullids.vertices:
+            node = self.get_node(numbers[number])
+
+            newdistance = np.sqrt(
+                (exitx - node.position[0]) ** 2
+                + (exity - node.position[1]) ** 2
+            )
+
+            if newdistance < min_distance:
+                min_distance = newdistance
+                nearest_id = node.number
+
+        self.add_connection(
+            node_number + ii, nearest_id, min_distance, self.k, self.n, "exit"
+        )
 
 
 # -----------------------------------------------------------------------------

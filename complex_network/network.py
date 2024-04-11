@@ -1,38 +1,13 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jun 26 14:38:08 2020
-
-@author: Matthew Foreman
-
-Class file for Network object. Inherits from NetworkGenerator class
-
-"""
-
-# setup code logging
-import logging
-from copy import deepcopy
 from typing import Any
 import warnings
 from tqdm.notebook import tqdm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.stats as stats
-import seaborn as sns
-from scipy import optimize
-from scipy.linalg import dft, null_space
-from matplotlib.patches import FancyArrowPatch
-import logconfig
 
-from ._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
-from ._generator import NetworkGenerator
 from complex_network import network_factory
 from complex_network.components.link import Link
 from complex_network.components.node import Node
-from .util import detect_peaks, plot_colourline, update_progress
-
-logconfig.setup_logging()
-logger = logging.getLogger(__name__)
 
 
 class Network:
@@ -46,6 +21,25 @@ class Network:
         self.node_dict = nodes
         self.link_dict = links
         self.reset_fields()
+        self.set_matrix_calc_utils()
+
+    def set_matrix_calc_utils(self):
+        """Pre-calculate some useful quantities used in calculating the network
+        scattering matrces"""
+
+        internal_vector_length = 0
+        for node in self.internal_nodes:
+            internal_vector_length += node.degree
+        self.internal_vector_length = internal_vector_length
+
+        (
+            internal_scattering_map,
+            internal_scattering_slices,
+            exit_scattering_map,
+        ) = self._get_network_matrix_maps()
+        self.internal_scattering_map = internal_scattering_map
+        self.internal_scattering_slices = internal_scattering_slices
+        self.exit_scattering_map = exit_scattering_map
 
     # -------------------------------------------------------------------------
     # Basic network properties
@@ -56,7 +50,7 @@ class Network:
         return list(self.node_dict.values())
 
     @property
-    def num_nodes(self):
+    def num_nodes(self) -> int:
         return len(self.nodes)
 
     @property
@@ -66,6 +60,10 @@ class Network:
     @property
     def num_exit_nodes(self):
         return len(self.exit_nodes)
+
+    @property
+    def exit_vector_length(self):
+        return self.num_exit_nodes
 
     @property
     def exit_node_indices(self):
@@ -248,10 +246,8 @@ class Network:
         self.set_network_fields(outgoing_vector)
 
     def set_network_fields(self, vector: np.ndarray) -> None:
-        exit_vector_length = self.num_exit_nodes
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
+        exit_vector_length = self.exit_vector_length
+        internal_vector_length = self.internal_vector_length
 
         outgoing_exit = vector[0:exit_vector_length]
         incoming_exit = vector[exit_vector_length : 2 * exit_vector_length]
@@ -377,321 +373,6 @@ class Network:
         self._network_matrix = rebuilt
         return rebuilt
 
-    def get_S_ee(self, n: float, k0: float | complex) -> np.ndarray:
-        self.update_link_S_matrices(n, k0)
-
-        exit_vector_length = self.num_exit_nodes
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
-
-        # Maps for dealing with positoins of matrix elements
-        (
-            internal_scattering_map,
-            internal_scattering_slices,
-            exit_scattering_map,
-        ) = self._get_network_matrix_maps()
-
-        P_ei = self.get_P_ei(
-            internal_vector_length,
-            exit_scattering_map,
-            internal_scattering_map,
-        )
-        P_ie = P_ei.T
-        S_ii = self.get_S_ii(
-            internal_vector_length, internal_scattering_slices
-        )
-        P_ii = self.get_P_ii(internal_vector_length, internal_scattering_map)
-
-        # Bracketed part to be inverted
-        bracket = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
-        inv = np.linalg.inv(bracket)
-
-        S_ee = P_ei @ inv @ S_ii @ P_ie
-        return S_ee
-
-    def get_S_ee_inv(self, n: float, k0: float | complex) -> np.ndarray:
-        self.update_link_S_matrices(n, k0)
-
-        exit_vector_length = self.num_exit_nodes
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
-
-        # Maps for dealing with positoins of matrix elements
-        (
-            internal_scattering_map,
-            internal_scattering_slices,
-            exit_scattering_map,
-        ) = self._get_network_matrix_maps()
-
-        P_ei_inv = self.get_P_ei_inv(
-            internal_vector_length,
-            exit_scattering_map,
-            internal_scattering_map,
-        )
-        P_ie_inv = P_ei_inv.T
-        S_ii_inv = self.get_S_ii_inv(
-            internal_vector_length, internal_scattering_slices
-        )
-        P_ii_inv = self.get_P_ii_inv(
-            internal_vector_length, internal_scattering_map
-        )
-
-        # Bracketed part to be inverted
-        bracket = (
-            np.identity(len(S_ii_inv), dtype=np.complex128)
-            - P_ii_inv @ S_ii_inv
-        )
-        inv = np.linalg.inv(bracket)
-
-        S_ee_inv = P_ei_inv @ S_ii_inv @ inv @ P_ie_inv
-        return S_ee_inv
-
-    def get_S_ii(
-        self,
-        internal_vector_length: int | None = None,
-        internal_scattering_slices: slice | None = None,
-    ) -> np.ndarray:
-        """Return the S_ii matrix formed from node scattering matrices"""
-
-        # Calculate the size of the matrix if it isn't given
-        if internal_vector_length is None:
-            internal_vector_length = 0
-            for node in self.internal_nodes:
-                internal_vector_length += node.degree
-
-        # Get the slices array if not provided
-        if internal_scattering_slices is None:
-            _, internal_scattering_slices, _ = self._get_network_matrix_maps()
-
-        internal_S = np.zeros(
-            (internal_vector_length, internal_vector_length),
-            dtype=np.complex128,
-        )
-        for node in self.internal_nodes:
-            node_index = node.index
-            node_S_mat = node.S_mat
-            new_slice = internal_scattering_slices[str(node_index)]
-            internal_S[new_slice, new_slice] = node_S_mat
-        return internal_S
-
-    def get_S_ii_inv(
-        self,
-        internal_vector_length: int | None = None,
-        internal_scattering_slices: slice | None = None,
-    ) -> np.ndarray:
-        """Return the inverse of the S_ii matrix formed from node scattering
-        matrices"""
-        return np.linalg.inv(
-            self.get_S_ii(internal_vector_length, internal_scattering_slices)
-        )
-
-    def get_P_ii(
-        self,
-        internal_vector_length: int | None = None,
-        internal_scattering_map: dict[str, int] | None = None,
-    ) -> np.ndarray:
-        """Return P matrix calculated from internal network links"""
-        # Calculate the size of the matrix if it isn't given
-        if internal_vector_length is None:
-            internal_vector_length = 0
-            for node in self.internal_nodes:
-                internal_vector_length += node.degree
-
-        # Get the slices array if not provided
-        if internal_scattering_map is None:
-            internal_scattering_map, _, _ = self._get_network_matrix_maps()
-
-        # Get internal P
-        internal_P = np.zeros(
-            (internal_vector_length, internal_vector_length),
-            dtype=np.complex128,
-        )
-        for link in self.internal_links:
-            node_one_index, node_two_index = link.node_indices
-            link_S_mat = link.S_mat
-            phase_factor = link_S_mat[0, 1]
-
-            # Wave that is going into node_one
-            row = internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
-            ]
-            col = internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
-            ]
-            internal_P[row, col] = phase_factor
-            # Wave propagating the other way
-            internal_P[col, row] = phase_factor
-        return internal_P
-
-    def get_P_ii_inv(
-        self,
-        internal_vector_length: int | None = None,
-        internal_scattering_map: dict[str, int] | None = None,
-    ) -> np.ndarray:
-        """Return P matrix calculated from internal network links"""
-        # Calculate the size of the matrix if it isn't given
-        if internal_vector_length is None:
-            internal_vector_length = 0
-            for node in self.internal_nodes:
-                internal_vector_length += node.degree
-
-        # Get the slices array if not provided
-        if internal_scattering_map is None:
-            internal_scattering_map, _, _ = self._get_network_matrix_maps()
-
-        # Get internal P
-        internal_P = np.zeros(
-            (internal_vector_length, internal_vector_length),
-            dtype=np.complex128,
-        )
-        for link in self.internal_links:
-            node_one_index, node_two_index = link.node_indices
-            link_S_mat = link.S_mat
-            phase_factor = link_S_mat[0, 1]
-
-            # Wave that is going into node_one
-            row = internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
-            ]
-            col = internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
-            ]
-            internal_P[row, col] = 1 / phase_factor
-            # Wave propagating the other way
-            internal_P[col, row] = 1 / phase_factor
-        return internal_P
-
-    def get_P_ei(
-        self,
-        internal_vector_length: int | None = None,
-        exit_scattering_map: dict[str, int] | None = None,
-        internal_scattering_map: dict[str, int] | None = None,
-    ) -> np.ndarray:
-        """Get the matrix that deals with propagation in exit links"""
-        exit_vector_length = self.num_exit_nodes
-
-        # Calculate the size of the matrix if it isn't given
-        if internal_vector_length is None:
-            internal_vector_length = 0
-            for node in self.internal_nodes:
-                internal_vector_length += node.degree
-
-        # Get the slices array if not provided
-        if exit_scattering_map is None or internal_scattering_map is None:
-            (
-                internal_scattering_map,
-                _,
-                exit_scattering_map,
-            ) = self._get_network_matrix_maps()
-
-        exit_P = np.zeros(
-            (exit_vector_length, internal_vector_length),
-            dtype=np.complex128,
-        )
-        for link in self.exit_links:
-            node_one_index, node_two_index = link.node_indices
-            link_S_mat = link.S_mat
-            phase_factor = link_S_mat[0, 1]
-            row = exit_scattering_map[f"{str(node_two_index)}"]
-            col = internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
-            ]
-            exit_P[row, col] = phase_factor
-        return exit_P
-
-    def get_P_ei_inv(
-        self,
-        internal_vector_length: int | None = None,
-        exit_scattering_map: dict[str, int] | None = None,
-        internal_scattering_map: dict[str, int] | None = None,
-    ) -> np.ndarray:
-        """Get the matrix that deals with propagation in exit links"""
-        exit_vector_length = self.num_exit_nodes
-
-        # Calculate the size of the matrix if it isn't given
-        if internal_vector_length is None:
-            internal_vector_length = 0
-            for node in self.internal_nodes:
-                internal_vector_length += node.degree
-
-        # Get the slices array if not provided
-        if exit_scattering_map is None or internal_scattering_map is None:
-            (
-                internal_scattering_map,
-                _,
-                exit_scattering_map,
-            ) = self._get_network_matrix_maps()
-
-        exit_P = np.zeros(
-            (exit_vector_length, internal_vector_length),
-            dtype=np.complex128,
-        )
-        for link in self.exit_links:
-            node_one_index, node_two_index = link.node_indices
-            link_S_mat = link.S_mat
-            phase_factor = link_S_mat[0, 1]
-            row = exit_scattering_map[f"{str(node_two_index)}"]
-            col = internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
-            ]
-            exit_P[row, col] = 1 / phase_factor
-        return exit_P
-
-    def get_P_ie(
-        self,
-        internal_vector_length: int | None = None,
-        exit_scattering_map: dict[str, int] | None = None,
-        internal_scattering_map: dict[str, int] | None = None,
-    ) -> np.ndarray:
-        return self.get_P_ei(
-            internal_vector_length,
-            exit_scattering_map,
-            internal_scattering_map,
-        ).T
-
-    def get_SP(self, n, k0):
-        self.update_link_S_matrices(n, k0)
-
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
-
-        # Maps for dealing with positoins of matrix elements
-        (
-            internal_scattering_map,
-            internal_scattering_slices,
-            _,
-        ) = self._get_network_matrix_maps()
-
-        S_ii = self.get_S_ii(
-            internal_vector_length, internal_scattering_slices
-        )
-        P_ii = self.get_P_ii(internal_vector_length, internal_scattering_map)
-        return S_ii @ P_ii
-
-    def get_inv_factor_det(self, n, k0) -> complex:
-        self.update_link_S_matrices(n, k0)
-
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
-
-        # Maps for dealing with positoins of matrix elements
-        (
-            internal_scattering_map,
-            internal_scattering_slices,
-            _,
-        ) = self._get_network_matrix_maps()
-
-        S_ii = self.get_S_ii(
-            internal_vector_length, internal_scattering_slices
-        )
-        P_ii = self.get_P_ii(internal_vector_length, internal_scattering_map)
-        inv_factor = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
-        return np.linalg.det(inv_factor)
-
     def get_network_step_matrix(self, n, k0) -> np.ndarray:
         """The network matrix satisfies
 
@@ -703,32 +384,20 @@ class Network:
         """
         self.update_link_S_matrices(n, k0)
 
-        exit_vector_length = self.num_exit_nodes
-        internal_vector_length = 0
-        for node in self.internal_nodes:
-            internal_vector_length += node.degree
-
-        # Maps for dealing with positoins of matrix elements
-        (
-            internal_scattering_map,
-            internal_scattering_slices,
-            exit_scattering_map,
-        ) = self._get_network_matrix_maps()
-
         # Get the internal S
         internal_S = np.zeros(
-            (internal_vector_length, internal_vector_length),
+            (self.internal_vector_length, self.internal_vector_length),
             dtype=np.complex128,
         )
         for node in self.internal_nodes:
             node_index = node.index
             node_S_mat = node.S_mat
-            new_slice = internal_scattering_slices[str(node_index)]
+            new_slice = self.internal_scattering_slices[str(node_index)]
             internal_S[new_slice, new_slice] = node_S_mat
 
         # Get internal P
         internal_P = np.zeros(
-            (internal_vector_length, internal_vector_length),
+            (self.internal_vector_length, self.internal_vector_length),
             dtype=np.complex128,
         )
         for link in self.internal_links:
@@ -737,10 +406,10 @@ class Network:
             phase_factor = link_S_mat[0, 1]
 
             # Wave that is going into node_one
-            row = internal_scattering_map[
+            row = self.internal_scattering_map[
                 f"{str(node_one_index)},{str(node_two_index)}"
             ]
-            col = internal_scattering_map[
+            col = self.internal_scattering_map[
                 f"{str(node_two_index)},{str(node_one_index)}"
             ]
             internal_P[row, col] = phase_factor
@@ -749,15 +418,15 @@ class Network:
 
         # Get exit P
         exit_P = np.zeros(
-            (exit_vector_length, internal_vector_length),
+            (self.exit_vector_length, self.internal_vector_length),
             dtype=np.complex128,
         )
         for link in self.exit_links:
             node_one_index, node_two_index = link.node_indices
             link_S_mat = link.S_mat
             phase_factor = link_S_mat[0, 1]
-            row = exit_scattering_map[f"{str(node_two_index)}"]
-            col = internal_scattering_map[
+            row = self.exit_scattering_map[f"{str(node_two_index)}"]
+            col = self.internal_scattering_map[
                 f"{str(node_one_index)},{str(node_two_index)}"
             ]
             exit_P[row, col] = phase_factor
@@ -765,18 +434,19 @@ class Network:
         # Build up network matrix
         # First define all the zero matrices to keep things simpler
         z_ee = np.zeros(
-            (exit_vector_length, exit_vector_length),
+            (self.exit_vector_length, self.exit_vector_length),
             dtype=np.complex128,
         )
         z_long = np.zeros(
-            (exit_vector_length, internal_vector_length), dtype=np.complex128
+            (self.exit_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
         )
         z_tall = z_long.T
         z_ii = np.zeros(
-            (internal_vector_length, internal_vector_length),
+            (self.internal_vector_length, self.internal_vector_length),
             dtype=np.complex128,
         )
-        identity = np.identity(exit_vector_length, dtype=np.complex128)
+        identity = np.identity(self.exit_vector_length, dtype=np.complex128)
 
         network_step_matrix = np.block(
             [
@@ -788,6 +458,199 @@ class Network:
         )
         self._network_step_matrix = network_step_matrix
         return network_step_matrix
+
+    def get_S_ee(
+        self, n: float = None, k0: float | complex = None
+    ) -> np.ndarray:
+        self.update_link_S_matrices(n, k0)
+
+        P_ei = self.get_P_ei()
+        P_ie = P_ei.T
+        S_ii = self.get_S_ii()
+        P_ii = self.get_P_ii()
+
+        # Bracketed part to be inverted
+        bracket = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
+        inv = np.linalg.inv(bracket)
+
+        S_ee = P_ei @ inv @ S_ii @ P_ie
+        return S_ee
+
+    def get_S_ee_inv(self, n: float, k0: float | complex) -> np.ndarray:
+        self.update_link_S_matrices(n, k0)
+
+        P_ei_inv = self.get_P_ei_inv()
+        P_ie_inv = P_ei_inv.T
+        S_ii_inv = self.get_S_ii_inv()
+        P_ii_inv = self.get_P_ii_inv()
+
+        # Bracketed part to be inverted
+        bracket = (
+            np.identity(len(S_ii_inv), dtype=np.complex128)
+            - P_ii_inv @ S_ii_inv
+        )
+        inv = np.linalg.inv(bracket)
+
+        S_ee_inv = P_ei_inv @ S_ii_inv @ inv @ P_ie_inv
+        return S_ee_inv
+
+    def get_S_ii(self) -> np.ndarray:
+        """Return the S_ii matrix formed from node scattering matrices"""
+
+        internal_S = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for node in self.internal_nodes:
+            node_index = node.index
+            node_S_mat = node.S_mat
+            new_slice = self.internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = node_S_mat
+        return internal_S
+
+    def get_S_ii_inv(self) -> np.ndarray:
+        """Return the inverse of the S_ii matrix formed from node scattering
+        matrices"""
+        return np.linalg.inv(self.get_S_ii())
+
+    def get_P_ii(self) -> np.ndarray:
+        """Return P matrix calculated from internal network links"""
+        # Get internal P
+        internal_P = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = self.internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor
+        return internal_P
+
+    def get_P_ii_inv(self) -> np.ndarray:
+        """Return P matrix calculated from internal network links"""
+
+        # Get internal P
+        internal_P = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = self.internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = 1 / phase_factor
+            # Wave propagating the other way
+            internal_P[col, row] = 1 / phase_factor
+        return internal_P
+
+    def get_P_ei(self) -> np.ndarray:
+        """Get the matrix that deals with propagation in exit links"""
+
+        exit_P = np.zeros(
+            (self.exit_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.exit_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+            row = self.exit_scattering_map[f"{str(node_two_index)}"]
+            col = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            exit_P[row, col] = phase_factor
+        return exit_P
+
+    def get_P_ei_inv(self) -> np.ndarray:
+        """Get the matrix that deals with propagation in exit links"""
+
+        exit_P = np.zeros(
+            (self.exit_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.exit_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+            row = self.exit_scattering_map[f"{str(node_two_index)}"]
+            col = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            exit_P[row, col] = 1 / phase_factor
+        return exit_P
+
+    def get_P_ie(self) -> np.ndarray:
+        return self.get_P_ei().T
+
+    def get_SP(self, n, k0):
+        self.update_link_S_matrices(n, k0)
+
+        S_ii = self.get_S_ii()
+        P_ii = self.get_P_ii()
+        return S_ii @ P_ii
+
+    def get_inv_factor(self, n, k0) -> complex:
+        self.update_link_S_matrices(n, k0)
+
+        S_ii = self.get_S_ii()
+        P_ii = self.get_P_ii()
+        inv_factor = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
+        return inv_factor
+
+    def get_inv_factor_det(self, n, k0) -> complex:
+        self.update_link_S_matrices(n, k0)
+
+        S_ii = self.get_S_ii()
+        P_ii = self.get_P_ii()
+        inv_factor = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
+        return np.linalg.det(inv_factor)
+
+    def get_wigner_smith_k0(self, n, k0) -> np.ndarray:
+        """Calculate analytically the Wigner-Smith operator
+        Q = -i * S^-1 * dS/dk0"""
+
+        S_ee_inv = self.get_S_ee_inv(n, k0)
+        dS_ee_dk0 = self.get_dS_ee_dk0()
+
+        ws = -1j * S_ee_inv @ dS_ee_dk0
+        return ws
+
+    def get_wigner_smith_t(
+        self,
+        n: float | complex,
+        k0: float | complex,
+        perturbed_node_index: int,
+        perturbed_angle_index: int,
+    ) -> np.ndarray:
+        """Calculate analytically the Wigner-Smith operator
+        Q = -i * S^-1 * dS/dt"""
+
+        S_ee_inv = self.get_S_ee_inv(n, k0)
+        dS_ee_dt = self.get_dS_ee_dt(
+            perturbed_node_index, perturbed_angle_index
+        )
+
+        ws = -1j * S_ee_inv @ dS_ee_dt
+        return ws
 
     def _get_network_matrix_maps(
         self,
@@ -820,8 +683,260 @@ class Network:
         )
 
     # -------------------------------------------------------------------------
+    # Volume integral methods
+    # -------------------------------------------------------------------------
+
+    def get_S_dag_S_volume(self, n, k0) -> np.ndarray:
+        """Calculate the product S^dagger S using the volume integral
+        method"""
+
+        network_matrix = self.get_network_matrix(n, k0)
+
+        # Get the scattered fields for each incident field
+        outgoing_vectors = []
+        num_exits = self.num_exit_nodes
+        for i in range(num_exits):
+            incident_field = np.zeros(num_exits, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            incident_vector = np.zeros(
+                (len(network_matrix)), dtype=np.complex128
+            )
+            incident_vector[num_exits : 2 * num_exits] = incident_field
+            outgoing_vector = network_matrix @ incident_vector
+            outgoing_vectors.append(outgoing_vector)
+
+        S_dag_S = np.zeros((num_exits, num_exits), dtype=np.complex128)
+
+        internal_vector_length = int((len(network_matrix) - 2 * num_exits) / 2)
+
+        for q in range(num_exits):
+            for p in range(num_exits):
+                # First loop over internal links
+                partial_sum = 0.0 + 0.0j
+                for link in self.internal_links:
+                    length = link.length
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[
+                        2 * num_exits : 2 * num_exits + internal_vector_length
+                    ]
+                    q_i = q_vector[2 * num_exits + internal_vector_length :]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[
+                        2 * num_exits : 2 * num_exits + internal_vector_length
+                    ]
+                    p_i = p_vector[2 * num_exits + internal_vector_length :]
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+                    key = f"{node_one_index},{node_two_index}"
+                    index = self.internal_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        O_mp
+                        * np.conj(O_mq)
+                        * (1.0 + 0.0j - np.exp(-2 * n * np.imag(k0) * length))
+                    )
+
+                    partial_sum += (
+                        I_mp
+                        * np.conj(I_mq)
+                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0 + 0.0j)
+                    )
+
+                # Next loop over exit links
+                for link in self.exit_links:
+                    length = link.length
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[0:num_exits]
+                    q_i = q_vector[num_exits : 2 * num_exits]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[0:num_exits]
+                    p_i = p_vector[num_exits : 2 * num_exits]
+
+                    # Find the fields in the link
+                    # Note: node_two is always the external node
+                    external_node_index = link.sorted_connected_nodes[1]
+                    key = f"{external_node_index}"
+                    index = self.exit_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        I_mp
+                        * np.conj(I_mq)
+                        * (1.0 - np.exp(-2 * n * np.imag(k0) * length))
+                    )
+
+                    partial_sum += (
+                        O_mp
+                        * np.conj(O_mq)
+                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0)
+                    )
+
+                delta = 1.0 if q == p else 0.0
+                S_dag_S[q, p] = delta - partial_sum
+
+        return S_dag_S
+
+    # -------------------------------------------------------------------------
     #  Methods for altering/perturbing the network
     # -------------------------------------------------------------------------
+
+    def perturb_node_eigenvalue(
+        self, node_index: int, eigenvalue_index: int, factor: complex
+    ) -> None:
+        """Multiply the specified eigenvalue by the factor variable"""
+        node = self.get_node(node_index)
+        S_mat = node.S_mat
+
+        # Multiply the appropriate eigenvalue by the given factor
+        lam, w = np.linalg.eig(S_mat)
+        lam[eigenvalue_index] = lam[eigenvalue_index] * factor
+        new_S = w @ np.diag(lam) @ np.linalg.inv(w)
+        node.S_mat = new_S
+        node.iS_mat = np.linalg.inv(new_S)
+
+        # Leave perturbation info here too
+        node.is_perturbed = True
+        node.perturbation_params = {
+            "eigenvalue_index": eigenvalue_index,
+            "factor": factor,
+        }
+
+    def get_dS_ee_dk0(self) -> np.ndarray:
+        """Get the derivative of S_ee with respect to k0"""
+
+        P_ei = self.get_P_ei()
+        P_ie = self.get_P_ie()
+        P_ii = self.get_P_ii()
+        S_ii = self.get_S_ii()
+
+        dP_ei_dk0 = self.get_dP_ei_dk0()
+        dP_ie_dk0 = self.get_dP_ie_dk0()
+        dP_ii_dk0 = self.get_dP_ii_dk0()
+        dS_ii_dk0 = np.zeros(S_ii.shape, dtype=np.complex128)
+
+        SP = S_ii @ P_ii
+        inv = np.linalg.inv(np.identity(len(SP)) - SP)
+        dinv_dk0 = inv @ (S_ii @ dP_ii_dk0 + dS_ii_dk0 @ P_ii) @ inv
+
+        term_one = dP_ei_dk0 @ inv @ S_ii @ P_ie
+        term_two = P_ei @ dinv_dk0 @ S_ii @ P_ie
+        term_three = P_ei @ inv @ dS_ii_dk0 @ P_ie
+        term_four = P_ei @ inv @ S_ii @ dP_ie_dk0
+
+        dS_ee_dk0 = term_one + term_two + term_three + term_four
+        return dS_ee_dk0
+
+    def get_dS_ee_dt(
+        self,
+        perturbed_node_index: int,
+        perturbed_angle_index: int,
+    ) -> np.ndarray:
+        """Get the derivative of S_ee with respect to eigenphase t
+        (eigenvalue is e^it)"""
+
+        P_ei = self.get_P_ei()
+        P_ie = self.get_P_ie()
+        P_ii = self.get_P_ii()
+        S_ii = self.get_S_ii()
+
+        dP_ei_dt = np.zeros(P_ei.shape, dtype=np.complex128)
+        dP_ie_dt = np.zeros(P_ie.shape, dtype=np.complex128)
+        dP_ii_dt = np.zeros(P_ii.shape, dtype=np.complex128)
+        dS_ii_dt = self.get_dS_ii_dt(
+            perturbed_node_index, perturbed_angle_index
+        )
+
+        SP = S_ii @ P_ii
+        inv = np.linalg.inv(np.identity(len(SP)) - SP)
+        dinv_dt = inv @ (S_ii @ dP_ii_dt + dS_ii_dt @ P_ii) @ inv
+
+        term_one = dP_ei_dt @ inv @ S_ii @ P_ie
+        term_two = P_ei @ dinv_dt @ S_ii @ P_ie
+        term_three = P_ei @ inv @ dS_ii_dt @ P_ie
+        term_four = P_ei @ inv @ S_ii @ dP_ie_dt
+
+        dS_ee_dt = term_one + term_two + term_three + term_four
+        return dS_ee_dt
+
+    def get_S_ii_dS_ii(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the S_ii matrix and its derivative"""
+
+        internal_S = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        internal_dS = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        for node in self.internal_nodes:
+            node_index = node.index
+            node_S_mat = node.S_mat
+            new_slice = self.internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = node_S_mat
+
+            if node.is_perturbed:
+                internal_dS[new_slice, new_slice] = node.dS_mat
+
+        return internal_S, internal_dS
+
+    def get_P_ii_dP_ii(
+        self, n: complex, k0: complex
+    ) -> tuple[np.ndarray, np.ndarray]:
+        self.update_link_S_matrices(n, k0)
+
+        internal_P = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        internal_dP = np.zeros(
+            (self.internal_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = self.internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor
+            internal_dP[row, col] = phase_factor * 1j * n * link.length
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor
+            internal_dP[col, row] = phase_factor * 1j * n * link.length
+
+        return internal_P, internal_dP
 
     def set_node_S_matrix(
         self,
@@ -839,37 +954,195 @@ class Network:
         node.S_mat = network_factory.get_S_mat(S_mat_type, size, S_mat_params)
         node.iS_mat = np.linalg.inv(node.S_mat)
 
-    def random_scaled_node_perturbation(
-        self, node_index: int, variance: float = 0.01
-    ) -> None:
-        """Perturb a node's S matrix by multiplying it by a small perturbation
-        of the identity matrix"""
-        node = self.get_node(node_index)
-        S_mat = node.S_mat
-        size, _ = S_mat.shape
+    def get_dS_ii_dt(
+        self,
+        perturbed_node_index: int,
+        perturbed_angle_index: int,
+        internal_vector_length: int | None = None,
+        internal_scattering_slices: slice | None = None,
+    ) -> np.ndarray:
+        """Return the S_ii matrix formed from node scattering matrices"""
 
-        is_symmetric = np.allclose(S_mat - S_mat.T, 0.0)
-        is_unitary = np.allclose(
-            S_mat @ np.conj(S_mat.T) - np.identity(size, dtype=np.complex128),
-            0.0,
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_slices is None:
+            _, internal_scattering_slices, _ = self._get_network_matrix_maps()
+
+        internal_S = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
         )
+        for node in self.internal_nodes:
+            node_index = node.index
 
-        # Calculate M = I + dS
-        dS = (
-            np.random.randn(size, size) + 1j * np.random.randn(size, size)
-        ) * np.sqrt(variance)
-        M = np.identity(size, dtype=np.complex128) + dS
-        new_S_mat = S_mat @ M
+            # Only perturbed node has non-zero entry in dS
+            if node_index != perturbed_node_index:
+                continue
 
-        # Symmetrise new S if necessary
-        if is_symmetric:
-            new_S_mat = (new_S_mat + new_S_mat.T) / 2
-        if is_unitary:
-            U, s, Vh = np.linalg.svd(new_S_mat)
-            new_S_mat = U @ Vh
+            # We are now at the perturbed node
+            node_S_mat = node.S_mat
+            lam, w = np.linalg.eig(node_S_mat)
+            for angle_num, phase_term in enumerate(lam):
+                if angle_num == perturbed_angle_index:
+                    lam[angle_num] = 1j * phase_term
+                else:
+                    lam[angle_num] = 0.0
 
-        node.S_mat = new_S_mat
-        node.iS_mat = np.linalg.inv(new_S_mat)
+            node_S_mat = w @ np.diag(lam) @ np.linalg.inv(w)
+
+            new_slice = internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = node_S_mat
+        return internal_S
+
+    def get_dP_ii_dk0(
+        self,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ii with respect to k0"""
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_map is None:
+            internal_scattering_map, _, _ = self._get_network_matrix_maps()
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor * 1j * link.n * link.length
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor * 1j * link.n * link.length
+        return internal_P
+
+    def get_dP_ii_drek0(
+        self,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ii with respect to the real part of k0"""
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_map is None:
+            internal_scattering_map, _, _ = self._get_network_matrix_maps()
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor * 1j * link.n * link.length
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor * 1j * link.n * link.length
+        return internal_P
+
+    def get_dP_ii_dimk0(
+        self,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ii with respect to the imaginary part of k0"""
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_map is None:
+            internal_scattering_map, _, _ = self._get_network_matrix_maps()
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.internal_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = phase_factor * -1 * link.n * link.length
+            # Wave propagating the other way
+            internal_P[col, row] = phase_factor * -1 * link.n * link.length
+        return internal_P
+
+    def get_dP_ei_dk0(
+        self,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ei with respect to k0"""
+
+        exit_P = np.zeros(
+            (self.exit_vector_length, self.internal_vector_length),
+            dtype=np.complex128,
+        )
+        for link in self.exit_links:
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+            row = self.exit_scattering_map[f"{str(node_two_index)}"]
+            col = self.internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            exit_P[row, col] = phase_factor * 1j * link.n * link.length
+        return exit_P
+
+    def get_dP_ie_dk0(
+        self,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ie with respect to k0"""
+
+        return self.get_dP_ei_dk0().T
 
     # -------------------------------------------------------------------------
     # Iterative scattering methods
@@ -1218,8 +1491,8 @@ class Network:
         cbar = fig.colorbar(sm, ax=ax, orientation="vertical")
 
         # background color
-        bg_color = cmap(0)
-        ax.set_facecolor(bg_color)
+        # bg_color = cmap(0)
+        # ax.set_facecolor(bg_color)
 
         # Exit nodes
         for node in self.exit_nodes:

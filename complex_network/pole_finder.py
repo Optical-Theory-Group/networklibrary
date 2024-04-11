@@ -4,6 +4,140 @@ from complex_network.network import Network
 from typing import Any
 import functools
 from tqdm import tqdm
+import quadpy
+    
+
+
+def get_adjugate(M: np.ndarray) -> np.ndarray:
+    n_row, n_col = np.shape(M)
+    adjugate = np.zeros((n_row, n_col), dtype=np.complex128)
+
+    for i in range(n_row):
+        for j in range(n_col):
+            modified = np.copy(M)
+            modified[i, :] = np.zeros(n_col)
+            modified[:, j] = np.zeros(n_row)
+            modified[i, j] = 1.0
+            adjugate[i, j] = np.linalg.det(modified)
+    return adjugate.T
+
+
+def contour_integral(
+    network: Network, vertices: np.ndarray, n: float | complex
+) -> np.ndarray:
+    """Computes the pair of contour integrals over a rectangular
+    region defined by the vertices"""
+
+    size = network.num_exit_nodes
+    integral_one = np.zeros((size, size), dtype=np.complex128)
+    integral_two = np.zeros((size, size), dtype=np.complex128)
+
+    for i in range(len(vertices)):
+        start = vertices[i]
+        end = vertices[(i + 1) % len(vertices)]
+
+        if np.isclose(start.real, end.real):
+            direction = "vertical"
+        elif np.isclose(start.imag, end.imag):
+            direction = "horizontal"
+        else:
+            raise ValueError(
+                "Contour must consist of horizontal and vertical lines"
+            )
+
+        new_one, new_two = contour_integral_segment(
+            network, start, end, n, direction
+        )
+        integral_one += new_one
+        integral_two += new_two
+
+    return integral_one, integral_two
+
+
+def contour_integral_segment(
+    network: Network,
+    start: complex,
+    end: complex,
+    n: float | complex,
+    direction: str,
+    num_points: int = 300,
+) -> tuple[complex, complex]:
+    """Computes the pair of integrals over a line segment in the complex plane,
+    either horizontally or vertically.
+
+    Parameters
+
+    network: Network
+        The complex network from which the scattering matrix is calculated.
+    start: complex
+        A complex number that defines the start of the contour over which the
+        integral is performed
+    end: complex
+        A complex number that defines the end of the contour over which the
+        integral is performed
+    n: complex
+        The refractive index
+    direction: str
+        A string, either "horizontal" or "vertical" that specifies the
+        direction of the contour segment over which the integral is calculated
+    """
+
+    if direction not in ["horizontal", "vertical"]:
+        raise ValueError("Direction must be 'horizontal' or 'vertical'.")
+    if direction == "horizontal" and not np.isclose(start.imag, end.imag):
+        raise ValueError(
+            "Start and end points do not have the same imaginary part for a "
+            "horizontal integral."
+        )
+    if direction == "vertical" and not np.isclose(start.real, end.real):
+        raise ValueError(
+            "Start and end points do not have the same real part for a "
+            "vertical integral."
+        )
+
+    fixed_value = start.imag if direction == "horizontal" else start.real
+    range_start = start.real if direction == "horizontal" else start.imag
+    range_end = end.real if direction == "horizontal" else end.imag
+
+    # Define integrands
+    def matrix(variable):
+        z = (
+            variable + 1j * fixed_value
+            if direction == "horizontal"
+            else fixed_value + 1j * variable
+        )
+        return network.get_S_ee(n, z)
+
+    # Compute integrals 'manually'. Doesn't work if you try to use quadpy
+    # directly due to the way it tries to vectorise over sample points
+    scheme = quadpy.c1.gauss_legendre(num_points)
+    normalized_points = scheme.points
+    weights = scheme.weights
+
+    diff = (range_end - range_start) / 2.0
+    mean = (range_end + range_start) / 2.0
+
+    sample_points = diff * normalized_points + mean
+
+    # Calculate the scattering matrices at the different values along the curve
+    size = network.num_exit_nodes
+    data_one = np.zeros((size, size, len(sample_points)), dtype=np.complex128)
+    data_two = np.zeros((size, size, len(sample_points)), dtype=np.complex128)
+
+    for i, z in enumerate(sample_points):
+        new_matrix = matrix(z)
+        data_one[:, :, i] = new_matrix * weights[i]
+        data_two[:, :, i] = new_matrix * weights[i] * z
+
+    integral_one = diff * np.sum(data_one, axis=2)
+    integral_two = diff * np.sum(data_two, axis=2)
+
+    return integral_one, integral_two
+
+
+def tanh_sinh(function, start, end):
+    pass
+
 
 def find_pole(
     network: Network,
@@ -120,190 +254,3 @@ def sweep(
             data[i, j] = new_data
 
     return k0_r, k0_i, data
-
-
-# # This method calculates determinant of scattering matrix of the network object.
-# # Input parameters:
-# # - self: An instance of Network class.
-# # - kmin: Minimum wavenumber value to calculate determinant.
-# # - kmax: Maximum wavenumber value to calculate determinant.
-# # - npr: Number of points in the real axis.
-# # - npi: Number of points in the imaginary axis.
-# # - takeabs: Flag to determine whether to take the absolute value of determinant or not.
-# # - progress_bar_text: Text to show in the progress bar.
-# def calc_det_S(
-#     self,
-#     kmin: complex,
-#     kmax: complex,
-#     npr: int,
-#     npi: Union[int, None] = None,
-#     takeabs: bool = True,
-#     progress_bar_text: str = "",
-# ):
-#     """
-#     This method calculates determinant of scattering matrix of the network object.
-
-#     Inputs:
-#         kmin: complex
-#             Minimum wavenumber value to calculate determinant.
-#         kmax: complex
-#             Maximum wavenumber value to calculate determinant.
-#         npr: int
-#             Number of points in the real axis.
-#         npi: int, optional
-#             Number of points in the imaginary axis. DEFAULT = npr
-#         takeabs: bool, optional
-#             Flag to determine whether to take the absolute value of determinant or not. DEFAULT = True
-#         progress_bar_text: str, optional
-#             Text to show in the progress bar.
-
-#     Returns:
-#         KR, KI: numpy ndarrays giving meshgrid of real and imaginary k coordinates
-#         detS:   abs(|SM|) or |SM| found at each position on k grid
-#         kpeaks: coarse approximation of positions of peaks in detS
-#     """
-#     # If npi is not given, we by default set it equal to npr.
-#     if npi is None:
-#         npi = npr
-
-#     # Save the original value of k.
-#     korig = self.k
-
-#     # Get real and imaginary parts of kmin and kmax and create a meshgrid of points for real/imaginary axes.
-#     krmin = kmin.real
-#     kimin = kmin.imag
-#     krmax = kmax.real
-#     kimax = kmax.imag
-#     kr = np.linspace(krmin, krmax, npr)
-#     ki = np.linspace(kimin, kimax, npi)
-#     KR, KI = np.meshgrid(kr, ki)
-
-#     # Initialise array to store determinant values for each complex wavenumber
-#     if takeabs is True:
-#         detS = np.zeros((npr, npi))
-#     else:
-#         detS = np.zeros((npr, npi)) + 1j * np.zeros((npr, npi))
-
-#     # Iterate over the grid and calculate the determinant of the scattering matrix for each point.
-#     for ii in range(0, npr):
-#         k_real = kr[ii]
-#         for jj in range(0, npi):
-#             # Update the progress bar and working value of k.
-#             update_progress(
-#                 (ii * npr + jj) / npr**2, status=progress_bar_text
-#             )
-#             k = k_real + 1j * ki[jj]
-
-#             # Reset the network with the new k value.
-#             self.reset_network(k=k)
-
-#             # Calculate the scattering matrix and node order and store SM determinant into array.
-#             sm, node_order = self.scattering_matrix_direct()
-#             if takeabs is True:
-#                 detS[ii, jj] = abs(np.linalg.det(sm))
-#             else:
-#                 detS[ii, jj] = np.linalg.det(sm)
-
-#     # Reset the network back to the original k value.
-#     self.reset_network(k=korig)
-
-#     # Find peaks of detS.
-#     peak_inds = detect_peaks(abs(detS))
-
-#     # Create an array with the wavenumbers of the peaks.
-#     kpeaks = np.array(
-#         [
-#             kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]]
-#             for i in range(0, len(peak_inds))
-#         ]
-#     )
-
-#     return KR, KI, detS, kpeaks
-
-
-# def calc_det_ImSP(self, kmin, kmax, npr, npi=None, takeabs=True):
-#     if npi is None:
-#         npi = npr
-#     korig = self.k
-
-#     krmin = np.real(kmin)
-#     kimin = np.imag(kmin)
-
-#     krmax = np.real(kmax)
-#     kimax = np.imag(kmax)
-
-#     kr = np.linspace(krmin, krmax, npr)
-#     ki = np.linspace(kimin, kimax, npi)
-#     KR, KI = np.meshgrid(kr, ki)
-
-#     if takeabs is True:
-#         detS = np.zeros((npr, npi))
-#     else:
-#         detS = np.zeros((npr, npi)) + 1j * np.zeros((npr, npi))
-
-#     for ii in range(0, npr):
-#         k_real = kr[ii]
-#         for jj in range(0, npi):
-#             update_progress((ii * npr + jj) / npr**2)
-#             k_imag = ki[jj]
-
-#             k = k_real + 1j * k_imag
-#             self.reset_network(k=k)
-#             S11, P11 = self.get_S11_P11()
-#             sm = np.eye(S11.shape[0]) - S11 @ P11
-#             if takeabs is True:
-#                 detS[ii, jj] = abs(np.linalg.det(sm))
-#             else:
-#                 detS[ii, jj] = np.linalg.det(sm)
-
-#     self.reset_network(k=korig)
-
-#     peak_inds = detect_peaks(abs(detS))
-#     kpeaks = np.array(
-#         [
-#             kr[peak_inds[i][0]] + 1j * ki[peak_inds[i][1]]
-#             for i in range(0, len(peak_inds))
-#         ]
-#     )
-
-#     return KR, KI, detS, kpeaks
-
-
-# def detect_peaks(image):
-#     """
-#     Takes an image and detect the peaks using the local maximum filter.
-#     Returns a boolean mask of the peaks (i.e. 1 when
-#     the pixel's value is the neighborhood maximum, 0 otherwise)
-#     """
-
-#     # define an 8-connected neighborhood
-#     neighborhood = generate_binary_structure(2, 2)
-
-#     # apply the local maximum filter; all pixel of maximal value
-#     # in their neighborhood are set to 1
-#     local_max = maximum_filter(image, footprint=neighborhood) == image
-#     # local_max is a mask that contains the peaks we are
-#     # looking for, but also the background.
-#     # In order to isolate the peaks we must remove the background from the mask.
-
-#     # we create the mask of the background
-#     background = image == 0
-
-#     # a little technicality: we must erode the background in order to
-#     # successfully subtract it form local_max, otherwise a line will
-#     # appear along the background border (artifact of the local maximum filter)
-#     eroded_background = binary_erosion(
-#         background, structure=neighborhood, border_value=1
-#     )
-
-#     # we obtain the final mask, containing only peaks,
-#     # by removing the background from the local_max mask (xor operation)
-#     detected_peaks = local_max ^ eroded_background
-
-#     labels = measure.label(detected_peaks)
-#     props = measure.regionprops(labels)
-#     peak_inds = [
-#         (int(prop.centroid[0]), int(prop.centroid[1])) for prop in props
-#     ]
-
-#     return peak_inds

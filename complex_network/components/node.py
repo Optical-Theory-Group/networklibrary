@@ -109,6 +109,7 @@ class Node(Component):
         """Default values for the node"""
         default_values: dict[str, Any] = {
             "index": 0,
+            "is_perturbed": False,
             "position": None,
             "node_type": "internal",
             "num_connect": 0,
