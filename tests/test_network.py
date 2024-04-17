@@ -14,7 +14,7 @@ import unittest
 import numpy as np
 
 # Import the Network class from the complexnetworklibrary.network module
-from complex_network.network import Network
+from complex_network.networks.network import Network
 from complex_network.util import compare_dict
 
 

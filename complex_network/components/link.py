@@ -32,7 +32,7 @@ class Link(Component):
     node_indices:
         Tuple of indices of the nodes connected by the link
     link_type:
-        string identify for link type, "internal" or "exit
+        string identify for link type, "internal" or "external
     length:
         length of link
     n:
@@ -151,7 +151,7 @@ class Link(Component):
         if color is not None:
             linecol = color
         else:
-            if self.link_type == "exit":
+            if self.link_type == "external":
                 linecol = "#85C27F"
             else:
                 linecol = "#9678B4"

@@ -1,11 +1,10 @@
 import numpy as np
 import scipy
-from complex_network.network import Network
-from typing import Any
+from complex_network.networks.network import Network
+from typing import Any, Callable
 import functools
 from tqdm import tqdm
 import quadpy
-    
 
 
 def get_adjugate(M: np.ndarray) -> np.ndarray:
@@ -28,7 +27,7 @@ def contour_integral(
     """Computes the pair of contour integrals over a rectangular
     region defined by the vertices"""
 
-    size = network.num_exit_nodes
+    size = network.num_external_nodes
     integral_one = np.zeros((size, size), dtype=np.complex128)
     integral_two = np.zeros((size, size), dtype=np.complex128)
 
@@ -120,7 +119,7 @@ def contour_integral_segment(
     sample_points = diff * normalized_points + mean
 
     # Calculate the scattering matrices at the different values along the curve
-    size = network.num_exit_nodes
+    size = network.num_external_nodes
     data_one = np.zeros((size, size, len(sample_points)), dtype=np.complex128)
     data_two = np.zeros((size, size, len(sample_points)), dtype=np.complex128)
 
@@ -142,6 +141,7 @@ def tanh_sinh(function, start, end):
 def find_pole(
     network: Network,
     k0: complex,
+    n_function: Callable[[float], float],
     method: str = "CG",
     options: dict[str, Any] | None = None,
     bounds: tuple[Any] | None = None,
@@ -156,6 +156,8 @@ def find_pole(
         The network for which the poles are found
     k0 : complex
         First guess
+    n_functoon:
+        Function that returns the refractive index as a function of wavelength
     method : string, optional
         Search algorithm (see optimize.minimize documentation).
         The default is 'CG'.
@@ -171,7 +173,9 @@ def find_pole(
         Complex wavenumber defining position of pole.
 
     """
-    func = functools.partial(inv_factor_det, network=network)
+    func = functools.partial(
+        inv_factor_det, network=network, n_function=n_function
+    )
 
     out = scipy.optimize.minimize(
         func,
@@ -184,9 +188,13 @@ def find_pole(
     return pole
 
 
-def inv_factor_det(k0: np.ndarray, network: Network) -> float:
+def inv_factor_det(
+    k0: np.ndarray, network: Network, n_function: Callable[[float], float]
+) -> float:
     k = k0[0] + 1j * k0[1]
-    det = network.get_inv_factor_det(None, k)
+    wavelength = 2 * np.pi / k0[0]
+    n = n_function(wavelength)
+    det = network.get_inv_factor_det(n, k)
     return np.abs(det)
 
 

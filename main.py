@@ -5,16 +5,16 @@ import copy
 import matplotlib.pyplot as plt
 import numpy as np
 
-from complex_network import network_factory
-from complex_network.spec import NetworkSpec
-from complex_network.pole_finder import (
+from complex_network.networks import network_factory
+from complex_network.networks.network_spec import NetworkSpec
+from complex_network.poles.pole_finder import (
     sweep,
     find_pole,
     contour_integral_segment,
     contour_integral,
 )
 from tqdm import tqdm
-from complex_network.network_perturbator import NetworkPerturbator
+from complex_network.perturbations.network_perturbator import NetworkPerturbator
 
 np.random.seed(1)
 

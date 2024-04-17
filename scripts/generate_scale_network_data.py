@@ -24,7 +24,7 @@ import seaborn as sns
 from matplotlib.animation import FFMpegFileWriter
 from matplotlib.collections import LineCollection
 
-from complex_network.network import Network
+from complex_network.networks.network import Network
 from complex_network.util import update_progress
 
 # #################################################

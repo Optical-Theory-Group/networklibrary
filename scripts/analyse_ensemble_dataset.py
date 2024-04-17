@@ -19,7 +19,7 @@ import seaborn as sns
 from complex_network._dict_hdf5 import (
     load_dict_from_hdf5, recursively_load_dict_contents_from_group,
     save_dict_to_hdf5)
-from complex_network.network import Network
+from complex_network.networks.network import Network
 from complex_network.util import update_progress
 
 obj = os.scandir('../data/')

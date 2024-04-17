@@ -1,42 +1,15 @@
-import matplotlib.pyplot as plt
+import numpy as np
 
 
-# Before pruning
-fig, ax = plt.subplots()
-for p in points_int:
-    plt.scatter(p[0], p[1], color="black")
-
-for node in nodes.values():
-    plt.scatter(node.position[0], node.position[1], color="blue")
-
-for link in links.values():
-    ni1, ni2 = link.node_indices
-    p1 = nodes[str(ni1)].position
-    p2 = nodes[str(ni2)].position
-    plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color="blue")
-ax.set_aspect("equal")
-ax.set_xlim(-1.2, 1.2)
-ax.set_ylim(-1.2, 1.2)
-t = np.linspace(-1, 1, 1000)
-y = np.sqrt(1.0 - t**2)
-ax.plot(t, y, color="black")
-ax.plot(t, -y, color="black")
+def f(x):
+    return x**2
 
 
-# Just network
-fig, ax = plt.subplots()
-for node in nodes.values():
-    plt.scatter(node.position[0], node.position[1], color="blue")
+x = 1
+dx = 1e-5
+y1 = f(x - dx / 2)
+y2 = f(x + dx / 2)
+df = (y2 - y1) / dx
 
-for link in links.values():
-    ni1, ni2 = link.node_indices
-    p1 = nodes[str(ni1)].position
-    p2 = nodes[str(ni2)].position
-    plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color="blue")
-ax.set_aspect("equal")
-# ax.set_xlim(-1.2, 1.2)
-# ax.set_ylim(-1.2, 1.2)
-# t = np.linspace(-1, 1, 1000)
-# y = np.sqrt(1.0 - t**2)
-# ax.plot(t, y, color="black")
-# ax.plot(t, -y, color="black")
+print(f"Theory: {2*x}")
+print(f"Numerical: {df}")

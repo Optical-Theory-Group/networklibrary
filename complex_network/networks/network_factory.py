@@ -8,12 +8,12 @@ from typing import Any
 import numpy as np
 import scipy
 from scipy.spatial import ConvexHull, Voronoi
-from complex_network.spec import NetworkSpec
+from complex_network.networks.network_spec import NetworkSpec
 from complex_network.components.node import Node
 from complex_network.components.link import Link
-from complex_network.network import Network
+from complex_network.networks.network import Network
 import logconfig
-
+from complex_network.scattering_matrices.scattering_matrix import get_S_mat
 
 # from line_profiler_pycharm import profile
 
@@ -54,7 +54,7 @@ def generate_network(spec: NetworkSpec) -> Network:
 
     _initialise_links(nodes, links, spec)
     _initialise_nodes(nodes, links, spec)
-    return Network(nodes, links)
+    return Network(nodes, links, spec.material)
 
 
 def _initialise_nodes(
@@ -78,8 +78,8 @@ def _initialise_nodes(
         )
 
     for node in nodes.values():
-        # Add "ghost" exit channel for exit nodes
-        if node.node_type == "exit":
+        # Add "ghost" external channel for external nodes
+        if node.node_type == "external":
             node.sorted_connected_nodes.append(-1)
 
         # Sort lists and get the length
@@ -99,7 +99,7 @@ def _initialise_nodes(
         node.outwave_np = np.zeros(size, dtype=np.complex128)
 
         # Set up scattering matrices
-        if node.node_type == "exit":
+        if node.node_type == "external":
             # This matrix just transfers power onwards
             node.S_mat = np.array(
                 [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
@@ -152,7 +152,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     spec : Dictionary specifying properties of network:
         Keys:
             'internal_nodes': number of internal nodes,
-            'exit_nodes': number of external nodes,
+            'external_nodes': number of external nodes,
             'shape': 'circular' or 'slab'
             'network_size':
                 for 'circular': radius of network
@@ -160,23 +160,23 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
                              network
             'wavenumber': k,
             'refractive_index': n,
-            'exit_size':
-                for 'circular': radius of exit nodes from network center
-                for 'slab': exit nodes placed at +/-exit_size/2 randomly
+            'external_size':
+                for 'circular': radius of external nodes from network center
+                for 'slab': external nodes placed at +/-external_size/2 randomly
                              within width
 
-            'left_exit_fraction': in range [0,1]. Fraction of exit nodes on
+            'left_external_fraction': in range [0,1]. Fraction of external nodes on
                                  lefthand side
                 of a slab network. Not needed for circular
     """
 
     num_internal_nodes = spec.num_internal_nodes
-    num_exit_nodes = spec.num_exit_nodes
+    num_external_nodes = spec.num_external_nodes
 
     network_shape = spec.network_shape
     network_size = spec.network_size
-    exit_size = spec.exit_size
-    exit_offset = spec.exit_offset
+    external_size = spec.external_size
+    external_offset = spec.external_offset
 
     nodes = {}
     links = {}
@@ -188,30 +188,34 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
                 "network_size must be a float for a circular delaunay network"
             )
         # Check type of network_size
-        if not isinstance(exit_size, float):
+        if not isinstance(external_size, float):
             raise ValueError(
-                "exit_size must be a float for a circular delaunay network"
+                "external_size must be a float for a circular delaunay network"
             )
-        # Radius of exit nodes must be bigger than radius of internal nodes
-        if exit_size <= network_size:
-            raise ValueError("exit_size must be larger than network_size")
+        # Radius of external nodes must be bigger than radius of internal nodes
+        if external_size <= network_size:
+            raise ValueError("external_size must be larger than network_size")
 
         # Generate random points
         # Points on the outer circles
-        theta_exit = 2 * np.pi * np.random.random(num_exit_nodes)
-        points_exit = (
-            exit_size * np.array([np.cos(theta_exit), np.sin(theta_exit)]).T
+        theta_external = 2 * np.pi * np.random.random(num_external_nodes)
+        points_external = (
+            external_size
+            * np.array([np.cos(theta_external), np.sin(theta_external)]).T
         )
         points_edge = (
-            network_size * np.array([np.cos(theta_exit), np.sin(theta_exit)]).T
+            network_size
+            * np.array([np.cos(theta_external), np.sin(theta_external)]).T
         )
 
         # Points in the interior
         theta_int = (
-            2 * np.pi * np.random.random(num_internal_nodes - num_exit_nodes)
+            2
+            * np.pi
+            * np.random.random(num_internal_nodes - num_external_nodes)
         )
         r_int = network_size * np.sqrt(
-            np.random.random(num_internal_nodes - num_exit_nodes)
+            np.random.random(num_internal_nodes - num_external_nodes)
         )
         points_int = np.array(
             [r_int * np.cos(theta_int), r_int * np.sin(theta_int)]
@@ -225,65 +229,74 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
                 "delaunay network"
             )
         # Check type of network_size
-        if not isinstance(exit_offset, float):
+        if not isinstance(external_offset, float):
             raise ValueError(
-                "exit_offset must be a float for a circular delaunay network"
+                "external_offset must be a float for a circular delaunay network"
             )
 
         # Unpack variables specific to the slab shaped networks
         network_length, network_height = network_size
 
-        if isinstance(num_exit_nodes, int):
-            num_left_exit_nodes, num_right_exit_nodes = (
-                num_exit_nodes,
-                num_exit_nodes,
+        if isinstance(num_external_nodes, int):
+            num_left_external_nodes, num_right_external_nodes = (
+                num_external_nodes,
+                num_external_nodes,
             )
         else:
-            num_left_exit_nodes, num_right_exit_nodes = num_exit_nodes
+            num_left_external_nodes, num_right_external_nodes = (
+                num_external_nodes
+            )
 
         # Error check if total number of internal nodes is too small to make
         # the network
-        if num_internal_nodes < num_left_exit_nodes + num_right_exit_nodes:
+        if (
+            num_internal_nodes
+            < num_left_external_nodes + num_right_external_nodes
+        ):
             raise ValueError(
                 f"Number of internal nodes {num_internal_nodes} "
-                f"must be at least the total number of exit "
-                f"nodes {num_left_exit_nodes}+"
-                f"{num_right_exit_nodes}="
-                f"{num_left_exit_nodes+num_right_exit_nodes}"
+                f"must be at least the total number of external "
+                f"nodes {num_left_external_nodes}+"
+                f"{num_right_external_nodes}="
+                f"{num_left_external_nodes+num_right_external_nodes}"
             )
 
-        # Generate edge and exit points
+        # Generate edge and external points
         left_edge_points = np.column_stack(
             (
-                np.zeros(num_left_exit_nodes),
-                np.random.uniform(0, network_height, num_left_exit_nodes),
+                np.zeros(num_left_external_nodes),
+                np.random.uniform(0, network_height, num_left_external_nodes),
             )
         )
-        left_exit_points = np.copy(left_edge_points)
-        left_exit_points[:, 0] = -exit_offset
+        left_external_points = np.copy(left_edge_points)
+        left_external_points[:, 0] = -external_offset
 
         right_edge_points = np.column_stack(
             (
-                np.full(num_right_exit_nodes, network_length),
-                np.random.uniform(0, network_height, num_right_exit_nodes),
+                np.full(num_right_external_nodes, network_length),
+                np.random.uniform(0, network_height, num_right_external_nodes),
             )
         )
-        right_exit_points = np.copy(right_edge_points)
-        right_exit_points[:, 0] = network_length + exit_offset
+        right_external_points = np.copy(right_edge_points)
+        right_external_points[:, 0] = network_length + external_offset
 
         points_edge = np.vstack((left_edge_points, right_edge_points))
-        points_exit = np.vstack((left_exit_points, right_exit_points))
+        points_external = np.vstack(
+            (left_external_points, right_external_points)
+        )
 
         # Points in the interior
         num_internal = (
-            num_internal_nodes - num_left_exit_nodes - num_right_exit_nodes
+            num_internal_nodes
+            - num_left_external_nodes
+            - num_right_external_nodes
         )
 
         points_int_x = np.random.uniform(0, network_length, num_internal)
         points_int_y = np.random.uniform(0, network_height, num_internal)
         points_int = np.column_stack((points_int_x, points_int_y))
 
-    # All non-exit points
+    # All non-external points
     points_internal = np.vstack((points_edge, points_int))
     for i, point in enumerate(points_internal):
         nodes[str(i)] = Node(i, "internal", point)
@@ -308,17 +321,17 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
                 link_index += 1
                 created_links.add(node_pair)
 
-    # Finally, add exit nodes and link them to the edge nodes
+    # Finally, add external nodes and link them to the edge nodes
     node_start = len(nodes)
     link_start = len(links)
-    for i, point_exit in enumerate(points_exit):
+    for i, point_external in enumerate(points_external):
         node_index = node_start + i
         link_index = link_start + i
         # Note that node i is the i'th edge mode, which lines up with the
-        # i'th exit ndoe
+        # i'th external ndoe
         node_pair = tuple(sorted((node_index, i)))
-        nodes[str(node_index)] = Node(node_index, "exit", point_exit)
-        links[str(link_index)] = Link(link_index, "exit", node_pair)
+        nodes[str(node_index)] = Node(node_index, "external", point_external)
+        links[str(link_index)] = Link(link_index, "external", node_pair)
 
     return nodes, links
 
@@ -327,10 +340,10 @@ def _generate_voronoi_nodes_links(
     spec: NetworkSpec,
 ) -> tuple[dict, dict]:
     num_seed_nodes = spec.num_seed_nodes
-    num_exit_nodes = spec.num_exit_nodes
+    num_external_nodes = spec.num_external_nodes
     network_shape = spec.network_shape
     network_size = spec.network_size
-    exit_size = spec.exit_size
+    external_size = spec.external_size
 
     nodes = {}
     links = {}
@@ -342,13 +355,13 @@ def _generate_voronoi_nodes_links(
                 "network_size must be a float for a circular Voronoi network"
             )
         # Check type of network_size
-        if not isinstance(exit_size, float):
+        if not isinstance(external_size, float):
             raise ValueError(
-                "exit_size must be a float for a circular Voronoi network"
+                "external_size must be a float for a circular Voronoi network"
             )
-        # Radius of exit nodes must be bigger than radius of internal nodes
-        if exit_size <= network_size:
-            raise ValueError("exit_size must be larger than network_size")
+        # Radius of external nodes must be bigger than radius of internal nodes
+        if external_size <= network_size:
+            raise ValueError("external_size must be larger than network_size")
 
         # Generate random points in the interior
         theta_int = 2 * np.pi * np.random.random(num_seed_nodes)
@@ -386,7 +399,7 @@ def _generate_voronoi_nodes_links(
             # Make sure that link isn't to a node that has been discarded.
             # Note, however, that if a node was connected to a now removed
             # node, that node will become an edge node that will ultimately
-            # connect to an exit node
+            # connect to an external node
             first, second = ridge_vertices
             if (
                 first in removed_node_indices
@@ -406,7 +419,7 @@ def _generate_voronoi_nodes_links(
         )
         edge_node_indices += new_edge_node_indices
 
-        # Generate exit nodes at the edge_node_indices return after pruning
+        # Generate external nodes at the edge_node_indices return after pruning
         # get centroid first of all nodes
 
         xs = [node.position[0] for _, node in nodes.items()]
@@ -419,7 +432,7 @@ def _generate_voronoi_nodes_links(
         i = int(remaining_node_indices[-1]) + 1
         j = int(remaining_link_indices[-1]) + 1
 
-        # If the number of exit nodes is less than the number of
+        # If the number of external nodes is less than the number of
         # edge nodes found so far, pick a random subset of them
         np.random.shuffle(edge_node_indices)
         num_so_far = 0
@@ -429,13 +442,15 @@ def _generate_voronoi_nodes_links(
             new_edge_node = nodes[edge_node_index]
             x, y = new_edge_node.position
             theta = np.arctan2(y - cy, x - cx)
-            new_position = exit_size * np.array([np.cos(theta), np.sin(theta)])
-            nodes[str(i)] = Node(i, "exit", new_position)
-            links[str(j)] = Link(j, "exit", (int(edge_node_index), i))
+            new_position = external_size * np.array(
+                [np.cos(theta), np.sin(theta)]
+            )
+            nodes[str(i)] = Node(i, "external", new_position)
+            links[str(j)] = Link(j, "external", (int(edge_node_index), i))
             i += 1
             j += 1
             num_so_far += 1
-            if num_so_far >= num_exit_nodes:
+            if num_so_far >= num_external_nodes:
                 break
 
     elif network_shape == "slab":
@@ -446,21 +461,23 @@ def _generate_voronoi_nodes_links(
                 "Voronoi network"
             )
         # Check type of network_size
-        if not isinstance(exit_size, float):
+        if not isinstance(external_size, float):
             raise ValueError(
-                "exit_size must be a float for a circular delaunay network"
+                "external_size must be a float for a circular delaunay network"
             )
 
         # Unpack variables specific to the slab shaped networks
         network_length, network_height = network_size
 
-        if isinstance(num_exit_nodes, int):
-            num_left_exit_nodes, num_right_exit_nodes = (
-                num_exit_nodes,
-                num_exit_nodes,
+        if isinstance(num_external_nodes, int):
+            num_left_external_nodes, num_right_external_nodes = (
+                num_external_nodes,
+                num_external_nodes,
             )
         else:
-            num_left_exit_nodes, num_right_exit_nodes = num_exit_nodes
+            num_left_external_nodes, num_right_external_nodes = (
+                num_external_nodes
+            )
 
         points_int_x = np.random.uniform(0, network_length, num_seed_nodes)
         points_int_y = np.random.uniform(0, network_height, num_seed_nodes)
@@ -495,7 +512,7 @@ def _generate_voronoi_nodes_links(
             # Make sure that link isn't to a node that has been discarded.
             # Note, however, that if a node was connected to a now removed
             # node, that node will become an edge node that will ultimately
-            # connect to an exit node
+            # connect to an external node
             first, second = ridge_vertices
             if (
                 first not in removed_node_indices
@@ -540,15 +557,15 @@ def _generate_buffon_network(network_spec: NetworkSpec):
             '"shape" in network spec should be either "circular" or "slab"'
         )
 
-    self.exit_nodes = 0  # external_link_number
+    self.external_nodes = 0  # external_link_number
     iternum = 0
     fibres = []
 
-    while self.exit_nodes != external_link_number:
+    while self.external_nodes != external_link_number:
         iternum += 1
 
-        # determine missing number of exit nodes
-        missing_nodes = external_link_number - self.exit_nodes
+        # determine missing number of external nodes
+        missing_nodes = external_link_number - self.external_nodes
         number_of_lines = int(missing_nodes / 2)
         available_node_ids = [
             i for i in range(0, total_lines) if i not in self.node_indices
@@ -569,9 +586,9 @@ def _generate_buffon_network(network_spec: NetworkSpec):
 
             nodeid = available_node_ids[nn]
 
-            self.add_node(nodeid, (points[0, 0], points[0, 1]), "exit")
+            self.add_node(nodeid, (points[0, 0], points[0, 1]), "external")
             self.add_node(
-                total_lines + nodeid, (points[1, 0], points[1, 1]), "exit"
+                total_lines + nodeid, (points[1, 0], points[1, 1]), "external"
             )
 
             distance = self.calculate_distance(
@@ -639,12 +656,12 @@ def _generate_buffon_network(network_spec: NetworkSpec):
                     self.n,
                 )
 
-        # loop through the connections and reset those that are connected to exit nodes
+        # loop through the connections and reset those that are connected to external nodes
         for link in self.links:
-            if (self.get_node(link.node1).node_type == "exit") or (
-                self.get_node(link.node2).node_type == "exit"
+            if (self.get_node(link.node1).node_type == "external") or (
+                self.get_node(link.node2).node_type == "external"
             ):
-                link.link_type = "exit"
+                link.link_type = "external"
                 link.reset_link(link.distance, link.k, link.n)
 
         self.connect_nodes()
@@ -720,27 +737,27 @@ def _generate_linear_network(network_spec: NetworkSpec):
         Keys:
             internal_nodes: number of internal nodes of network
             network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
-            exit_size: two exit nodes placed at +/-exit_size/2
+            external_size: two external nodes placed at +/-external_size/2
 
     """
     node_number = spec["internal_nodes"]
     network_size = spec["network_size"]
-    exit_size = spec["exit_size"]
+    external_size = spec["external_size"]
 
-    if exit_size < network_size:
-        raise ValueError("exit_size must be larger than network_size.")
+    if external_size < network_size:
+        raise ValueError("external_size must be larger than network_size.")
 
     # generate random positions
     x = network_size * (np.random.random(node_number) - 0.5)
     xs = sorted(x)
 
-    # add exit nodes
-    xs = np.insert(xs, 0, -exit_size / 2)
-    xs = np.append(xs, exit_size / 2)
+    # add external nodes
+    xs = np.insert(xs, 0, -external_size / 2)
+    xs = np.append(xs, external_size / 2)
 
     for index in range(0, len(xs)):
         if index == 0 or index == len(xs) - 1:
-            self.add_node(index, (xs[index], 0), "exit")
+            self.add_node(index, (xs[index], 0), "external")
         else:
             self.add_node(index, (xs[index], 0), "internal")
 
@@ -752,7 +769,7 @@ def _generate_linear_network(network_spec: NetworkSpec):
                 xs[index + 1] - xs[index],
                 self.k,
                 self.n,
-                "exit",
+                "external",
             )
         else:
             self.add_connection(
@@ -773,12 +790,12 @@ def _generate_archimedean_network(network_spec: NetworkSpec):
         Keys:
             internal_nodes: number of internal nodes of network
             network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
-            exit_size: two exit nodes placed at +/-exit_size/2
+            external_size: two external nodes placed at +/-external_size/2
 
             num_layers':3,
             'scale': network_rad,
             'type': 'square',
-            'exit_nodes': 5} # square,triangular, honeycomb
+            'external_nodes': 5} # square,triangular, honeycomb
 
     Parameters
     ----------
@@ -790,9 +807,9 @@ def _generate_archimedean_network(network_spec: NetworkSpec):
     None.
 
     """
-    external_link_number = spec["exit_nodes"]
+    external_link_number = spec["external_nodes"]
 
-    network_size, exit_size = self.generate_tiling(spec)
+    network_size, external_size = self.generate_tiling(spec)
 
     points = [
         np.array(node.position)
@@ -809,19 +826,19 @@ def _generate_archimedean_network(network_spec: NetworkSpec):
     # add some external links
     for ii in range(0, external_link_number):
         theta = 2 * math.pi * np.random.random(1)
-        exitx = exit_size * np.cos(theta)[0]
-        exity = exit_size * np.sin(theta)[0]
-        self.add_node(node_number + ii, (exitx, exity), "exit")
+        externalx = external_size * np.cos(theta)[0]
+        externaly = external_size * np.sin(theta)[0]
+        self.add_node(node_number + ii, (externalx, externaly), "external")
 
         # find appropriate connection to closest point on convex hull
-        min_distance = 2 * exit_size
+        min_distance = 2 * external_size
 
         for number in hullids.vertices:
             node = self.get_node(numbers[number])
 
             newdistance = np.sqrt(
-                (exitx - node.position[0]) ** 2
-                + (exity - node.position[1]) ** 2
+                (externalx - node.position[0]) ** 2
+                + (externaly - node.position[1]) ** 2
             )
 
             if newdistance < min_distance:
@@ -829,7 +846,12 @@ def _generate_archimedean_network(network_spec: NetworkSpec):
                 nearest_id = node.number
 
         self.add_connection(
-            node_number + ii, nearest_id, min_distance, self.k, self.n, "exit"
+            node_number + ii,
+            nearest_id,
+            min_distance,
+            self.k,
+            self.n,
+            "external",
         )
 
 
@@ -920,7 +942,7 @@ def prune_edge_chains(
     from the edge of a network.
 
     The returned list contains indices of the nodes at the bases of the pruned
-    chains. These might be used as edge nodes for the creation of further exit
+    chains. These might be used as edge nodes for the creation of further external
     nodes.
     """
 
@@ -935,13 +957,13 @@ def prune_edge_chains(
     # Get indices of nodes that need to be removed
     remove_list = [key for key, value in num_connections.items() if value == 1]
 
-    # Exit early with fail flag if no nodes need to be pruned
+    # external early with fail flag if no nodes need to be pruned
     if len(remove_list) == 0:
         return nodes, links, None
 
     # Filter nodes and indices by removing ones from the remove list
     # For links, record adjoining nodes as these will become new edge nodes
-    # that will receive exit nodes.
+    # that will receive external nodes.
     new_nodes = {}
     new_links = {}
     new_edge_node_indices = []
@@ -990,119 +1012,3 @@ def _remove_duplicates(
             ids.append(node.number)
 
     return new_nodes, new_links, ids
-
-
-# -----------------------------------------------------------------------------
-# Scattering matrices
-# -----------------------------------------------------------------------------
-
-
-def get_S_mat(
-    S_mat_type: str, size: int, S_mat_params: dict[str, Any] | None = None
-) -> np.ndarray:
-    """Generate a random node scattering matrix of a given size.
-
-    S_mat_params must contain at least "S_mat_type". Options are
-        'identity':
-            identity matrix - complete reflection at each input
-        'permute_identity' :
-            permuted identity matrix - rerouting to next edge
-        'uniform':
-            each element takes a value in [0,1)
-        'isotropic_unitary':
-            unitary isotropic SM, implemented through DFT matrix of correct
-            dimension
-        'COE' :
-            drawn from circular orthogonal ensemble
-        'CUE' :
-            drawn from circular unitary ensemble
-        'unitary_cyclic':
-            unitary cyclic SM constructed through specifying phases of
-            eigenvalues using 'delta'
-        'to_the_lowest_index':
-            reroutes all energy to connected node of lowest index
-        'custom' :
-            Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
-    """
-
-    if S_mat_params is None:
-        S_mat_params = {}
-
-    valid_S_mat_types = [
-        "identity",
-        "uniform_random",
-        "isotropic_unitary",
-        "CUE",
-        "COE",
-        "permute_identity",
-        "custom",
-        "unitary_cyclic",
-    ]
-
-    match S_mat_type:
-        case "identity":
-            S_mat = np.identity(size, dtype=np.complex128)
-
-        case "gaussian_random":
-            S_mat = np.random.random((size, size))
-
-        case "isotropic_unitary":
-            S_mat = scipy.linalg.dft(size) / np.sqrt(size)
-
-        case "CUE":
-            gamma = S_mat_params.get("subunitary_factor", 1.0)
-            S_mat = scipy.stats.unitary_group.rvs(size) * gamma
-
-        case "COE":
-            gamma = S_mat_params.get("subunitary_factor", 1.0)
-            S_mat = scipy.stats.unitary_group.rvs(size) * gamma
-
-            S_mat = S_mat @ S_mat.T
-        case "permute_identity":
-            mat = np.identity(size, dtype=np.complex_)
-            inds = [(i - 1) % size for i in range(size)]
-            S_mat = mat[:, inds]
-
-        case "custom":
-            S_mat = S_mat_params.get("S_mat", np.array(0))
-            if S_mat.shape != (size, size):
-                raise ValueError(
-                    "Supplied scattering matrix is of incorrect"
-                    f"Given: {S_mat.shape}"
-                    f"Expected: {(size, size)}"
-                )
-
-        case "unitary_cyclic":
-            delta = S_mat_params.get("delta")
-
-            if delta is not None:
-                ll = np.exp(1j * delta[0:size])
-            else:
-                ll = np.exp(1j * 2 * np.pi * np.random.rand(size))
-
-            s = 1 / size * scipy.linalg.dft(size) @ ll
-
-            S_mat = np.zeros((size, size), dtype=np.complex128)
-            for jj in range(0, size):
-                S_mat[jj, :] = np.concatenate(
-                    (s[(size - jj) : size], s[0 : size - jj])
-                )
-
-        case _:
-            raise ValueError(
-                f"Specified scattering matrix type is invalid. Please choose"
-                f" one from {valid_S_mat_types}"
-            )
-
-    # Introduce incoherent scattering loss
-    scat_loss = S_mat_params.get("scat_loss", 0.0)
-    if not np.isclose(scat_loss, 0.0):
-        S11 = (np.sqrt(1 - scat_loss**2)) * S_mat
-        S12 = np.zeros(shape=(size, size), dtype=np.complex128)
-        S21 = np.zeros(shape=(size, size), dtype=np.complex128)
-        S22 = scat_loss * np.identity(size, dtype=np.complex128)
-        S_mat_top_row = np.concatenate((S11, S12), axis=1)
-        S_mat_bot_row = np.concatenate((S21, S22), axis=1)
-        S_mat = np.concatenate((S_mat_top_row, S_mat_bot_row), axis=0)
-
-    return S_mat

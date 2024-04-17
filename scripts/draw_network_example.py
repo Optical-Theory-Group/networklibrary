@@ -13,7 +13,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from complex_network.network import Network
+from complex_network.networks.network import Network
 
 wavelength = 1050e-9
 k = (2 * np.pi) / wavelength

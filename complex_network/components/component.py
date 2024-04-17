@@ -33,9 +33,9 @@ class Component:
 
     @nature.setter
     def nature(self, value):
-        if value not in ["internal", "exit"]:
+        if value not in ["internal", "external"]:
             raise ValueError(
-                f"Invalid type '{value}'. Must be 'internal' or 'exit'."
+                f"Invalid type '{value}'. Must be 'internal' or 'external'."
             )
         self._nature = value
 

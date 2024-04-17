@@ -25,14 +25,14 @@ from matplotlib.patches import FancyArrowPatch
 import logconfig
 from tqdm import tqdm
 
-from ._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
-from ._generator import NetworkGenerator
-from complex_network import network_factory
+from .._dict_hdf5 import load_dict_from_hdf5, save_dict_to_hdf5
+from .._generator import NetworkGenerator
+from complex_network.networks import network_factory
 from complex_network.components.link import Link
 from complex_network.components.node import Node
-from complex_network import pole_finder
-from complex_network.network import Network
-from .util import detect_peaks, plot_colourline, update_progress
+from complex_network.poles import pole_finder
+from complex_network.networks.network import Network
+from ..util import detect_peaks, plot_colourline, update_progress
 
 
 def get_adjugate(M: np.ndarray) -> np.ndarray:

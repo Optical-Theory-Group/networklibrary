@@ -14,8 +14,8 @@ import scipy
 import matplotlib.pyplot as plt
 import numpy as np
 
-from complex_network import network_factory
-from complex_network.spec import NetworkSpec
+from complex_network.networks import network_factory
+from complex_network.networks.network_spec import NetworkSpec
 from tqdm import tqdm
 
 np.random.seed(1)

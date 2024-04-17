@@ -30,7 +30,7 @@ class Node(Component):
     position:
         Coordinates of node position
     node_type:
-        Nature of node ("internal" or "exit")
+        Nature of node ("internal" or "external")
     num_connect:
         number of connecting links/edges
     sorted_connected_nodes:
@@ -130,19 +130,19 @@ class Node(Component):
         self,
         ax: plt.Axes,
         show_index: bool = False,
-        show_exit_index: bool = False,
+        show_external_index: bool = False,
         color: str | None = None,
     ) -> None:
         """Draw node on figure"""
         if show_index:
             ax.text(self.x, self.y, self.index)
 
-        if show_exit_index and self.node_type == "exit":
+        if show_external_index and self.node_type == "external":
             ax.text(self.x, self.y, self.index)
 
         if color is not None:
             ax.plot(self.x, self.y, "o", color=color)
         elif self.node_type == "internal":
             ax.plot(self.x, self.y, "o", color="#9678B4")
-        elif self.node_type == "exit":
+        elif self.node_type == "external":
             ax.plot(self.x, self.y, "o", color="#85C27F")

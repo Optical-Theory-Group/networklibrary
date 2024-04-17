@@ -5,6 +5,8 @@ components of the networks.
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Any
+from complex_network.materials.material import Material
+from complex_network.materials.dielectric import Dielectric
 
 
 @dataclass
@@ -36,11 +38,16 @@ class NetworkSpec:
 
     network_type: str
     num_internal_nodes: int
-    num_exit_nodes: int
+    num_external_nodes: int
     num_seed_nodes: int
     network_shape: str
     network_size: float | tuple[float, float]
-    exit_size: float
-    exit_offset: float
+    external_size: float
+    external_offset: float
     node_S_mat_type: str
     node_S_mat_params: dict[str, Any]
+    material: Material | None = None
+
+    def __post_init__(self) -> None:
+        if self.material is None:
+            self.material = Dielectric("glass")
