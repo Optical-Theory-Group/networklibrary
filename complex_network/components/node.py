@@ -110,6 +110,7 @@ class Node(Component):
         default_values: dict[str, Any] = {
             "index": 0,
             "is_perturbed": False,
+            "perturbation_data": {},
             "position": None,
             "node_type": "internal",
             "num_connect": 0,
@@ -132,6 +133,7 @@ class Node(Component):
         show_index: bool = False,
         show_external_index: bool = False,
         color: str | None = None,
+        markersize: float = 6.0,
     ) -> None:
         """Draw node on figure"""
         if show_index:
@@ -141,8 +143,12 @@ class Node(Component):
             ax.text(self.x, self.y, self.index)
 
         if color is not None:
-            ax.plot(self.x, self.y, "o", color=color)
+            ax.plot(self.x, self.y, "o", color=color, markersize=markersize)
         elif self.node_type == "internal":
-            ax.plot(self.x, self.y, "o", color="#9678B4")
+            ax.plot(
+                self.x, self.y, "o", color="#9678B4", markersize=markersize
+            )
         elif self.node_type == "external":
-            ax.plot(self.x, self.y, "o", color="#85C27F")
+            ax.plot(
+                self.x, self.y, "o", color="#85C27F", markersize=markersize
+            )

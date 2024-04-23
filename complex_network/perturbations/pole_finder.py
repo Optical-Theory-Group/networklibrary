@@ -141,7 +141,6 @@ def tanh_sinh(function, start, end):
 def find_pole(
     network: Network,
     k0: complex,
-    n_function: Callable[[float], float],
     method: str = "CG",
     options: dict[str, Any] | None = None,
     bounds: tuple[Any] | None = None,
@@ -173,9 +172,7 @@ def find_pole(
         Complex wavenumber defining position of pole.
 
     """
-    func = functools.partial(
-        inv_factor_det, network=network, n_function=n_function
-    )
+    func = functools.partial(inv_factor_det, network=network)
 
     out = scipy.optimize.minimize(
         func,
@@ -188,13 +185,9 @@ def find_pole(
     return pole
 
 
-def inv_factor_det(
-    k0: np.ndarray, network: Network, n_function: Callable[[float], float]
-) -> float:
+def inv_factor_det(k0: np.ndarray, network: Network) -> float:
     k = k0[0] + 1j * k0[1]
-    wavelength = 2 * np.pi / k0[0]
-    n = n_function(wavelength)
-    det = network.get_inv_factor_det(n, k)
+    det = network.get_inv_factor_det(k)
     return np.abs(det)
 
 
@@ -218,7 +211,7 @@ def inverse_determinant(k0: np.ndarray, network: Network) -> float:
     """
 
     k = k0[0] + 1j * k0[1]
-    S_ee_inv = network.get_S_ee_inv(None, k)
+    S_ee_inv = network.get_S_ee_inv(k)
     return np.abs(np.linalg.det(S_ee_inv))
 
 
@@ -242,7 +235,7 @@ def determinant(k0: np.ndarray, network: Network) -> float:
     """
 
     k = k0[0] + 1j * k0[1]
-    S_ee = network.get_S_ee(None, k)
+    S_ee = network.get_S_ee(k)
     return np.abs(np.linalg.det(S_ee))
 
 

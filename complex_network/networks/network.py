@@ -43,6 +43,62 @@ class Network:
         self.internal_scattering_slices = internal_scattering_slices
         self.external_scattering_map = external_scattering_map
 
+    def reset_dict_indices(self) -> None:
+        """Go through the node and link dictionaries and generate a new
+        numbering system."""
+
+        # Set up conversion dictionaries from old to new
+        old_to_new_links = {}
+        old_to_new_nodes = {-1: -1}
+        i = 0
+        for node in self.internal_nodes + self.external_nodes:
+            old_to_new_nodes[node.index] = i
+            i += 1
+        i = 0
+        for link in self.internal_links + self.external_links:
+            old_to_new_links[link.index] = i
+            i += 1
+
+        # Update all the nodes
+        for node in self.nodes:
+            node.index = old_to_new_nodes[node.index]
+            node.sorted_connected_nodes = [
+                old_to_new_nodes[j] for j in node.sorted_connected_nodes
+            ]
+            node.sorted_connected_links = [
+                old_to_new_links[j] for j in node.sorted_connected_links
+            ]
+            node.inwave = {
+                str(old_to_new_nodes[int(key)]): value
+                for key, value in node.inwave.items()
+            }
+            node.outwave = {
+                str(old_to_new_nodes[int(key)]): value
+                for key, value in node.outwave.items()
+            }
+            self.node_dict[str(node.index)] = node
+
+        # Update all the links
+        for link in self.links:
+            link.index = old_to_new_links[link.index]
+            link.node_indices = (
+                old_to_new_nodes[link.node_indices[0]],
+                old_to_new_nodes[link.node_indices[1]],
+            )
+            link.sorted_connected_nodes = [
+                old_to_new_nodes[j] for j in link.sorted_connected_nodes
+            ]
+
+            link.inwave = {
+                str(old_to_new_nodes[int(key)]): value
+                for key, value in link.inwave.items()
+            }
+            link.outwave = {
+                str(old_to_new_nodes[int(key)]): value
+                for key, value in link.outwave.items()
+            }
+            self.link_dict[str(link.index)] = link
+
     # -------------------------------------------------------------------------
     # Basic network properties
     # -------------------------------------------------------------------------
@@ -228,6 +284,159 @@ class Network:
             link.update_S_matrices()
 
     # -------------------------------------------------------------------------
+    #  Adding new nodes to the network
+    # -------------------------------------------------------------------------
+
+    def add_node_to_link(
+        self, link_index: int, s: float, reflection_coefficient: float
+    ) -> None:
+        """Add a node to a link with given index at fractional position given
+        by s, which ranges from 0 to 1.
+
+        s=0 corresponds to the attached node with lower node index and s=1 is
+        the opposite. s=0 and s=1 are not actaully valid options, since
+        0 < s < 1.
+        """
+        is_invalid_s = (
+            not isinstance(s, float)
+            or np.isclose(s, 0.0)
+            or np.isclose(s, 1.0)
+            or s < 0.0
+            or s > 1.0
+        )
+        if is_invalid_s:
+            raise ValueError(
+                f"s must be a float in the open interval (0,1)."
+                " s={s} was given."
+            )
+
+        old_link = self.get_link(link_index)
+        transmission_coefficient = np.sqrt(1 - reflection_coefficient**2)
+
+        # Get connected nodes
+        node_one = self.get_node(old_link.node_indices[0])
+        node_two = self.get_node(old_link.node_indices[1])
+
+        # Create new node
+        node_position = node_one.position + s * (
+            node_two.position - node_one.position
+        )
+        new_node = Node(
+            self.num_nodes,
+            "internal",
+            node_position,
+            data={
+                "is_perturbed": True,
+                "perturbation_data": {
+                    "perturbation_type": "pseudonode_r",
+                    "r": reflection_coefficient,
+                    "t": transmission_coefficient,
+                },
+            },
+        )
+
+        # Create two new links
+        new_link_one = Link(
+            self.num_links, "internal", (node_one.index, new_node.index)
+        )
+        new_link_two = Link(
+            self.num_links + 1, "internal", (new_node.index, node_two.index)
+        )
+
+        # Fix node one
+        replace_index = node_one.sorted_connected_nodes.index(node_two.index)
+        node_one.sorted_connected_nodes[replace_index] = new_node.index
+
+        node_one.sorted_connected_links.remove(old_link.index)
+        node_one.sorted_connected_links.append(new_link_one.index)
+        node_one.sorted_connected_links = sorted(
+            node_one.sorted_connected_links
+        )
+        del node_one.inwave[str(node_two.index)]
+        node_one.inwave[str(new_node.index)] = 0 + 0j
+        del node_one.outwave[str(node_two.index)]
+        node_one.outwave[str(new_node.index)] = 0 + 0j
+
+        # Fix node two
+        replace_index = node_two.sorted_connected_nodes.index(node_one.index)
+        node_two.sorted_connected_nodes[replace_index] = new_node.index
+
+        node_two.sorted_connected_links.remove(old_link.index)
+        node_two.sorted_connected_links.append(new_link_two.index)
+        node_two.sorted_connected_links = sorted(
+            node_two.sorted_connected_links
+        )
+        del node_two.inwave[str(node_one.index)]
+        node_two.inwave[str(new_node.index)] = 0 + 0j
+        del node_two.outwave[str(node_one.index)]
+        node_two.outwave[str(new_node.index)] = 0 + 0j
+
+        # Set up new node
+        new_node.sorted_connected_nodes = sorted(
+            [node_one.index, node_two.index]
+        )
+        new_node.sorted_connected_links = sorted(
+            [new_link_one.index, new_link_two.index]
+        )
+        new_node.inwave = {
+            str(node_one.index): 0 + 0j,
+            str(node_two.index): 0 + 0j,
+        }
+        new_node.outwave = {
+            str(node_one.index): 0 + 0j,
+            str(node_two.index): 0 + 0j,
+        }
+        new_node.inwave_np = np.array([0 + 0j, 0 + 0j])
+        new_node.outwave_np = np.array([0 + 0j, 0 + 0j])
+        new_node.S_mat = np.array(
+            [
+                [-reflection_coefficient, transmission_coefficient],
+                [transmission_coefficient, reflection_coefficient],
+            ]
+        )
+        new_node.iS_mat = np.linalg.inv(new_node.S_mat)
+        new_node.num_connect = 2
+
+        # Set up new links
+        new_link_one.length = np.linalg.norm(
+            node_one.position - new_node.position
+        )
+        new_link_one.sorted_connected_nodes = sorted(new_link_one.node_indices)
+        new_link_one.inwave = {
+            str(node_one.index): 0 + 0j,
+            str(new_node.index): 0 + 0j,
+        }
+        new_link_one.outwave = {
+            str(node_one.index): 0 + 0j,
+            str(new_node.index): 0 + 0j,
+        }
+        new_link_two.length = np.linalg.norm(
+            new_node.position - node_two.position
+        )
+        new_link_two.sorted_connected_nodes = sorted(new_link_one.node_indices)
+        new_link_two.inwave = {
+            str(new_node.index): 0 + 0j,
+            str(node_two.index): 0 + 0j,
+        }
+        new_link_two.outwave = {
+            str(new_node.index): 0 + 0j,
+            str(node_two.index): 0 + 0j,
+        }
+
+        # Add new node and link to network dict
+        self.node_dict[str(new_node.index)] = new_node
+        self.link_dict[str(new_link_one.index)] = new_link_one
+        self.link_dict[str(new_link_two.index)] = new_link_two
+
+        # Delete the existing link
+        del self.link_dict[str(link_index)]
+
+        # Update matrix maps and so on
+        self.reset_dict_indices()
+        # self.reset_fields()
+        self.set_matrix_calc_utils()
+
+    # -------------------------------------------------------------------------
     #  Direct scattering methods
     # -------------------------------------------------------------------------
 
@@ -310,8 +519,8 @@ class Network:
 
             node.outwave["-1"] = value
             node.outwave_np[0] = value
-            node.inwave[str(connected_link)] = value
-            node.inwave[1] = value
+            node.inwave[str(node.sorted_connected_nodes[1])] = value
+            node.inwave_np[1] = value
 
             connected_link.outwave[str(node_index)] = value
             connected_link.outwave_np[1] = value
@@ -324,7 +533,7 @@ class Network:
 
             node.inwave["-1"] = value
             node.inwave_np[0] = value
-            node.outwave[str(connected_link)] = value
+            node.outwave[str(node.sorted_connected_nodes[1])] = value
             node.outwave[1] = value
 
             connected_link.inwave[str(node_index)] = value
@@ -506,10 +715,10 @@ class Network:
         """Get the external scattering matrix from the inverse formula"""
         self.update_links(k0)
 
-        P_ei = self.get_P_ei()
+        P_ei = self.get_P_ei(k0)
         P_ie = P_ei.T
         S_ii = self.get_S_ii()
-        P_ii = self.get_P_ii()
+        P_ii = self.get_P_ii(k0)
 
         # Bracketed part to be inverted
         bracket = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
@@ -523,10 +732,10 @@ class Network:
         formula"""
         self.update_links(k0)
 
-        P_ei_inv = self.get_P_ei_inv()
+        P_ei_inv = self.get_P_ei_inv(k0)
         P_ie_inv = P_ei_inv.T
         S_ii_inv = self.get_S_ii_inv()
-        P_ii_inv = self.get_P_ii_inv()
+        P_ii_inv = self.get_P_ii_inv(k0)
 
         # Bracketed part to be inverted
         bracket = (
@@ -540,7 +749,6 @@ class Network:
 
     def get_S_ii(self) -> np.ndarray:
         """Return the S_ii matrix formed from node scattering matrices"""
-
         internal_S = np.zeros(
             (self.internal_vector_length, self.internal_vector_length),
             dtype=np.complex128,
@@ -555,10 +763,13 @@ class Network:
     def get_S_ii_inv(self) -> np.ndarray:
         """Return the inverse of the S_ii matrix formed from node scattering
         matrices"""
+
         return np.linalg.inv(self.get_S_ii())
 
-    def get_P_ii(self) -> np.ndarray:
+    def get_P_ii(self, k0) -> np.ndarray:
         """Return P matrix calculated from internal network links"""
+        self.update_links(k0)
+
         # Get internal P
         internal_P = np.zeros(
             (self.internal_vector_length, self.internal_vector_length),
@@ -581,8 +792,9 @@ class Network:
             internal_P[col, row] = phase_factor
         return internal_P
 
-    def get_P_ii_inv(self) -> np.ndarray:
+    def get_P_ii_inv(self, k0) -> np.ndarray:
         """Return P matrix calculated from internal network links"""
+        self.update_links(k0)
 
         # Get internal P
         internal_P = np.zeros(
@@ -606,8 +818,9 @@ class Network:
             internal_P[col, row] = 1 / phase_factor
         return internal_P
 
-    def get_P_ei(self) -> np.ndarray:
+    def get_P_ei(self, k0) -> np.ndarray:
         """Get the matrix that deals with propagation in external links"""
+        self.update_links(k0)
 
         external_P = np.zeros(
             (self.external_vector_length, self.internal_vector_length),
@@ -624,8 +837,9 @@ class Network:
             external_P[row, col] = phase_factor
         return external_P
 
-    def get_P_ei_inv(self) -> np.ndarray:
+    def get_P_ei_inv(self, k0) -> np.ndarray:
         """Get the matrix that deals with propagation in external links"""
+        self.update_links(k0)
 
         external_P = np.zeros(
             (self.external_vector_length, self.internal_vector_length),
@@ -642,8 +856,8 @@ class Network:
             external_P[row, col] = 1 / phase_factor
         return external_P
 
-    def get_P_ie(self) -> np.ndarray:
-        return self.get_P_ei().T
+    def get_P_ie(self, k0) -> np.ndarray:
+        return self.get_P_ei(k0).T
 
     def get_SP(self, k0: float | complex) -> np.ndarray:
         """Get the prodct S_ii P_ii"""
@@ -664,10 +878,8 @@ class Network:
 
     def get_inv_factor_det(self, k0: float | complex) -> complex:
         """Calculate det(I - S_ii P_ii)"""
-        self.update_links(k0)
-
         S_ii = self.get_S_ii()
-        P_ii = self.get_P_ii()
+        P_ii = self.get_P_ii(k0)
         inv_factor = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
         return np.linalg.det(inv_factor)
 
@@ -676,7 +888,7 @@ class Network:
         Q = -i * S^-1 * dS/dk0"""
 
         S_ee_inv = self.get_S_ee_inv(k0)
-        dS_ee_dk0 = self.get_dS_ee_dk0()
+        dS_ee_dk0 = self.get_dS_ee_dk0(k0)
 
         ws = -1j * S_ee_inv @ dS_ee_dk0
         return ws
@@ -692,19 +904,34 @@ class Network:
 
         S_ee_inv = self.get_S_ee_inv(k0)
         dS_ee_dt = self.get_dS_ee_dt(
-            perturbed_node_index, perturbed_angle_index
+            perturbed_node_index, perturbed_angle_index, k0
         )
 
         ws = -1j * S_ee_inv @ dS_ee_dt
+        return ws
+
+    def get_wigner_smith_r(
+        self,
+        k0: float | complex,
+        perturbed_node_index: int,
+    ) -> np.ndarray:
+        """Calculate analytically the Wigner-Smith operator
+        Q = -i * S^-1 * dS/dr"""
+
+        S_ee_inv = self.get_S_ee_inv(k0)
+        dS_ee_dr = self.get_dS_ee_dr(k0, perturbed_node_index)
+
+        ws = -1j * S_ee_inv @ dS_ee_dr
         return ws
 
     # -------------------------------------------------------------------------
     # Volume integral methods
     # -------------------------------------------------------------------------
 
-    def get_U_0(self, n, k0) -> np.ndarray:
+    def get_U_0(self, k0) -> np.ndarray:
         """Calculate the U_0 matrix (see theory notes)"""
-
+        n = self.n(k0)
+        self.update_links(k0)
         network_matrix = self.get_network_matrix(k0)
 
         # Get the scattered fields for each incident field
@@ -768,13 +995,13 @@ class Network:
                     partial_sum += (
                         O_mp
                         * np.conj(O_mq)
-                        * (1.0 + 0.0j - np.exp(-2 * n * np.imag(k0) * length))
+                        * (1.0 - np.exp(-2 * n * np.imag(k0) * length))
                     )
 
                     partial_sum += (
                         I_mp
                         * np.conj(I_mq)
-                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0 + 0.0j)
+                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0)
                     )
 
                 # Next loop over external links
@@ -818,9 +1045,9 @@ class Network:
 
         return U_0
 
-    def get_U_1(self, n, k0) -> np.ndarray:
+    def get_U_1(self, k0) -> np.ndarray:
         """Calculate the U_1 matrix (see theory notes)"""
-
+        n = self.n(k0)
         network_matrix = self.get_network_matrix(k0)
 
         # Get the scattered fields for each incident field
@@ -884,10 +1111,10 @@ class Network:
                     partial_sum += (
                         O_mp
                         * np.conj(O_mq)
-                        * (np.exp(-2 * n * np.real(k0) * length))
+                        * (np.exp(-2 * n * np.imag(k0) * length))
                         + I_mp
                         * np.conj(I_mq)
-                        * (np.exp(2 * n * np.real(k0) * length))
+                        * (np.exp(2 * n * np.imag(k0) * length))
                     ) * length
 
                 # Next loop over external links
@@ -918,19 +1145,19 @@ class Network:
                     partial_sum += (
                         I_mp
                         * np.conj(I_mq)
-                        * (np.exp(-2 * n * np.real(k0) * length))
+                        * (np.exp(-2 * n * np.imag(k0) * length))
                         + O_mp
                         * np.conj(O_mq)
-                        * (np.exp(2 * n * np.real(k0) * length))
+                        * (np.exp(2 * n * np.imag(k0) * length))
                     ) * length
 
                 U_1[q, p] = partial_sum
 
         return U_1
 
-    def get_U_2(self, n, k0) -> np.ndarray:
+    def get_U_2(self, k0) -> np.ndarray:
         """Calculate the U_2 matrix (see theory notes)"""
-
+        n = self.n(k0)
         network_matrix = self.get_network_matrix(k0)
 
         # Get the scattered fields for each incident field
@@ -994,13 +1221,13 @@ class Network:
                     partial_sum += (
                         O_mp
                         * np.conj(I_mq)
-                        * (np.exp(2 * n * np.real(k0) * length) - 1.0)
+                        * (np.exp(2j * n * np.real(k0) * length) - 1.0)
                     )
 
                     partial_sum += (
                         I_mp
                         * np.conj(O_mq)
-                        * (1.0 - np.exp(-2 * n * np.real(k0) * length))
+                        * (1.0 - np.exp(-2j * n * np.real(k0) * length))
                     )
 
                 # Next loop over external links
@@ -1031,55 +1258,218 @@ class Network:
                     partial_sum += (
                         I_mp
                         * np.conj(O_mq)
-                        * (np.exp(2 * n * np.real(k0) * length) - 1.0)
+                        * (np.exp(2j * n * np.real(k0) * length) - 1.0)
                     )
 
                     partial_sum += (
                         O_mp
                         * np.conj(I_mq)
-                        * (1.0 - np.exp(-2 * n * np.real(k0) * length))
+                        * (1.0 - np.exp(-2j * n * np.real(k0) * length))
                     )
 
                 U_2[q, p] = partial_sum
 
         return U_2
 
+    def get_U_3(self, k0: float | complex, dk: float = 1e-5) -> np.ndarray:
+        """Calculate the U_3 matrix associated with the wavenumber
+        (see theory notes)"""
+        # Perturbation parameters
+        k1 = k0 + dk
+        n0 = self.n(k0)
+
+        # Get network matrices
+        unperturbed_network_matrix = self.get_network_matrix(k0)
+        perturbed_network_matrix = self.get_network_matrix(k1)
+
+        # Get the scattered fields for each incident field
+        unperturbed_outgoing_vectors = []
+        perturbed_outgoing_vectors = []
+
+        num_externals = self.num_external_nodes
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            incident_vector = np.zeros(
+                (len(unperturbed_network_matrix)), dtype=np.complex128
+            )
+            incident_vector[num_externals : 2 * num_externals] = incident_field
+
+            unperturbed_outgoing_vector = (
+                unperturbed_network_matrix @ incident_vector
+            )
+            unperturbed_outgoing_vectors.append(unperturbed_outgoing_vector)
+            perturbed_outgoing_vector = (
+                perturbed_network_matrix @ incident_vector
+            )
+            perturbed_outgoing_vectors.append(perturbed_outgoing_vector)
+
+        U_3 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+        internal_vector_length = int(
+            (len(perturbed_network_matrix) - 2 * num_externals) / 2
+        )
+        internal_scattering_map = self.internal_scattering_map
+        external_scattering_map = self.external_scattering_map
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+
+                # First loop over internal links
+                partial_sum = 0.0 + 0.0j
+                for link in self.internal_links:
+                    length = link.length
+
+                    # Get the field distribution associated with q illumination
+                    q_vector_unperturbed = unperturbed_outgoing_vectors[q]
+                    q_vector_perturbed = perturbed_outgoing_vectors[q]
+                    q_o_unperturbed = q_vector_unperturbed[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    q_i_unperturbed = q_vector_unperturbed[
+                        2 * num_externals + internal_vector_length :
+                    ]
+                    q_o_perturbed = q_vector_perturbed[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    q_i_perturbed = q_vector_perturbed[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector_unperturbed = unperturbed_outgoing_vectors[p]
+                    p_vector_perturbed = perturbed_outgoing_vectors[p]
+                    p_o_unperturbed = p_vector_unperturbed[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    p_i_unperturbed = p_vector_unperturbed[
+                        2 * num_externals + internal_vector_length :
+                    ]
+                    p_o_perturbed = p_vector_perturbed[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    p_i_perturbed = p_vector_perturbed[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+                    key = f"{node_one_index},{node_two_index}"
+                    index = internal_scattering_map[key]
+
+                    # Work out derivatives numerically
+                    I_mp_before = p_i_unperturbed[index]
+                    I_mq_before = q_i_unperturbed[index]
+                    O_mp_before = p_o_unperturbed[index]
+                    O_mq_before = q_o_unperturbed[index]
+
+                    I_mp_after = p_i_perturbed[index]
+                    I_mq_after = q_i_perturbed[index]
+                    O_mp_after = p_o_perturbed[index]
+                    O_mq_after = q_o_perturbed[index]
+
+                    diff_I_mp = I_mp_after - I_mp_before
+                    diff_I_mq = I_mq_after - I_mq_before
+                    diff_O_mp = O_mp_after - O_mp_before
+                    diff_O_mq = O_mq_after - O_mq_before
+
+                    d_I_mp = diff_I_mp / dk
+                    d_I_mq = diff_I_mq / dk
+                    d_O_mp = diff_O_mp / dk
+                    d_O_mq = diff_O_mq / dk
+
+                    partial_sum += d_O_mp * np.conj(O_mq_before) * (
+                        1.0 - np.exp(-2 * n0 * np.imag(k0) * length)
+                    ) + d_I_mp * np.conj(I_mq_before) * (
+                        np.exp(2 * n0 * np.imag(k0) * length) - 1.0
+                    )
+
+                # Next loop over external links
+                for link in self.external_links:
+                    length = link.length
+
+                    # Get the field distribution associated with q illumination
+                    q_vector_unperturbed = unperturbed_outgoing_vectors[q]
+                    q_vector_perturbed = perturbed_outgoing_vectors[q]
+                    q_o_unperturbed = q_vector_unperturbed[0:num_externals]
+                    q_o_perturbed = q_vector_perturbed[0:num_externals]
+                    q_i_unperturbed = q_vector_unperturbed[
+                        num_externals : 2 * num_externals
+                    ]
+                    q_i_perturbed = q_vector_perturbed[
+                        num_externals : 2 * num_externals
+                    ]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector_unperturbed = unperturbed_outgoing_vectors[p]
+                    p_vector_perturbed = perturbed_outgoing_vectors[p]
+                    p_o_unperturbed = p_vector_unperturbed[0:num_externals]
+                    p_o_perturbed = p_vector_perturbed[0:num_externals]
+                    p_i_unperturbed = p_vector_unperturbed[
+                        num_externals : 2 * num_externals
+                    ]
+                    p_i_perturbed = p_vector_perturbed[
+                        num_externals : 2 * num_externals
+                    ]
+
+                    # Find the fields in the link
+                    # Note: node_two is always the external node
+                    external_node_index = link.sorted_connected_nodes[1]
+                    key = f"{external_node_index}"
+                    index = external_scattering_map[key]
+
+                    # Work out derivatives numerically
+                    I_mp_before = p_i_unperturbed[index]
+                    I_mq_before = q_i_unperturbed[index]
+                    O_mp_before = p_o_unperturbed[index]
+                    O_mq_before = q_o_unperturbed[index]
+
+                    I_mp_after = p_i_perturbed[index]
+                    I_mq_after = q_i_perturbed[index]
+                    O_mp_after = p_o_perturbed[index]
+                    O_mq_after = q_o_perturbed[index]
+
+                    diff_I_mp = I_mp_after - I_mp_before
+                    diff_I_mq = I_mq_after - I_mq_before
+                    diff_O_mp = O_mp_after - O_mp_before
+                    diff_O_mq = O_mq_after - O_mq_before
+
+                    d_I_mp = diff_I_mp / dk
+                    d_I_mq = diff_I_mq / dk
+                    d_O_mp = diff_O_mp / dk
+                    d_O_mq = diff_O_mq / dk
+
+                    partial_sum += d_I_mp * np.conj(I_mq_before) * (
+                        1.0 - np.exp(-2 * n0 * np.imag(k0) * length)
+                    ) + d_O_mp * np.conj(O_mq_before) * (
+                        np.exp(2 * n0 * np.imag(k0) * length) - 1.0
+                    )
+
+                U_3[q, p] = partial_sum
+
+        return U_3
+
     # -------------------------------------------------------------------------
     #  Methods for altering/perturbing the network
     # -------------------------------------------------------------------------
 
-    def perturb_node_eigenvalue(
-        self, node_index: int, eigenvalue_index: int, factor: complex
-    ) -> None:
-        """Multiply the specified eigenvalue by the factor variable"""
-        node = self.get_node(node_index)
-        S_mat = node.S_mat
-
-        # Multiply the appropriate eigenvalue by the given factor
-        lam, w = np.linalg.eig(S_mat)
-        lam[eigenvalue_index] = lam[eigenvalue_index] * factor
-        new_S = w @ np.diag(lam) @ np.linalg.inv(w)
-        node.S_mat = new_S
-        node.iS_mat = np.linalg.inv(new_S)
-
-        # Leave perturbation info here too
-        node.is_perturbed = True
-        node.perturbation_params = {
-            "eigenvalue_index": eigenvalue_index,
-            "factor": factor,
-        }
-
-    def get_dS_ee_dk0(self) -> np.ndarray:
+    def get_dS_ee_dk0(self, k0) -> np.ndarray:
         """Get the derivative of S_ee with respect to k0"""
 
-        P_ei = self.get_P_ei()
-        P_ie = self.get_P_ie()
-        P_ii = self.get_P_ii()
+        P_ei = self.get_P_ei(k0)
+        P_ie = self.get_P_ie(k0)
+        P_ii = self.get_P_ii(k0)
         S_ii = self.get_S_ii()
 
-        dP_ei_dk0 = self.get_dP_ei_dk0()
-        dP_ie_dk0 = self.get_dP_ie_dk0()
-        dP_ii_dk0 = self.get_dP_ii_dk0()
+        dP_ei_dk0 = self.get_dP_ei_dk0(k0)
+        dP_ie_dk0 = self.get_dP_ie_dk0(k0)
+        dP_ii_dk0 = self.get_dP_ii_dk0(k0)
         dS_ii_dk0 = np.zeros(S_ii.shape, dtype=np.complex128)
 
         SP = S_ii @ P_ii
@@ -1095,16 +1485,14 @@ class Network:
         return dS_ee_dk0
 
     def get_dS_ee_dt(
-        self,
-        perturbed_node_index: int,
-        perturbed_angle_index: int,
+        self, perturbed_node_index: int, perturbed_angle_index: int, k0
     ) -> np.ndarray:
         """Get the derivative of S_ee with respect to eigenphase t
         (eigenvalue is e^it)"""
 
-        P_ei = self.get_P_ei()
-        P_ie = self.get_P_ie()
-        P_ii = self.get_P_ii()
+        P_ei = self.get_P_ei(k0)
+        P_ie = self.get_P_ie(k0)
+        P_ii = self.get_P_ii(k0)
         S_ii = self.get_S_ii()
 
         dP_ei_dt = np.zeros(P_ei.shape, dtype=np.complex128)
@@ -1125,6 +1513,34 @@ class Network:
 
         dS_ee_dt = term_one + term_two + term_three + term_four
         return dS_ee_dt
+
+    def get_dS_ee_dr(
+        self, k0: float | complex, perturbed_node_index: int
+    ) -> np.ndarray:
+        """Get the derivative of S_ee with respect to the reflection
+        coefficient r"""
+
+        P_ei = self.get_P_ei(k0)
+        P_ie = self.get_P_ie(k0)
+        P_ii = self.get_P_ii(k0)
+        S_ii = self.get_S_ii()
+
+        dP_ei_dr = np.zeros(P_ei.shape, dtype=np.complex128)
+        dP_ie_dr = np.zeros(P_ie.shape, dtype=np.complex128)
+        dP_ii_dr = np.zeros(P_ii.shape, dtype=np.complex128)
+        dS_ii_dr = self.get_dS_ii_dr(perturbed_node_index)
+
+        SP = S_ii @ P_ii
+        inv = np.linalg.inv(np.identity(len(SP)) - SP)
+        dinv_dr = inv @ (S_ii @ dP_ii_dr + dS_ii_dr @ P_ii) @ inv
+
+        term_one = dP_ei_dr @ inv @ S_ii @ P_ie
+        term_two = P_ei @ dinv_dr @ S_ii @ P_ie
+        term_three = P_ei @ inv @ dS_ii_dr @ P_ie
+        term_four = P_ei @ inv @ S_ii @ dP_ie_dr
+
+        dS_ee_dr = term_one + term_two + term_three + term_four
+        return dS_ee_dr
 
     def get_S_ii_dS_ii(self) -> tuple[np.ndarray, np.ndarray]:
         """Return the S_ii matrix and its derivative"""
@@ -1150,9 +1566,7 @@ class Network:
 
         return internal_S, internal_dS
 
-    def get_P_ii_dP_ii(
-        self, n: complex, k0: complex
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def get_P_ii_dP_ii(self, k0: complex) -> tuple[np.ndarray, np.ndarray]:
         self.update_links(k0)
 
         internal_P = np.zeros(
@@ -1178,10 +1592,14 @@ class Network:
                 f"{str(node_two_index)},{str(node_one_index)}"
             ]
             internal_P[row, col] = phase_factor
-            internal_dP[row, col] = phase_factor * 1j * n * link.length
+            internal_dP[row, col] = (
+                phase_factor * 1j * self.n(k0) * link.length
+            )
             # Wave propagating the other way
             internal_P[col, row] = phase_factor
-            internal_dP[col, row] = phase_factor * 1j * n * link.length
+            internal_dP[col, row] = (
+                phase_factor * 1j * self.n(k0) * link.length
+            )
 
         return internal_P, internal_dP
 
@@ -1248,12 +1666,57 @@ class Network:
             internal_S[new_slice, new_slice] = node_S_mat
         return internal_S
 
+    def get_dS_ii_dr(
+        self,
+        perturbed_node_index: int,
+        internal_vector_length: int | None = None,
+        internal_scattering_slices: slice | None = None,
+    ) -> np.ndarray:
+        """Return the derivative of S_ii with respect to the perturbed node's
+        reflection coefficeint"""
+
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_slices is None:
+            _, internal_scattering_slices, _ = self._get_network_matrix_maps()
+
+        internal_S = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+        for node in self.internal_nodes:
+            node_index = node.index
+
+            # Only perturbed node has non-zero entry in dS
+            if node_index != perturbed_node_index:
+                continue
+
+            # We are now at the perturbed node
+            node_S_mat = node.S_mat
+            r = -node_S_mat[0, 0]
+            fac = -r / np.sqrt(1 - r**2)
+            derivative = np.array([[-1.0, fac], [fac, 1.0]])
+
+            new_slice = internal_scattering_slices[str(node_index)]
+            internal_S[new_slice, new_slice] = derivative
+        return internal_S
+
     def get_dP_ii_dk0(
         self,
+        k0: float | complex,
         internal_vector_length: int | None = None,
         internal_scattering_map: dict[str, int] | None = None,
     ) -> np.ndarray:
         """Return derivative of P_ii with respect to k0"""
+        self.update_links(k0)
+        dn = self.dn(k0)
+        n = self.n(k0)
+
         # Calculate the size of the matrix if it isn't given
         if internal_vector_length is None:
             internal_vector_length = 0
@@ -1281,9 +1744,13 @@ class Network:
             col = internal_scattering_map[
                 f"{str(node_two_index)},{str(node_one_index)}"
             ]
-            internal_P[row, col] = phase_factor * 1j * link.n * link.length
+            internal_P[row, col] = (
+                phase_factor * 1j * link.length * (dn * k0 + n)
+            )
             # Wave propagating the other way
-            internal_P[col, row] = phase_factor * 1j * link.n * link.length
+            internal_P[col, row] = (
+                phase_factor * 1j * link.length * (dn * k0 + n)
+            )
         return internal_P
 
     def get_dP_ii_drek0(
@@ -1364,10 +1831,14 @@ class Network:
 
     def get_dP_ei_dk0(
         self,
+        k0: float | complex,
         internal_vector_length: int | None = None,
         internal_scattering_map: dict[str, int] | None = None,
     ) -> np.ndarray:
         """Return derivative of P_ei with respect to k0"""
+        self.update_links(k0)
+        dn = self.dn(k0)
+        n = self.n(k0)
 
         external_P = np.zeros(
             (self.external_vector_length, self.internal_vector_length),
@@ -1381,17 +1852,19 @@ class Network:
             col = self.internal_scattering_map[
                 f"{str(node_one_index)},{str(node_two_index)}"
             ]
-            external_P[row, col] = phase_factor * 1j * link.n * link.length
+            external_P[row, col] = (
+                phase_factor * 1j * link.length * (dn * k0 + n)
+            )
         return external_P
 
     def get_dP_ie_dk0(
         self,
+        k0: float | complex,
         internal_vector_length: int | None = None,
         internal_scattering_map: dict[str, int] | None = None,
     ) -> np.ndarray:
         """Return derivative of P_ie with respect to k0"""
-
-        return self.get_dP_ei_dk0().T
+        return self.get_dP_ei_dk0(k0).T
 
     # -------------------------------------------------------------------------
     # Iterative scattering methods
@@ -1648,6 +2121,8 @@ class Network:
         show_indices: bool = False,
         show_external_indices: bool = False,
         equal_aspect: bool = False,
+        highlight_nodes: list[int] | None = None,
+        highlight_perturbed: bool = True,
     ) -> None:
         """Draw network"""
         fig, ax = plt.subplots()
@@ -1663,7 +2138,34 @@ class Network:
 
         # Plot nodes
         for node in self.nodes:
+            if node.is_perturbed:
+                continue
             node.draw(ax, show_indices, show_external_indices)
+
+        # Highlight nodes
+        if highlight_nodes is not None:
+            for node_index in highlight_nodes:
+                node = self.get_node(node_index)
+                node.draw(ax, color="red")
+
+        # Custom highlighting for perturbations
+        if highlight_perturbed:
+            for node in self.nodes:
+                if not node.is_perturbed:
+                    continue
+
+                match node.perturbation_data.get("perturbation_type"):
+                    case "pseudo_node":
+                        r = node.perturbation_data.get("r")
+                        node.draw(
+                            ax,
+                            show_indices,
+                            show_external_indices,
+                            color="red",
+                            markersize=3 + 9 * r,
+                        )
+                    case _:
+                        pass
 
     def plot_fields(
         self,

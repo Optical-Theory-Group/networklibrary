@@ -25,7 +25,7 @@ from matplotlib.animation import FFMpegFileWriter
 from matplotlib.collections import LineCollection
 
 from complex_network.networks.network import Network
-from complex_network.util import update_progress
+from complex_network.utils import update_progress
 
 # #################################################
 # %% define simulation parameters

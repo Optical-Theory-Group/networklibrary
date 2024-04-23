@@ -10,6 +10,21 @@ from scipy.ndimage.morphology import binary_erosion, generate_binary_structure
 from skimage import measure
 
 
+def get_adjugate(M: np.ndarray) -> np.ndarray:
+    """Find the adjugate of a matrix"""
+    n_row, n_col = np.shape(M)
+    adjugate = np.zeros((n_row, n_col), dtype=np.complex128)
+
+    for i in range(n_row):
+        for j in range(n_col):
+            modified = np.copy(M)
+            modified[i, :] = np.zeros(n_col)
+            modified[:, j] = np.zeros(n_row)
+            modified[i, j] = 1.0
+            adjugate[i, j] = np.linalg.det(modified)
+    return adjugate.T
+
+
 def plot_colourline(x, y, c, minc=None, maxc=None):
     plt.figure(1)
     if maxc is None:
@@ -166,4 +181,3 @@ def detect_peaks(image):
     ]
 
     return peak_inds
-

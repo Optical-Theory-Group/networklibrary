@@ -9,7 +9,7 @@ def n_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
 
     The input is assumed to be given as a wavenumber in units 1/m.
     """
-
+    k0 = np.real(k0)
     wavelength = 2.0 * np.pi / k0
     wavelength *= 1e6
 
@@ -28,7 +28,7 @@ def dn_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
 
     The input is assumed to be given as a wavenumber in units 1/m.
     """
-
+    k0 = np.real(k0)
     # Denominator is just n_glass, multiplied by 2 because we differentiate
     # a square root
     denominator = 2 * n_sellmeier_k0(k0, B, C)
@@ -42,4 +42,6 @@ def dn_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
             b * c / (wavelength / 1e6) / (np.pi * (1 - c / wavelength**2) ** 2)
         )
     dn = partial / denominator
+    dn /= 1e12
     return dn
+
