@@ -2155,7 +2155,7 @@ class Network:
                     continue
 
                 match node.perturbation_data.get("perturbation_type"):
-                    case "pseudo_node":
+                    case "pseudonode_r":
                         r = node.perturbation_data.get("r")
                         node.draw(
                             ax,

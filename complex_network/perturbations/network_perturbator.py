@@ -150,7 +150,9 @@ class NetworkPerturbator:
 
             # Work out pole shift from Wigner-Smith operators
             ws_k0 = self.unperturbed_network.get_wigner_smith_k0(old_pole)
-            ws_r = self.unperturbed_network.get_wigner_smith_r(old_pole, node_index)
+            ws_r = self.unperturbed_network.get_wigner_smith_r(
+                old_pole, node_index
+            )
             pole_shift = -np.trace(ws_r) / np.trace(ws_k0) * dr
             poles["wigner"].append(poles["wigner"][-1] + pole_shift)
             pole_shifts["wigner"].append(pole_shift)
@@ -160,6 +162,39 @@ class NetworkPerturbator:
             self.update()
 
         return poles, pole_shifts
+
+    def perturb_pseudonode_r_sweep(
+        self,
+        node_index: int,
+        num_points: int,
+        k0_min: complex,
+        k0_max: complex,
+        r_values: np.ndarray,
+    ):
+
+        # Set up list for storing poles
+        data_array = np.zeros((len(r_values), num_points, num_points))
+
+        for i, value in enumerate(tqdm(r_values)):
+            # If we are at the first angle, dt is just that. Otherwise
+            # it's the difference between the current angle and the previous
+            # one
+            if i == 0:
+                dr = value
+            else:
+                dr = value - r_values[i - 1]
+
+            # Do the perturbation
+            self.perturb_pseudonode_r(node_index, dr)
+
+            # Do the complex plane sweep
+            k0_r, k0_i, data = pole_finder.sweep(
+                k0_min, k0_max, num_points, self.perturbed_network
+            )
+            data_array[i] = data
+            self.update()
+
+        return k0_r, k0_i, data
 
     def perturb_node_eigenvalue_iterative(
         self,

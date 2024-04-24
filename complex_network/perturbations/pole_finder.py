@@ -241,7 +241,18 @@ def determinant(k0: np.ndarray, network: Network) -> float:
 
 def sweep(
     k0_min: complex, k0_max: complex, num_points: int, network: Network
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Look for poles in a rectangular region with diagonal ranging from
+    k0_min to k0_max
+
+                    k0_max
+          ----------
+          |        |
+          |        |
+          ----------
+    k0_min
+    """
+
     k0_reals = np.linspace(k0_min.real, k0_max.real, num_points)
     k0_imags = np.linspace(k0_min.imag, k0_max.imag, num_points)
     k0_r, k0_i = np.meshgrid(k0_reals, k0_imags)
