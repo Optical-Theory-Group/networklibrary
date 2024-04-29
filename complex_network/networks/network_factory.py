@@ -54,7 +54,7 @@ def generate_network(spec: NetworkSpec) -> Network:
 
     _initialise_links(nodes, links, spec)
     _initialise_nodes(nodes, links, spec)
-    return Network(nodes, links, spec.material)
+    return Network(nodes, links)
 
 
 def _initialise_nodes(
@@ -140,7 +140,11 @@ def _initialise_links(
             str(node_index_one): 0 + 0j,
             str(node_index_two): 0 + 0j,
         }
-        link.update_S_matrices()
+
+        # Set link material properties
+        link.material = spec.material
+        link.n = spec.material.n
+        link.dn = spec.material.dn
 
 
 def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:

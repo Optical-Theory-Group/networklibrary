@@ -37,8 +37,6 @@ class Link(Component):
         length of link
     n:
         effective refractive index of link
-    k0:
-        vacuum wavenumber of wave propagating in link
     inwave:
         dictionary of inwave amplitudes
         {node id: amplitude, ... }
@@ -95,8 +93,11 @@ class Link(Component):
             "node_indices": None,
             "link_type": "internal",
             "length": 0.0,
-            "n": 1.0,
-            "k0": 1.0,
+            "n": lambda k0: 1.0,
+            "dn": lambda k0: 0.0,
+            "Dn": lambda k0: 0.0,
+            "dDn": lambda k0: 0.0,
+            "material": None,
             "sorted_connected_nodes": [],
             "inwave": {},
             "outwave": {},
@@ -107,25 +108,29 @@ class Link(Component):
         }
         return default_values
 
-    def update_wave_parameters(
-        self, n: float | complex, k0: float | complex
-    ) -> None:
-        self.n = n
-        self.k0 = k0
+    # def update_wave_parameters(
+    #     self, n: float | complex, k0: float | complex
+    # ) -> None:
+    #     self.k0 = k0
+    #     self.n = n
 
-    def update_S_matrices(self) -> None:
+    def update_S_matrices(self, k0: float | complex) -> None:
         """Function to set the scattering matrix of the link"""
+
+        length = self.length
+        n = self.n(k0)
+        Dn = self.Dn(k0)
 
         self.S_mat = np.array(
             [
-                [0, np.exp(1j * self.n * self.k0 * self.length)],
-                [np.exp(1j * self.n * self.k0 * self.length), 0],
+                [0, np.exp(1j * (n + Dn) * k0 * length)],
+                [np.exp(1j * (n + Dn) * k0 * length), 0],
             ]
         )
         self.iS_mat = np.array(
             [
-                [0, np.exp(-1j * self.n * self.k0 * self.length)],
-                [np.exp(-1j * self.n * self.k0 * self.length), 0],
+                [0, np.exp(-1j * (n + Dn) * k0 * length)],
+                [np.exp(-1j * (n + Dn) * k0 * length), 0],
             ]
         )
 

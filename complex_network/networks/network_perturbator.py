@@ -15,7 +15,7 @@ from tqdm import tqdm
 from typing import Any
 from complex_network.networks.network import Network
 from dataclasses import dataclass
-from complex_network.perturbations import pole_finder
+from complex_network.networks import pole_finder
 from complex_network import utils
 
 
@@ -53,6 +53,7 @@ class NetworkPerturbator:
         self.network = network
         self.unperturbed_network = copy.deepcopy(network)
         self.perturbed_network = copy.deepcopy(network)
+        self.temporary_network = copy.deepcopy(network)
         self.status = PerturbationStatus()
 
     def reset(self) -> None:
@@ -114,16 +115,151 @@ class NetworkPerturbator:
         self.status.perturbation_value = dr
         self.status.node_id = node.index
 
+    def perturb_pseudonode_s(self, node_index: int, ds: float) -> None:
+        """Change the position of the pseudonode along the parent link by the
+        amount ds"""
+        node = self.perturbed_network.get_node(node_index)
+        link_one_index, link_two_index = node.sorted_connected_links
+        node_one_index, node_two_index = node.sorted_connected_nodes
+        node_one = self.perturbed_network.get_node(node_one_index)
+        node_two = self.perturbed_network.get_node(node_two_index)
+        link_one = self.perturbed_network.get_link(link_one_index)
+        link_two = self.perturbed_network.get_link(link_two_index)
+
+        # Work out the current fractional position of the pseudonode
+        # and get the new position
+        p = node.position
+        p1 = node_one.position
+        p2 = node_two.position
+        previous_s = (p - p1) / (p2 - p1)
+        previous_s = previous_s[0]
+        new_s = previous_s + ds
+        new_position = p1 + new_s * (p2 - p1)
+        node.position = new_position
+        node.perturbation_data["s"] = new_s
+
+        # Get new lengths
+        total_length = link_one.length + link_two.length
+        link_one.length = total_length * new_s
+        link_two.length = total_length * (1 - new_s)
+        link_one.update_S_matrices()
+        link_two.update_S_matrices()
+
+        self.status.perturbation_type = "pseudonode_s"
+        self.status.perturbation_value = ds
+        self.status.node_id = node.index
+
+    def perturb_link_n(self, link_index: int, d_alpha: complex) -> None:
+        """Change the refractive index of a link so that it becomes
+        base_n + alpha"""
+        link = self.perturbed_network.get_link(link_index)
+
+        # Need to copy this to avoid a recursion error
+        copied_function = copy.deepcopy(link.Dn)
+
+        def new_Dn(k0: complex) -> complex:
+            return copied_function(k0) + d_alpha
+
+        link.Dn = new_Dn
+
+        self.status.perturbation_type = "link_n"
+        self.status.perturbation_value = d_alpha
+        self.status.link_id = link_index
+
     # -------------------------------------------------------------------------
     # Methods associated with iterative perturbations
     # -------------------------------------------------------------------------
+
+    def perturb_link_n_iterative(
+        self,
+        pole: complex,
+        link_index: int,
+        alpha_values: np.ndarray,
+    ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
+        """Change the refractive index of a link so that it becomes
+        base_n + alpha"""
+
+        # Set up list for storing poles
+        poles = {"direct": [pole], "wigner": [pole], "volume": [pole]}
+        pole_shifts = {"direct": [], "wigner": [], "volume": []}
+
+        old_pole = pole
+        for i, value in enumerate(tqdm(alpha_values)):
+            # If we are at the first angle, dt is just that. Otherwise
+            # it's the difference between the current angle and the previous
+            # one
+            if i == 0:
+                continue
+            else:
+                d_alpha = value - alpha_values[i - 1]
+
+            # Do the perturbation
+            self.perturb_link_n(link_index, d_alpha)
+
+            # Find the new pole
+            new_pole = pole_finder.find_pole(self.perturbed_network, old_pole)
+            poles["direct"].append(new_pole)
+            pole_shift = new_pole - old_pole
+            pole_shifts["direct"].append(pole_shift)
+
+            # Work out pole shift from Wigner-Smith operators
+            ws_k0 = self.unperturbed_network.get_wigner_smith_k0(old_pole)
+            ws_n = self.unperturbed_network.get_wigner_smith_n(
+                old_pole, link_index
+            )
+            pole_shift = -np.trace(ws_n) / np.trace(ws_k0) * d_alpha
+            poles["wigner"].append(poles["wigner"][-1] + pole_shift)
+            pole_shifts["wigner"].append(pole_shift)
+
+            # Work out pole shift from the volume integrals
+            ws_k0_vol = self.get_wigner_smith_k0_volume(old_pole)
+            ws_n_vol = self.get_wigner_smith_n_volume(old_pole, link_index)
+            pole_shift = -np.trace(ws_n_vol) / np.trace(ws_k0_vol) * d_alpha
+            poles["volume"].append(poles["volume"][-1] + pole_shift)
+            pole_shifts["volume"].append(pole_shift)
+
+            # Test
+
+            # Update the networks
+            old_pole = new_pole
+            self.update()
+
+        return poles, pole_shifts
+
+    def get_wigner_smith_k0_volume(self, k0):
+        U_0 = self.unperturbed_network.get_U_0(k0)
+        U_1 = self.unperturbed_network.get_U_1(k0)
+        U_2 = self.unperturbed_network.get_U_2(k0)
+        U_3 = self.unperturbed_network.get_U_3(k0, dk=1e-4)
+
+        pre_factor = np.linalg.inv(
+            np.identity(len(U_0), dtype=np.complex128) - U_0
+        )
+
+        post_factor = U_1 + U_2 + U_3
+        ws_volume = pre_factor @ post_factor
+        return ws_volume
+
+    def get_wigner_smith_n_volume(self, k0, link_index):
+        U_0 = self.unperturbed_network.get_U_0(k0)
+        U_1 = self.unperturbed_network.get_U_1_n(k0, link_index)
+        U_2 = self.unperturbed_network.get_U_2_n(k0, link_index)
+        U_3 = self.get_U_3_alpha(k0)
+
+        pre_factor = np.linalg.inv(
+            np.identity(len(U_0), dtype=np.complex128) - U_0
+        )
+
+        post_factor = U_1 + U_2 + U_3
+        ws_volume = pre_factor @ post_factor
+        return ws_volume
 
     def perturb_pseudonode_r_iterative(
         self,
         pole: complex,
         node_index: int,
         r_values: np.ndarray,
-    ):
+    ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
 
         # Set up list for storing poles
         poles = {"direct": [pole], "wigner": [pole]}
@@ -154,6 +290,51 @@ class NetworkPerturbator:
                 old_pole, node_index
             )
             pole_shift = -np.trace(ws_r) / np.trace(ws_k0) * dr
+            poles["wigner"].append(poles["wigner"][-1] + pole_shift)
+            pole_shifts["wigner"].append(pole_shift)
+
+            # Update the networks
+            old_pole = new_pole
+            self.update()
+
+        return poles, pole_shifts
+
+    def perturb_pseudonode_s_iterative(
+        self,
+        pole: complex,
+        node_index: int,
+        s_values: np.ndarray,
+    ):
+
+        # Set up list for storing poles
+        poles = {"direct": [pole], "wigner": [pole]}
+        pole_shifts = {"direct": [], "wigner": []}
+
+        old_pole = pole
+        for i, value in enumerate(tqdm(s_values)):
+            # If we are at the first angle, dt is just that. Otherwise
+            # it's the difference between the current angle and the previous
+            # one
+            if i == 0:
+                ds = value
+            else:
+                ds = value - s_values[i - 1]
+
+            # Do the perturbation
+            self.perturb_pseudonode_s(node_index, ds)
+
+            # Find the new pole
+            new_pole = pole_finder.find_pole(self.perturbed_network, old_pole)
+            poles["direct"].append(new_pole)
+            pole_shift = new_pole - old_pole
+            pole_shifts["direct"].append(pole_shift)
+
+            # Work out pole shift from Wigner-Smith operators
+            ws_k0 = self.unperturbed_network.get_wigner_smith_k0(old_pole)
+            ws_s = self.unperturbed_network.get_wigner_smith_s(
+                old_pole, node_index
+            )
+            pole_shift = -np.trace(ws_s) / np.trace(ws_k0) * ds
             poles["wigner"].append(poles["wigner"][-1] + pole_shift)
             pole_shifts["wigner"].append(pole_shift)
 
@@ -209,12 +390,11 @@ class NetworkPerturbator:
             "direct": [pole],
             "network": [pole],
             "wigner": [pole],
-            "volume": [pole],
         }
-        pole_shifts = {"direct": [], "network": [], "wigner": [], "volume": []}
+        pole_shifts = {"direct": [], "network": [], "wigner": []}
 
         old_pole = pole
-        for i, value in enumerate(angles):
+        for i, value in enumerate(tqdm(angles)):
             # If we are at the first angle, dt is just that. Otherwise
             # it's the difference between the current angle and the previous
             # one
@@ -252,13 +432,9 @@ class NetworkPerturbator:
             ws_t = self.unperturbed_network.get_wigner_smith_t(
                 old_pole, node_index, eigenvalue_index
             )
-            print(ws_k0)
-            print(ws_t)
             pole_shift = -np.trace(ws_t) / np.trace(ws_k0) * dt
             poles["wigner"].append(poles["wigner"][-1] + pole_shift)
             pole_shifts["wigner"].append(pole_shift)
-
-            # Work out pole shifts using volume integrals
 
             # Update the networks
             old_pole = new_pole
@@ -360,7 +536,6 @@ class NetworkPerturbator:
     def get_U_3_alpha(self, k0) -> np.ndarray:
         """Calculate the U_3 matrix associated with the perturbation parameter
         (see theory notes)"""
-        n = self.unperturbed_network.n(k0)
 
         # Get network matrices
         unperturbed_network_matrix = (
@@ -407,6 +582,9 @@ class NetworkPerturbator:
                 partial_sum = 0.0 + 0.0j
                 for link in self.network.internal_links:
                     length = link.length
+
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector_unperturbed = unperturbed_outgoing_vectors[q]
@@ -468,15 +646,18 @@ class NetworkPerturbator:
                     d_O_mp = diff_O_mp / self.status.perturbation_value
                     d_O_mq = diff_O_mq / self.status.perturbation_value
 
-                    partial_sum += d_O_mp * np.conj(O_mq_before) * (
-                        1.0 - np.exp(-2 * n * np.imag(k0) * length)
-                    ) + d_I_mp * np.conj(I_mq_before) * (
-                        np.exp(2 * n * np.imag(k0) * length) - 1.0
+                    partial_sum += 1j * d_O_mp * np.conj(O_mq_before) * (
+                        1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length)
+                    ) + 1j * d_I_mp * np.conj(I_mq_before) * (
+                        np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     )
 
                 # Next loop over external links
                 for link in self.network.external_links:
                     length = link.length
+
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector_unperturbed = unperturbed_outgoing_vectors[q]
@@ -526,10 +707,10 @@ class NetworkPerturbator:
                     d_O_mp = diff_O_mp / self.status.perturbation_value
                     d_O_mq = diff_O_mq / self.status.perturbation_value
 
-                    partial_sum += d_I_mp * np.conj(I_mq_before) * (
-                        1.0 - np.exp(-2 * n * np.imag(k0) * length)
-                    ) + d_O_mp * np.conj(O_mq_before) * (
-                        np.exp(2 * n * np.imag(k0) * length) - 1.0
+                    partial_sum += 1j * d_I_mp * np.conj(I_mq_before) * (
+                        1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length)
+                    ) + 1j * d_O_mp * np.conj(O_mq_before) * (
+                        np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     )
 
                 U_3[q, p] = partial_sum

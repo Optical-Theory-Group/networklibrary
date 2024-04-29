@@ -7,14 +7,17 @@ import numpy as np
 
 from complex_network.networks import network_factory
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.poles.pole_finder import (
+from complex_network.networks.pole_finder import (
     sweep,
     find_pole,
     contour_integral_segment,
     contour_integral,
 )
 from tqdm import tqdm
-from complex_network.perturbations.network_perturbator import NetworkPerturbator, pole_finder
+from complex_network.networks.network_perturbator import (
+    NetworkPerturbator,
+    pole_finder,
+)
 
 np.random.seed(1)
 
@@ -22,18 +25,17 @@ spec = NetworkSpec(
     network_type="delaunay",
     network_shape="circular",
     num_seed_nodes=0,
-    exit_offset=0.0,
+    external_offset=0.0,
     num_internal_nodes=15,
-    num_exit_nodes=5,
+    num_external_nodes=5,
     network_size=500e-6,
-    exit_size=550e-6,
+    external_size=550e-6,
     node_S_mat_type="COE",
     node_S_mat_params={},
 )
 
 network = network_factory.generate_network(spec)
-# network.draw()
-n = 1.5
+network.draw()
 
 perturbed_node_index = 9
 perturbed_angle_index = 0
@@ -43,7 +45,7 @@ perturbed_angle_index = 0
 # -----------------------------------------------------------------------------
 
 k0 = 2 * np.pi / (500e-9)
-network.update_link_S_matrices(n, k0)
+network.update_links(n, k0)
 
 S_ee = network.get_S_ee(n, k0)
 S_ee_inv = network.get_S_ee_inv(n, k0)

@@ -7,10 +7,10 @@ import numpy as np
 
 from complex_network.networks import network_factory
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.perturbations.network_perturbator import (
+from complex_network.networks.network_perturbator import (
     NetworkPerturbator,
 )
-from complex_network.perturbations import pole_finder
+from complex_network.networks import pole_finder
 
 # Generate the random network
 np.random.seed(1)
@@ -27,9 +27,19 @@ spec = NetworkSpec(
     node_S_mat_params={},
 )
 network = network_factory.generate_network(spec)
-network.draw(show_indices=True)
+network.add_node_to_link(9, 0.1, 0.25)
 
-old_to_new_nodes, old_to_new_links = network.add_node_to_link(9, 0.5, 1.0)
 
-S_ee_after = network.get_S_ee(k0)
-print(S_ee_after - S_ee_before)
+perturbator = NetworkPerturbator(network)
+perturbator.perturb_pseudonode_s(15, 0.5)
+
+print(perturbator.unperturbed_network.get_node(15))
+print(perturbator.unperturbed_network.get_link(33))
+print(perturbator.unperturbed_network.get_link(34))
+
+
+print(perturbator.perturbed_network.get_node(15))
+print(perturbator.perturbed_network.get_link(33))
+print(perturbator.perturbed_network.get_link(34))
+
+s = network.get_wigner_smith_s(2*np.pi/(500e-9), 15)

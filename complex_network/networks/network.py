@@ -15,13 +15,11 @@ class Network:
         self,
         nodes: dict[int, Node],
         links: dict[int, Link],
-        material: Material,
         data: dict[str, Any] | None = None,
     ) -> None:
         self.reset_values(data)
         self.node_dict = nodes
         self.link_dict = links
-        self.material = material
         self.reset_fields()
         self.set_matrix_calc_utils()
 
@@ -102,16 +100,6 @@ class Network:
     # -------------------------------------------------------------------------
     # Basic network properties
     # -------------------------------------------------------------------------
-
-    @property
-    def n(self) -> Callable[..., float]:
-        """Refractive index function"""
-        return self.material.n
-
-    @property
-    def dn(self) -> Callable[..., float]:
-        """Derivative of refractive index function"""
-        return self.material.dn
 
     @property
     def nodes(self):
@@ -271,17 +259,10 @@ class Network:
         }
         return default_values
 
-    def update_links(
-        self,
-        k0: float | complex,
-    ) -> None:
-        """Update k0, n and the scattering matrices for all links in the
-        network"""
+    def update_links(self, k0: float | complex) -> None:
+        """Update the scattering matrices for all links in the network"""
         for link in self.links:
-            link.k0 = k0
-            new_n = self.n(k0)
-            link.n = new_n
-            link.update_S_matrices()
+            link.update_S_matrices(k0)
 
     # -------------------------------------------------------------------------
     #  Adding new nodes to the network
@@ -328,9 +309,10 @@ class Network:
             data={
                 "is_perturbed": True,
                 "perturbation_data": {
-                    "perturbation_type": "pseudonode_r",
+                    "perturbation_type": "pseudonode",
                     "r": reflection_coefficient,
                     "t": transmission_coefficient,
+                    "s": s,
                 },
             },
         )
@@ -413,7 +395,7 @@ class Network:
         new_link_two.length = np.linalg.norm(
             new_node.position - node_two.position
         )
-        new_link_two.sorted_connected_nodes = sorted(new_link_one.node_indices)
+        new_link_two.sorted_connected_nodes = sorted(new_link_two.node_indices)
         new_link_two.inwave = {
             str(new_node.index): 0 + 0j,
             str(node_two.index): 0 + 0j,
@@ -422,6 +404,14 @@ class Network:
             str(new_node.index): 0 + 0j,
             str(node_two.index): 0 + 0j,
         }
+
+        # Set up mateiral properties of new links
+        new_link_one.material = old_link.material
+        new_link_two.material = old_link.material
+        new_link_one.n = old_link.n
+        new_link_two.n = old_link.n
+        new_link_one.dn = old_link.dn
+        new_link_two.dn = old_link.dn
 
         # Add new node and link to network dict
         self.node_dict[str(new_node.index)] = new_node
@@ -613,8 +603,9 @@ class Network:
         """Get the 'infinite' order network matrix"""
         step_matrix = self.get_network_step_matrix(k0)
         lam, v = np.linalg.eig(step_matrix)
-        modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
-        rebuilt = v @ np.diag(modified_lam) @ np.linalg.inv(v)
+        # modified_lam = np.where(np.isclose(lam, 1.0 + 0.0 * 1j), lam, 0.0)
+        lam[:-self.num_external_nodes] = 0.0 + 0.0j
+        rebuilt = v @ np.diag(lam) @ np.linalg.inv(v)
         self._network_matrix = rebuilt
         return rebuilt
 
@@ -716,7 +707,7 @@ class Network:
         self.update_links(k0)
 
         P_ei = self.get_P_ei(k0)
-        P_ie = P_ei.T
+        P_ie = self.get_P_ie(k0)
         S_ii = self.get_S_ii()
         P_ii = self.get_P_ii(k0)
 
@@ -924,13 +915,44 @@ class Network:
         ws = -1j * S_ee_inv @ dS_ee_dr
         return ws
 
+    def get_wigner_smith_s(
+        self,
+        k0: float | complex,
+        perturbed_node_index: int,
+    ) -> np.ndarray:
+        """Calculate analytically the Wigner-Smith operator
+        Q = -i * S^-1 * dS/ds"""
+
+        S_ee_inv = self.get_S_ee_inv(k0)
+        dS_ee_ds = self.get_dS_ee_ds(k0, perturbed_node_index)
+
+        ws = -1j * S_ee_inv @ dS_ee_ds
+        return ws
+
+    def get_wigner_smith_n(
+        self,
+        k0: float | complex,
+        perturbed_link_index: int,
+    ) -> np.ndarray:
+        """Calculate analytically the Wigner-Smith operator
+        Q = -i * S^-1 * dS/dn associated with link refractive index
+        perturbations"""
+
+        S_ee_inv = self.get_S_ee_inv(k0)
+        dS_ee_dn = self.get_dS_ee_dn(k0, perturbed_link_index)
+
+        ws = -1j * S_ee_inv @ dS_ee_dn
+        return ws
+
     # -------------------------------------------------------------------------
     # Volume integral methods
     # -------------------------------------------------------------------------
 
+    def get_wigner_smith_k0_volume(self, k0: float | complex) -> np.ndarray:
+        pass
+
     def get_U_0(self, k0) -> np.ndarray:
         """Calculate the U_0 matrix (see theory notes)"""
-        n = self.n(k0)
         self.update_links(k0)
         network_matrix = self.get_network_matrix(k0)
 
@@ -960,6 +982,8 @@ class Network:
                 partial_sum = 0.0 + 0.0j
                 for link in self.internal_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -995,18 +1019,20 @@ class Network:
                     partial_sum += (
                         O_mp
                         * np.conj(O_mq)
-                        * (1.0 - np.exp(-2 * n * np.imag(k0) * length))
+                        * (1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length))
                     )
 
                     partial_sum += (
                         I_mp
                         * np.conj(I_mq)
-                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0)
+                        * (np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0)
                     )
 
                 # Next loop over external links
                 for link in self.external_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -1032,22 +1058,151 @@ class Network:
                     partial_sum += (
                         I_mp
                         * np.conj(I_mq)
-                        * (1.0 - np.exp(-2 * n * np.imag(k0) * length))
+                        * (1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length))
                     )
 
                     partial_sum += (
                         O_mp
                         * np.conj(O_mq)
-                        * (np.exp(2 * n * np.imag(k0) * length) - 1.0)
+                        * (np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0)
                     )
 
                 U_0[q, p] = partial_sum
 
         return U_0
 
+    def get_U_0_test(self, k0) -> np.ndarray:
+        """Calculate the U_0 matrix (see theory notes)"""
+        self.update_links(k0)
+        network_matrix = self.get_network_matrix(k0)
+
+
+
+
+
+
+
+
+        # Get the scattered fields for each incident field
+        outgoing_vectors = []
+        num_externals = self.num_external_nodes
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            incident_vector = np.zeros(
+                (len(network_matrix)), dtype=np.complex128
+            )
+            incident_vector[num_externals : 2 * num_externals] = incident_field
+            outgoing_vector = network_matrix @ incident_vector
+            outgoing_vectors.append(outgoing_vector)
+
+        U_0 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+        internal_vector_length = int(
+            (len(network_matrix) - 2 * num_externals) / 2
+        )
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+                # First loop over internal links
+                partial_sum = 0.0 + 0.0j
+                for link in self.internal_links:
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    q_i = q_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    p_i = p_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+                    key = f"{node_one_index},{node_two_index}"
+                    index = self.internal_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        O_mp
+                        * np.conj(O_mq)
+                        * (1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                    )
+
+                    partial_sum += (
+                        I_mp
+                        * np.conj(I_mq)
+                        * (np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0)
+                    )
+
+                # Next loop over external links
+                for link in self.external_links:
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[0:num_externals]
+                    q_i = q_vector[num_externals : 2 * num_externals]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[0:num_externals]
+                    p_i = p_vector[num_externals : 2 * num_externals]
+
+                    # Find the fields in the link
+                    # Note: node_two is always the external node
+                    external_node_index = link.sorted_connected_nodes[1]
+                    key = f"{external_node_index}"
+                    index = self.external_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        I_mp
+                        * np.conj(I_mq)
+                        * (1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                    )
+
+                    partial_sum += (
+                        O_mp
+                        * np.conj(O_mq)
+                        * (np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0)
+                    )
+
+                U_0[q, p] = partial_sum
+
+        return U_0
+
+
+
+
     def get_U_1(self, k0) -> np.ndarray:
         """Calculate the U_1 matrix (see theory notes)"""
-        n = self.n(k0)
         network_matrix = self.get_network_matrix(k0)
 
         # Get the scattered fields for each incident field
@@ -1076,6 +1231,10 @@ class Network:
                 partial_sum = 0.0 + 0.0j
                 for link in self.internal_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+                    dn = link.dn(k0)
+                    dDn = link.dDn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -1109,17 +1268,23 @@ class Network:
                     O_mq = q_o[index]
 
                     partial_sum += (
-                        O_mp
-                        * np.conj(O_mq)
-                        * (np.exp(-2 * n * np.imag(k0) * length))
-                        + I_mp
-                        * np.conj(I_mq)
-                        * (np.exp(2 * n * np.imag(k0) * length))
-                    ) * length
+                        (n + Dn + k0 * (dn + dDn))
+                        * (
+                            O_mp
+                            * np.conj(O_mq)
+                            * (np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                            + I_mp
+                            * np.conj(I_mq)
+                            * (np.exp(2 * (n + Dn) * np.imag(k0) * length))
+                        )
+                        * length
+                    )
 
                 # Next loop over external links
                 for link in self.external_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -1143,13 +1308,148 @@ class Network:
                     O_mq = q_o[index]
 
                     partial_sum += (
-                        I_mp
-                        * np.conj(I_mq)
-                        * (np.exp(-2 * n * np.imag(k0) * length))
-                        + O_mp
-                        * np.conj(O_mq)
-                        * (np.exp(2 * n * np.imag(k0) * length))
-                    ) * length
+                        (n + Dn + k0 * (dn + dDn))
+                        * (
+                            I_mp
+                            * np.conj(I_mq)
+                            * (np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                            + O_mp
+                            * np.conj(O_mq)
+                            * (np.exp(2 * (n + Dn) * np.imag(k0) * length))
+                        )
+                        * length
+                    )
+
+                U_1[q, p] = partial_sum
+
+        return U_1
+
+    def get_U_1_n(self, k0, link_index) -> np.ndarray:
+        """Calculate the U_1 matrix (see theory notes)"""
+        network_matrix = self.get_network_matrix(k0)
+
+        # Get the scattered fields for each incident field
+        outgoing_vectors = []
+        num_externals = self.num_external_nodes
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            incident_vector = np.zeros(
+                (len(network_matrix)), dtype=np.complex128
+            )
+            incident_vector[num_externals : 2 * num_externals] = incident_field
+            outgoing_vector = network_matrix @ incident_vector
+            outgoing_vectors.append(outgoing_vector)
+
+        U_1 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+        internal_vector_length = int(
+            (len(network_matrix) - 2 * num_externals) / 2
+        )
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+                # First loop over internal links
+                partial_sum = 0.0 + 0.0j
+                for link in self.internal_links:
+
+                    # Skip unless we are at the key link
+                    if link.index != link_index:
+                        continue
+
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    q_i = q_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    p_i = p_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+                    key = f"{node_one_index},{node_two_index}"
+                    index = self.internal_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        k0
+                        * (
+                            O_mp
+                            * np.conj(O_mq)
+                            * (np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                            + I_mp
+                            * np.conj(I_mq)
+                            * (np.exp(2 * (n + Dn) * np.imag(k0) * length))
+                        )
+                        * length
+                    )
+
+                # Next loop over external links
+                for link in self.external_links:
+
+                    # Skip unless we are at the key link
+                    if link.index != link_index:
+                        continue
+
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[0:num_externals]
+                    q_i = q_vector[num_externals : 2 * num_externals]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[0:num_externals]
+                    p_i = p_vector[num_externals : 2 * num_externals]
+
+                    # Find the fields in the link
+                    # Note: node_two is always the external node
+                    external_node_index = link.sorted_connected_nodes[1]
+                    key = f"{external_node_index}"
+                    index = self.external_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        k0
+                        * (
+                            I_mp
+                            * np.conj(I_mq)
+                            * (np.exp(-2 * (n + Dn) * np.imag(k0) * length))
+                            + O_mp
+                            * np.conj(O_mq)
+                            * (np.exp(2 * (n + Dn) * np.imag(k0) * length))
+                        )
+                        * length
+                    )
 
                 U_1[q, p] = partial_sum
 
@@ -1157,7 +1457,6 @@ class Network:
 
     def get_U_2(self, k0) -> np.ndarray:
         """Calculate the U_2 matrix (see theory notes)"""
-        n = self.n(k0)
         network_matrix = self.get_network_matrix(k0)
 
         # Get the scattered fields for each incident field
@@ -1186,6 +1485,10 @@ class Network:
                 partial_sum = 0.0 + 0.0j
                 for link in self.internal_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+                    dn = link.dn(k0)
+                    dDn = link.dDn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -1219,20 +1522,44 @@ class Network:
                     O_mq = q_o[index]
 
                     partial_sum += (
-                        O_mp
-                        * np.conj(I_mq)
-                        * (np.exp(2j * n * np.real(k0) * length) - 1.0)
+                        0.5
+                        * (dn + dDn)
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            O_mp
+                            * np.conj(I_mq)
+                            * (
+                                np.exp(2j * (n + Dn) * np.real(k0) * length)
+                                - 1.0
+                            )
+                        )
                     )
 
                     partial_sum += (
-                        I_mp
-                        * np.conj(O_mq)
-                        * (1.0 - np.exp(-2j * n * np.real(k0) * length))
+                        0.5
+                        * (dn + dDn)
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            I_mp
+                            * np.conj(O_mq)
+                            * (
+                                1.0
+                                - np.exp(-2j * (n + Dn) * np.real(k0) * length)
+                            )
+                        )
                     )
 
                 # Next loop over external links
                 for link in self.external_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+                    dn = link.dn(k0)
+                    dDn = link.dDn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector = outgoing_vectors[q]
@@ -1256,15 +1583,196 @@ class Network:
                     O_mq = q_o[index]
 
                     partial_sum += (
-                        I_mp
-                        * np.conj(O_mq)
-                        * (np.exp(2j * n * np.real(k0) * length) - 1.0)
+                        0.5
+                        * (dn + dDn)
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            I_mp
+                            * np.conj(O_mq)
+                            * (
+                                np.exp(2j * (n + Dn) * np.real(k0) * length)
+                                - 1.0
+                            )
+                        )
                     )
 
                     partial_sum += (
-                        O_mp
-                        * np.conj(I_mq)
-                        * (1.0 - np.exp(-2j * n * np.real(k0) * length))
+                        0.5
+                        * (dn + dDn)
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            O_mp
+                            * np.conj(I_mq)
+                            * (
+                                1.0
+                                - np.exp(-2j * (n + Dn) * np.real(k0) * length)
+                            )
+                        )
+                    )
+
+                U_2[q, p] = partial_sum
+
+        return U_2
+
+    def get_U_2_n(self, k0, link_index) -> np.ndarray:
+        """Calculate the U_2 matrix (see theory notes)"""
+        network_matrix = self.get_network_matrix(k0)
+
+        # Get the scattered fields for each incident field
+        outgoing_vectors = []
+        num_externals = self.num_external_nodes
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            incident_vector = np.zeros(
+                (len(network_matrix)), dtype=np.complex128
+            )
+            incident_vector[num_externals : 2 * num_externals] = incident_field
+            outgoing_vector = network_matrix @ incident_vector
+            outgoing_vectors.append(outgoing_vector)
+
+        U_2 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+        internal_vector_length = int(
+            (len(network_matrix) - 2 * num_externals) / 2
+        )
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+                # First loop over internal links
+                partial_sum = 0.0 + 0.0j
+                for link in self.internal_links:
+                    if link.index != link_index:
+                        continue
+
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    q_i = q_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[
+                        2 * num_externals : 2 * num_externals
+                        + internal_vector_length
+                    ]
+                    p_i = p_vector[
+                        2 * num_externals + internal_vector_length :
+                    ]
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+                    key = f"{node_one_index},{node_two_index}"
+                    index = self.internal_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        0.5
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            O_mp
+                            * np.conj(I_mq)
+                            * (
+                                np.exp(2j * (n + Dn) * np.real(k0) * length)
+                                - 1.0
+                            )
+                        )
+                    )
+
+                    partial_sum += (
+                        0.5
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            I_mp
+                            * np.conj(O_mq)
+                            * (
+                                1.0
+                                - np.exp(-2j * (n + Dn) * np.real(k0) * length)
+                            )
+                        )
+                    )
+
+                # Next loop over external links
+                for link in self.external_links:
+                    if link.index != link_index:
+                        continue
+
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
+
+                    # Get the field distribution associated with q illumination
+                    q_vector = outgoing_vectors[q]
+                    q_o = q_vector[0:num_externals]
+                    q_i = q_vector[num_externals : 2 * num_externals]
+
+                    # Get the field distribution associated with p illumination
+                    p_vector = outgoing_vectors[p]
+                    p_o = p_vector[0:num_externals]
+                    p_i = p_vector[num_externals : 2 * num_externals]
+
+                    # Find the fields in the link
+                    # Note: node_two is always the external node
+                    external_node_index = link.sorted_connected_nodes[1]
+                    key = f"{external_node_index}"
+                    index = self.external_scattering_map[key]
+
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum += (
+                        0.5
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            I_mp
+                            * np.conj(O_mq)
+                            * (
+                                np.exp(2j * (n + Dn) * np.real(k0) * length)
+                                - 1.0
+                            )
+                        )
+                    )
+
+                    partial_sum += (
+                        0.5
+                        / (n + Dn)
+                        * np.imag(k0)
+                        / np.real(k0)
+                        * (
+                            O_mp
+                            * np.conj(I_mq)
+                            * (
+                                1.0
+                                - np.exp(-2j * (n + Dn) * np.real(k0) * length)
+                            )
+                        )
                     )
 
                 U_2[q, p] = partial_sum
@@ -1276,7 +1784,6 @@ class Network:
         (see theory notes)"""
         # Perturbation parameters
         k1 = k0 + dk
-        n0 = self.n(k0)
 
         # Get network matrices
         unperturbed_network_matrix = self.get_network_matrix(k0)
@@ -1320,6 +1827,8 @@ class Network:
                 partial_sum = 0.0 + 0.0j
                 for link in self.internal_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector_unperturbed = unperturbed_outgoing_vectors[q]
@@ -1384,15 +1893,17 @@ class Network:
                     d_O_mp = diff_O_mp / dk
                     d_O_mq = diff_O_mq / dk
 
-                    partial_sum += d_O_mp * np.conj(O_mq_before) * (
-                        1.0 - np.exp(-2 * n0 * np.imag(k0) * length)
-                    ) + d_I_mp * np.conj(I_mq_before) * (
-                        np.exp(2 * n0 * np.imag(k0) * length) - 1.0
+                    partial_sum += 1j * d_O_mp * np.conj(O_mq_before) * (
+                        1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length)
+                    ) + 1j * d_I_mp * np.conj(I_mq_before) * (
+                        np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     )
 
                 # Next loop over external links
                 for link in self.external_links:
                     length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn(k0)
 
                     # Get the field distribution associated with q illumination
                     q_vector_unperturbed = unperturbed_outgoing_vectors[q]
@@ -1445,10 +1956,10 @@ class Network:
                     d_O_mp = diff_O_mp / dk
                     d_O_mq = diff_O_mq / dk
 
-                    partial_sum += d_I_mp * np.conj(I_mq_before) * (
-                        1.0 - np.exp(-2 * n0 * np.imag(k0) * length)
-                    ) + d_O_mp * np.conj(O_mq_before) * (
-                        np.exp(2 * n0 * np.imag(k0) * length) - 1.0
+                    partial_sum += 1j * d_I_mp * np.conj(I_mq_before) * (
+                        1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length)
+                    ) + 1j * d_O_mp * np.conj(O_mq_before) * (
+                        np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     )
 
                 U_3[q, p] = partial_sum
@@ -1542,6 +2053,62 @@ class Network:
         dS_ee_dr = term_one + term_two + term_three + term_four
         return dS_ee_dr
 
+    def get_dS_ee_ds(
+        self, k0: float | complex, perturbed_node_index: int
+    ) -> np.ndarray:
+        """Get the derivative of S_ee with respect to the fractional
+        position s"""
+
+        P_ei = self.get_P_ei(k0)
+        P_ie = self.get_P_ie(k0)
+        P_ii = self.get_P_ii(k0)
+        S_ii = self.get_S_ii()
+
+        dP_ei_ds = np.zeros(P_ei.shape, dtype=np.complex128)
+        dP_ie_ds = np.zeros(P_ie.shape, dtype=np.complex128)
+        dP_ii_ds = self.get_dP_ii_ds(k0, perturbed_node_index)
+        dS_ii_ds = np.zeros(S_ii.shape, dtype=np.complex128)
+
+        SP = S_ii @ P_ii
+        inv = np.linalg.inv(np.identity(len(SP)) - SP)
+        dinv_ds = inv @ (S_ii @ dP_ii_ds + dS_ii_ds @ P_ii) @ inv
+
+        term_one = dP_ei_ds @ inv @ S_ii @ P_ie
+        term_two = P_ei @ dinv_ds @ S_ii @ P_ie
+        term_three = P_ei @ inv @ dS_ii_ds @ P_ie
+        term_four = P_ei @ inv @ S_ii @ dP_ie_ds
+
+        dS_ee_ds = term_one + term_two + term_three + term_four
+        return dS_ee_ds
+
+    def get_dS_ee_dn(
+        self, k0: float | complex, perturbed_link_index: int
+    ) -> np.ndarray:
+        """Get the derivative of S_ee with respect to change in refractive
+        index alpha"""
+
+        P_ei = self.get_P_ei(k0)
+        P_ie = self.get_P_ie(k0)
+        P_ii = self.get_P_ii(k0)
+        S_ii = self.get_S_ii()
+
+        dP_ei_dn = np.zeros(P_ei.shape, dtype=np.complex128)
+        dP_ie_dn = np.zeros(P_ie.shape, dtype=np.complex128)
+        dP_ii_dn = self.get_dP_ii_dn(k0, perturbed_link_index)
+        dS_ii_dn = np.zeros(S_ii.shape, dtype=np.complex128)
+
+        SP = S_ii @ P_ii
+        inv = np.linalg.inv(np.identity(len(SP)) - SP)
+        dinv_dn = inv @ (S_ii @ dP_ii_dn + dS_ii_dn @ P_ii) @ inv
+
+        term_one = dP_ei_dn @ inv @ S_ii @ P_ie
+        term_two = P_ei @ dinv_dn @ S_ii @ P_ie
+        term_three = P_ei @ inv @ dS_ii_dn @ P_ie
+        term_four = P_ei @ inv @ S_ii @ dP_ie_dn
+
+        dS_ee_dn = term_one + term_two + term_three + term_four
+        return dS_ee_dn
+
     def get_S_ii_dS_ii(self) -> tuple[np.ndarray, np.ndarray]:
         """Return the S_ii matrix and its derivative"""
 
@@ -1583,6 +2150,7 @@ class Network:
             node_one_index, node_two_index = link.node_indices
             link_S_mat = link.S_mat
             phase_factor = link_S_mat[0, 1]
+            n = link.n(k0)
 
             # Wave that is going into node_one
             row = self.internal_scattering_map[
@@ -1592,14 +2160,10 @@ class Network:
                 f"{str(node_two_index)},{str(node_one_index)}"
             ]
             internal_P[row, col] = phase_factor
-            internal_dP[row, col] = (
-                phase_factor * 1j * self.n(k0) * link.length
-            )
+            internal_dP[row, col] = phase_factor * 1j * n * link.length
             # Wave propagating the other way
             internal_P[col, row] = phase_factor
-            internal_dP[col, row] = (
-                phase_factor * 1j * self.n(k0) * link.length
-            )
+            internal_dP[col, row] = phase_factor * 1j * n * link.length
 
         return internal_P, internal_dP
 
@@ -1714,8 +2278,6 @@ class Network:
     ) -> np.ndarray:
         """Return derivative of P_ii with respect to k0"""
         self.update_links(k0)
-        dn = self.dn(k0)
-        n = self.n(k0)
 
         # Calculate the size of the matrix if it isn't given
         if internal_vector_length is None:
@@ -1737,6 +2299,11 @@ class Network:
             link_S_mat = link.S_mat
             phase_factor = link_S_mat[0, 1]
 
+            n = link.n(k0)
+            dn = link.dn(k0)
+            Dn = link.Dn(k0)
+            dDn = link.dDn(k0)
+
             # Wave that is going into node_one
             row = internal_scattering_map[
                 f"{str(node_one_index)},{str(node_two_index)}"
@@ -1745,12 +2312,121 @@ class Network:
                 f"{str(node_two_index)},{str(node_one_index)}"
             ]
             internal_P[row, col] = (
-                phase_factor * 1j * link.length * (dn * k0 + n)
+                phase_factor * 1j * link.length * (n + Dn + k0 * (dn + dDn))
             )
             # Wave propagating the other way
             internal_P[col, row] = (
-                phase_factor * 1j * link.length * (dn * k0 + n)
+                phase_factor * 1j * link.length * (n + Dn + k0 * (dn + dDn))
             )
+        return internal_P
+
+    def get_dP_ii_ds(
+        self,
+        k0: float | complex,
+        perturbed_node_index: int,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ii with respect to k0"""
+        self.update_links(k0)
+
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_map is None:
+            internal_scattering_map, _, _ = self._get_network_matrix_maps()
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        # Determine the two links that are relevant
+        perturbed_node = self.get_node(perturbed_node_index)
+        link_one_index, link_two_index = perturbed_node.sorted_connected_links
+        link_one = self.get_link(link_one_index)
+        link_two = self.get_link(link_two_index)
+        total_length = link_one.length + link_two.length
+
+        for i, link in enumerate([link_one, link_two]):
+            sign = 1.0 if i == 0 else -1.0
+            n = link.n(k0)
+            dn = link.dn(k0)
+            Dn = link.Dn(k0)
+            dDn = link.dDn(k0)
+
+            node_one_index, node_two_index = link.node_indices
+            link_S_mat = link.S_mat
+            phase_factor = link_S_mat[0, 1]
+
+            # Wave that is going into node_one
+            row = internal_scattering_map[
+                f"{str(node_one_index)},{str(node_two_index)}"
+            ]
+            col = internal_scattering_map[
+                f"{str(node_two_index)},{str(node_one_index)}"
+            ]
+            internal_P[row, col] = (
+                sign * phase_factor * 1j * k0 * (n + Dn) * total_length
+            )
+            # Wave propagating the other way
+            internal_P[col, row] = (
+                sign * phase_factor * 1j * k0 * (n + Dn) * total_length
+            )
+
+        return internal_P
+
+    def get_dP_ii_dn(
+        self,
+        k0: float | complex,
+        perturbed_link_index: int,
+        internal_vector_length: int | None = None,
+        internal_scattering_map: dict[str, int] | None = None,
+    ) -> np.ndarray:
+        """Return derivative of P_ii with respect to alpha"""
+        self.update_links(k0)
+
+        # Calculate the size of the matrix if it isn't given
+        if internal_vector_length is None:
+            internal_vector_length = 0
+            for node in self.internal_nodes:
+                internal_vector_length += node.degree
+
+        # Get the slices array if not provided
+        if internal_scattering_map is None:
+            internal_scattering_map, _, _ = self._get_network_matrix_maps()
+
+        # Get internal P
+        internal_P = np.zeros(
+            (internal_vector_length, internal_vector_length),
+            dtype=np.complex128,
+        )
+
+        # Determine the two links that are relevant
+        perturbed_link = self.get_link(perturbed_link_index)
+        link_S_mat = perturbed_link.S_mat
+        phase_factor = link_S_mat[0, 1]
+        length = perturbed_link.length
+
+        # Get joining nodes
+        node_one_index, node_two_index = perturbed_link.node_indices
+
+        # Wave that is going into node_one
+        row = internal_scattering_map[
+            f"{str(node_one_index)},{str(node_two_index)}"
+        ]
+        col = internal_scattering_map[
+            f"{str(node_two_index)},{str(node_one_index)}"
+        ]
+        internal_P[row, col] = phase_factor * 1j * k0 * length
+        # Wave propagating the other way
+        internal_P[col, row] = phase_factor * 1j * k0 * length
+
         return internal_P
 
     def get_dP_ii_drek0(
@@ -1837,14 +2513,17 @@ class Network:
     ) -> np.ndarray:
         """Return derivative of P_ei with respect to k0"""
         self.update_links(k0)
-        dn = self.dn(k0)
-        n = self.n(k0)
 
         external_P = np.zeros(
             (self.external_vector_length, self.internal_vector_length),
             dtype=np.complex128,
         )
         for link in self.external_links:
+            n = link.n(k0)
+            dn = link.dn(k0)
+            Dn = link.Dn(k0)
+            dDn = link.dDn(k0)
+
             node_one_index, node_two_index = link.node_indices
             link_S_mat = link.S_mat
             phase_factor = link_S_mat[0, 1]
@@ -1853,7 +2532,7 @@ class Network:
                 f"{str(node_one_index)},{str(node_two_index)}"
             ]
             external_P[row, col] = (
-                phase_factor * 1j * link.length * (dn * k0 + n)
+                phase_factor * 1j * link.length * (n + Dn + k0 * (dn + dDn))
             )
         return external_P
 
@@ -2118,16 +2797,25 @@ class Network:
 
     def draw(
         self,
+        ax=None,
         show_indices: bool = False,
         show_external_indices: bool = False,
         equal_aspect: bool = False,
         highlight_nodes: list[int] | None = None,
         highlight_perturbed: bool = True,
+        hide_axes: bool = False,
+        title: str | None = None,
     ) -> None:
         """Draw network"""
-        fig, ax = plt.subplots()
+
+        if ax is None:
+            ax = plt.gca()  # use current axis if none is given
         if equal_aspect:
             ax.set_aspect("equal")
+
+        # Title
+        if title is not None:
+            ax.set_title(title)
 
         # Plot links
         for link in self.links:
@@ -2155,17 +2843,29 @@ class Network:
                     continue
 
                 match node.perturbation_data.get("perturbation_type"):
-                    case "pseudonode_r":
+                    case "pseudonode":
                         r = node.perturbation_data.get("r")
                         node.draw(
                             ax,
                             show_indices,
                             show_external_indices,
                             color="red",
-                            markersize=3 + 9 * r,
+                            markersize=1 + (6 - 1) * r,
                         )
                     case _:
                         pass
+
+        if hide_axes:
+            ax.tick_params(
+                axis="both",
+                which="both",
+                bottom=False,
+                top=False,
+                left=False,
+                right=False,
+            )
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
 
     def plot_fields(
         self,
