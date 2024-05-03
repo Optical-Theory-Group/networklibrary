@@ -1,10 +1,12 @@
-import numpy as np
-import scipy
-from complex_network.networks.network import Network
-from typing import Any, Callable
 import functools
-from tqdm import tqdm
+from typing import Any, Callable
+
+import numpy as np
 import quadpy
+import scipy
+from tqdm import tqdm
+
+from complex_network.networks.network import Network
 
 
 def get_adjugate(M: np.ndarray) -> np.ndarray:

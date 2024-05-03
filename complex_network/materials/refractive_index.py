@@ -1,4 +1,5 @@
-"""Define functions for calculating refractive indices and their derivatives"""
+"""Module that defines functions for calculating refractive indices and their
+derivatives."""
 
 import numpy as np
 
@@ -7,8 +8,7 @@ def n_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
     """Returns the refractive index using the Sellmeier equation
     https://en.wikipedia.org/wiki/Sellmeier_equation
 
-    The input is assumed to be given as a wavenumber in units 1/m.
-    """
+    The input is assumed to be given as a wavenumber in units 1/m."""
     k0 = np.real(k0)
     wavelength = 2.0 * np.pi / k0
     wavelength *= 1e6
@@ -26,8 +26,7 @@ def dn_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
     using the Sellmeier equation
     https://en.wikipedia.org/wiki/Sellmeier_equation
 
-    The input is assumed to be given as a wavenumber in units 1/m.
-    """
+    The input is assumed to be given as a wavenumber in units 1/m."""
     k0 = np.real(k0)
     # Denominator is just n_glass, multiplied by 2 because we differentiate
     # a square root
@@ -44,4 +43,3 @@ def dn_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
     dn = partial / denominator
     dn /= 1e12
     return dn
-

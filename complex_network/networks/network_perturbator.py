@@ -10,13 +10,15 @@ Class file for Network object. Inherits from NetworkGenerator class
 
 # setup code logging
 import copy
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 from tqdm import tqdm
-from typing import Any
-from complex_network.networks.network import Network
-from dataclasses import dataclass
-from complex_network.networks import pole_finder
+
 from complex_network import utils
+from complex_network.networks import pole_finder
+from complex_network.networks.network import Network
 
 
 @dataclass

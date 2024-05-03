@@ -1,20 +1,12 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Nov  9 09:45:48 2022
+"""Class module for network links."""
 
-@author: Matthew Foreman
-
-Link class functions
-
-"""
-
-# setup code logging
 import logging
 from typing import Any
-import numpy as np
-import matplotlib.pyplot as plt
-import logconfig
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+import logconfig
 from complex_network.components.component import Component
 
 logconfig.setup_logging()
@@ -22,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class Link(Component):
-    """
-    Class that defines links/fibres in the network
+    """Class that defines links/fibres in the network
 
     Attributes:
     ----------
@@ -50,8 +41,7 @@ class Link(Component):
     S_mat:
         propagation matrix
     iS_mat:
-        inverse propagation matrix
-    """
+        inverse propagation matrix"""
 
     def __init__(
         self,
@@ -64,24 +54,26 @@ class Link(Component):
         self.node_indices = node_indices
 
     @property
-    def link_type(self):
+    def link_type(self) -> str:
         """Alias for nature"""
         return self.nature
 
     @link_type.setter
-    def link_type(self, value):
+    def link_type(self, value) -> None:
         self.nature = value
 
     @property
-    def power_diff(self):
-        """Difference in power flowing in both directions"""
+    def power_diff(self) -> float:
+        """Difference in power flowing in both directions."""
         return np.abs(
             np.abs(self.inwave_np[0]) ** 2 - np.abs(self.outwave_np[0]) ** 2
         )
 
     @property
-    def power_direction(self):
-        """Direction in which net power flows within the link"""
+    def power_direction(self) -> float:
+        """Direction in which net power flows within the link.
+        
+        Output is 1 or -1"""
         return np.sign(
             np.abs(self.inwave_np[0]) ** 2 - np.abs(self.outwave_np[0]) ** 2
         )
@@ -108,15 +100,8 @@ class Link(Component):
         }
         return default_values
 
-    # def update_wave_parameters(
-    #     self, n: float | complex, k0: float | complex
-    # ) -> None:
-    #     self.k0 = k0
-    #     self.n = n
-
     def update_S_matrices(self, k0: float | complex) -> None:
-        """Function to set the scattering matrix of the link"""
-
+        """Function to set the scattering matrix of the link."""
         length = self.length
         n = self.n(k0)
         Dn = self.Dn(k0)
@@ -142,7 +127,7 @@ class Link(Component):
         show_index: bool = False,
         color: None = None,
     ) -> None:
-        """Draw link on figure"""
+        """Draw link on figure."""
         node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
         node_2_x, node_2_y = node_2_pos[0], node_2_pos[1]
 

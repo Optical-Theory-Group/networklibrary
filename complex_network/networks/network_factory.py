@@ -1,18 +1,20 @@
-"""Factory module for building networks"""
+"""Factory module for building networks.
 
-# setup code logging
+This should be used to generate networks, rather than the network class
+itself."""
+
 import logging
 import math
-from typing import Any
 
 import numpy as np
 import scipy
-from scipy.spatial import ConvexHull, Voronoi
-from complex_network.networks.network_spec import NetworkSpec
-from complex_network.components.node import Node
-from complex_network.components.link import Link
-from complex_network.networks.network import Network
+from scipy.spatial import ConvexHull
+
 import logconfig
+from complex_network.components.link import Link
+from complex_network.components.node import Node
+from complex_network.networks.network import Network
+from complex_network.networks.network_spec import NetworkSpec
 from complex_network.scattering_matrices.scattering_matrix import get_S_mat
 
 # from line_profiler_pycharm import profile
@@ -23,8 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_network(spec: NetworkSpec) -> Network:
-    """Main method for building a network"""
-
+    """Main method for building a network."""
     VALID_NETWORK_TYPES = [
         "delaunay",
         "voronoi",
@@ -52,6 +53,10 @@ def generate_network(spec: NetworkSpec) -> Network:
                 f"Please choose one from {VALID_NETWORK_TYPES}."
             )
 
+    # By this point we have nodes that all have an index, but don't know what
+    # links or other nodes they are connected to. The links are also all
+    # numbered and know what two nodes they connect. These two methods finish
+    # off the numbering.
     _initialise_links(nodes, links, spec)
     _initialise_nodes(nodes, links, spec)
     return Network(nodes, links)
@@ -60,7 +65,7 @@ def generate_network(spec: NetworkSpec) -> Network:
 def _initialise_nodes(
     nodes: dict[str, Node], links: dict[str, Link], spec: NetworkSpec
 ) -> None:
-    """Set initial values for nodes in the network"""
+    """Set initial values for nodes in the network."""
     # First, tell the nodes which links and nodes are connected to them
     for link in links.values():
         node_index_one, node_index_two = link.node_indices
@@ -90,7 +95,6 @@ def _initialise_nodes(
         size = num_connect
 
         # Set up in and out waves
-
         for second_node in node.sorted_connected_nodes:
             node.inwave[str(second_node)] = 0 + 0j
             node.outwave[str(second_node)] = 0 + 0j
@@ -119,7 +123,7 @@ def _initialise_nodes(
 def _initialise_links(
     nodes: dict[str, Node], links: dict[str, Link], spec: NetworkSpec
 ) -> None:
-    """Set initial values for links in the network"""
+    """Set initial values for links in the network."""
     for link in links.values():
         # Get nodes
         node_index_one, node_index_two = link.node_indices
@@ -148,8 +152,7 @@ def _initialise_links(
 
 
 def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
-    """
-    Generates a Delaunay type network formed from delaunay triangulation
+    """Generates a Delaunay type network formed from delaunay triangulation
 
     Parameters
     ----------
@@ -166,14 +169,12 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
             'refractive_index': n,
             'external_size':
                 for 'circular': radius of external nodes from network center
-                for 'slab': external nodes placed at +/-external_size/2 randomly
-                             within width
+                for 'slab': external nodes placed at +/-external_size/2
+                            randomly within width
 
-            'left_external_fraction': in range [0,1]. Fraction of external nodes on
-                                 lefthand side
-                of a slab network. Not needed for circular
-    """
-
+            'left_external_fraction': in range [0,1]. Fraction of external
+                                      nodes on the lefthand side of a slab
+                                      network. Not needed for circular."""
     num_internal_nodes = spec.num_internal_nodes
     num_external_nodes = spec.num_external_nodes
 
@@ -732,8 +733,7 @@ def _generate_buffon_network(network_spec: NetworkSpec):
 
 
 def _generate_linear_network(network_spec: NetworkSpec):
-    """
-    Generates a linear network with all nodes on a straight line
+    """Generates a linear network with all nodes on a straight line
 
     Parameters
     ----------
@@ -741,9 +741,7 @@ def _generate_linear_network(network_spec: NetworkSpec):
         Keys:
             internal_nodes: number of internal nodes of network
             network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
-            external_size: two external nodes placed at +/-external_size/2
-
-    """
+            external_size: two external nodes placed at +/-external_size/2"""
     node_number = spec["internal_nodes"]
     network_size = spec["network_size"]
     external_size = spec["external_size"]

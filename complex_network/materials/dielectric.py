@@ -1,13 +1,17 @@
-"""Class for defining dielectric materials"""
+"""Class for defining dielectric materials.
+
+This is used for the links' optical properties."""
+
+import functools
+from typing import Callable
 
 import numpy as np
-import functools
-from complex_network.materials.refractive_index import (
-    n_sellmeier_k0,
-    dn_sellmeier_k0,
-)
+
 from complex_network.materials.material import Material
-from typing import Callable
+from complex_network.materials.refractive_index import (
+    dn_sellmeier_k0,
+    n_sellmeier_k0,
+)
 
 # UPDATE THIS SET WHEN MORE MATERIALS ARE ADDED
 VALID_DIELECTRICS = {"glass", "sapphire"}
@@ -43,8 +47,10 @@ class Dielectric(Material):
 
     @property
     def n(self) -> Callable[..., float]:
+        """The refractive index function."""
         return self._n
 
     @property
     def dn(self) -> Callable[..., float]:
+        """The derivative of the refractive index with respect to k0."""
         return self._dn

@@ -1,21 +1,18 @@
-import os
-import scipy
 import copy
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-from complex_network.networks import network_factory
-from complex_network.networks.network_spec import NetworkSpec
-from complex_network.networks.pole_finder import (
-    sweep,
-    find_pole,
-    contour_integral_segment,
-    contour_integral,
-)
+import scipy
 from tqdm import tqdm
-from complex_network.networks.network_perturbator import NetworkPerturbator
+
 from complex_network.materials.dielectric import Dielectric
+from complex_network.networks import network_factory
+from complex_network.networks.network_perturbator import NetworkPerturbator
+from complex_network.networks.network_spec import NetworkSpec
+from complex_network.networks.pole_finder import (contour_integral,
+                                                  contour_integral_segment,
+                                                  find_pole, sweep)
 
 np.random.seed(1)
 

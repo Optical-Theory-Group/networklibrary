@@ -9,14 +9,14 @@ Draw an example of different networks and save them to the output folder
 """
 
 import os
-import scipy
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy
+from tqdm import tqdm
 
 from complex_network.networks import network_factory
 from complex_network.networks.network_spec import NetworkSpec
-from tqdm import tqdm
 
 # np.random.seed(1)
 

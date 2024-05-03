@@ -1,38 +1,45 @@
-import numpy as np
-import matplotlib.pyplot as plt
+"""Component base class module. 
+
+These are things like nodes and links."""
+
 from typing import Any
+
+import numpy as np
 
 
 class Component:
-    """Base class for network components
+    """Base class for network components.
 
-    Defines some useful functions common to both components, such as
-    printing, saving to file etc.
-    """
+    Defines some useful functions common to all components, such as
+    printing, saving to file etc."""
 
     def __init__(
         self, index: int, nature: str, data: dict[str, Any] | None = None
-    ):
+    ) -> None:
         self.reset_values(data)
         self.index = index
         self.nature = nature
 
     @property
-    def index(self):
+    def index(self) -> int:
+        """Index of the component.
+
+        Used for identification or quick extraction."""
         return self._index
 
     @index.setter
-    def index(self, value):
+    def index(self, value) -> None:
         if not isinstance(value, int):
             raise ValueError("Property 'index' must be an integer.")
         self._index = value
 
     @property
-    def nature(self):
+    def nature(self) -> str:
+        """Nature refers to whether a component is internal or external."""
         return self._nature
 
     @nature.setter
-    def nature(self, value):
+    def nature(self, value) -> None:
         if value not in ["internal", "external"]:
             raise ValueError(
                 f"Invalid type '{value}'. Must be 'internal' or 'external'."
@@ -41,8 +48,9 @@ class Component:
 
     @property
     def attr_names(self) -> list[str]:
-        """Get a list of all the attribute names. Useful for printing and
-        saving"""
+        """Get a list of all the attribute names.
+
+        Useful for printing and saving."""
         return list(self.get_default_values().keys())
 
     @staticmethod
@@ -50,6 +58,9 @@ class Component:
         raise NotImplementedError("Must be implemented in subclasses")
 
     def reset_values(self, data: dict[str, Any] | None = None) -> None:
+        """Mostly used to set default values of the component.
+
+        Specific details implemented in subclasses."""
         default_values = self.get_default_values()
         if data is not None:
             default_values.update(data)
@@ -73,8 +84,7 @@ class Component:
         ----------
         direction : str, optional
             Set to 'forward' or 'backwards' depending on recursive algorithm
-            being used. The default is 'forward'.
-        """
+            being used. The default is 'forward'."""
         if direction == "forward":
             # Use S matrix to find outgoing waves at node
             outwave_np = np.matmul(self.S_mat, self.inwave_np).T
@@ -102,7 +112,7 @@ class Component:
             )
 
     def to_dict(self) -> dict:
-        """Return a dictionary of the component attributes"""
+        """Return a dictionary of the component attributes."""
         return {
             v: getattr(self, v) for v in self.attr_names if hasattr(self, v)
         }
