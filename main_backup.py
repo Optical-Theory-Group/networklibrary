@@ -10,7 +10,7 @@ from complex_network.materials.dielectric import Dielectric
 from complex_network.networks import network_factory
 from complex_network.networks.network_perturbator import NetworkPerturbator
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.networks.pole_finder import (contour_integral,
+from complex_network.networks.pole_calculator import (contour_integral,
                                                   contour_integral_segment,
                                                   find_pole, sweep)
 

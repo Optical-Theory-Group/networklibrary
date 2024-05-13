@@ -121,33 +121,6 @@ def scatter_iterative(
     return after
 
 
-def set_incident_field(
-    self, incident_field: np.ndarray, direction: str = "forward"
-) -> None:
-    """Sets the incident field to the inwaves/outwaves"""
-    # Check size
-    if len(incident_field) != self.num_external_nodes:
-        raise ValueError(
-            f"Incident field has incorrect size. "
-            f"It should be of size {self.num_external_nodes}."
-        )
-
-    # Set values to nodes and network dictionaries
-    for i, external_node in enumerate(self.external_nodes):
-        if direction == "forward":
-            self.inwave[str(external_node.index)] = incident_field[i]
-            external_node.inwave["-1"] = incident_field[i]
-            external_node.inwave_np[0] = incident_field[i]
-        elif direction == "backward":
-            self.outwave[str(external_node.index)] = incident_field[i]
-            external_node.outwave["-1"] = incident_field[i]
-            external_node.outwave_np[0] = incident_field[i]
-
-    # Set values to network
-    if direction == "forward":
-        self.inwave_np = incident_field
-    if direction == "backward":
-        self.outwave_np = incident_field
 
 
 def get_outgoing_fields(self, direction: str = "forward") -> np.ndarray:

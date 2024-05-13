@@ -10,9 +10,13 @@ from complex_network.materials.dielectric import Dielectric
 from complex_network.networks import network_factory
 from complex_network.networks.network_perturbator import NetworkPerturbator
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.networks.pole_finder import (contour_integral,
-                                                  contour_integral_segment,
-                                                  find_pole, sweep)
+from complex_network.networks.pole_calculator import (
+    contour_integral,
+    contour_integral_segment,
+    find_pole,
+    sweep,
+    get_residue,
+)
 
 np.random.seed(1)
 
@@ -32,20 +36,23 @@ spec = NetworkSpec(
 
 network = network_factory.generate_network(spec)
 network.draw(show_indices=True)
-perturbator = NetworkPerturbator(network)
+pole = 12532230.332102112 - 11.136143180724291j
 
-lam = 500e-9
-k0 = 2 * np.pi / lam
+ws = network.get_wigner_smith(pole)
+res = get_residue(network.get_wigner_smith, pole, radius=1e-2, degree=10)
 
-# Perturb link
-base_n = 1.5
-link_index = 9
-perturbator.perturb_link_n(link_index, 0.001)
+A = network.get_S_ee_inv(pole)
+B = network.get_dS_ee(pole)
 
-print(perturbator.perturbed_network.get_link(10).n(k0))
-print(perturbator.perturbed_network.get_link(9).n(k0))
 
-perturbator.perturb_link_n(link_index, 0.001)
+# # Testing the hypothesis
+# inv_fac = network.get_inv_factor(pole)
+# eigs, w = np.linalg.eig(inv_fac)
+# eigs = np.where(np.isclose(eigs, 0.0), 1.0, eigs)
+# rebuilt = w @ np.diag(eigs) @ np.linalg.inv(w)
 
-print(perturbator.perturbed_network.get_link(10).n(k0))
-print(perturbator.perturbed_network.get_link(9).n(k0))
+# P_ei = network.get_P_ei(pole)
+# S_ii = network.get_S_ii()
+# P_ie = network.get_P_ie(pole)
+# S_ee = P_ei @ np.linalg.inv(rebuilt) @ S_ii @ P_ie
+

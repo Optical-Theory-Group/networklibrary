@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 
-from complex_network.networks import network_factory, pole_finder
+from complex_network.networks import network_factory, pole_calculator
 from complex_network.networks.network_perturbator import NetworkPerturbator
 from complex_network.networks.network_spec import NetworkSpec
 

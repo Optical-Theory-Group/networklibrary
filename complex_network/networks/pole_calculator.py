@@ -140,6 +140,44 @@ def tanh_sinh(function, start, end):
     pass
 
 
+def get_residue(
+    function,
+    pole: complex,
+    radius: float = 0.1,
+    scheme: Any = None,
+    degree: int = 10,
+) -> complex:
+    """Find the pole of a function numerically using a contour integral.
+
+    This is not particularly optimized, but should do the job. Make sure the
+    radius is small enough so that only 1 pole is contained within."""
+
+    # We convert the integral to polar coordinates
+    # int f(z) dz = int f(pole + R*e^it) * i * R * e^it
+    def integrand(t):
+        arg = pole + radius * np.exp(1j * t)
+        return 1j * radius * function(arg) * np.exp(1j * t)
+
+    if scheme is None:
+        scheme = quadpy.c1.gauss_legendre(degree)
+
+    points = scheme.points
+    weights = scheme.weights
+
+    polar = (1.0 + points) * np.pi
+
+    # Main loop for integral calculation
+    integral = 0.0
+    for point, weight in zip(polar, weights):
+        value = integrand(point)
+        integral += value * weight
+
+    integral *= np.pi
+    residue = integral / (2 * np.pi * 1j)
+
+    return residue
+
+
 def find_pole(
     network: Network,
     k0: complex,

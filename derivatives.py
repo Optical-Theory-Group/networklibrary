@@ -8,9 +8,9 @@ from tqdm import tqdm
 
 from complex_network.networks import network_factory
 from complex_network.networks.network_perturbator import (NetworkPerturbator,
-                                                          pole_finder)
+                                                          pole_calculator)
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.networks.pole_finder import (contour_integral,
+from complex_network.networks.pole_calculator import (contour_integral,
                                                   contour_integral_segment,
                                                   find_pole, sweep)
 
@@ -104,8 +104,8 @@ print(f"The t WS is Hermitian: {is_hermitian_t}")
 # Pole
 # -----------------------------------------------------------------------------
 
-pole = 12532234.746804317 - 18.467637263524797j
-k0 = pole
+pole_calculator = 12532234.746804317 - 18.467637263524797j
+k0 = pole_calculator
 network.update_link_S_matrices(n, k0)
 
 S_ee = network.get_S_ee(n, k0)
@@ -146,18 +146,18 @@ factor = np.exp(1j * dt)
 perturbed_network.perturb_node_eigenvalue(
     perturbed_node_index, perturbed_angle_index, factor
 )
-new_pole = pole_finder.find_pole(perturbed_network, pole)
+new_pole = pole_calculator.find_pole(perturbed_network, pole_calculator)
 
 # Check if old pole is still a pole (shouldn't be)
-S_ee = perturbed_network.get_S_ee(n, pole)
-S_ee_inv = perturbed_network.get_S_ee_inv(n, pole)
+S_ee = perturbed_network.get_S_ee(n, pole_calculator)
+S_ee_inv = perturbed_network.get_S_ee_inv(n, pole_calculator)
 dS_ee_dk0 = perturbed_network.get_dS_ee_dk0()
 dS_ee_dt = perturbed_network.get_dS_ee_dt(
     perturbed_node_index, perturbed_angle_index
 )
-ws_k0 = perturbed_network.get_wigner_smith_k0(n, pole)
+ws_k0 = perturbed_network.get_wigner_smith_k0(n, pole_calculator)
 ws_t = perturbed_network.get_wigner_smith_t(
-    n, pole, perturbed_node_index, perturbed_angle_index
+    n, pole_calculator, perturbed_node_index, perturbed_angle_index
 )
 print(f"Determinant of perturbed S at old pole: {np.linalg.det(S_ee)}")
 print(f"Determinant of perturbed S^-1 at old pole: {np.linalg.det(S_ee_inv)}")
@@ -180,7 +180,7 @@ print(f"Determinant of perturbed S^-1 at new pole: {np.linalg.det(S_ee_inv)}")
 
 # Check perturbation theory results
 
-dk0 = new_pole - pole
+dk0 = new_pole - pole_calculator
 frac = dk0 / dt
 
 # Method based on det(I - SP) = 0
@@ -197,9 +197,9 @@ frac_one = -top / bottom
 
 # Method based on det(S^-1) = 0
 ws_t = network.get_wigner_smith_t(
-    n, pole, perturbed_node_index, perturbed_angle_index
+    n, pole_calculator, perturbed_node_index, perturbed_angle_index
 )
-ws_k0 = network.get_wigner_smith_k0(n, pole)
+ws_k0 = network.get_wigner_smith_k0(n, pole_calculator)
 
 top = np.trace(ws_t)
 bottom = np.trace(ws_k0)
