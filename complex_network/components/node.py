@@ -28,13 +28,13 @@ class Node(Component):
         number of connecting links/edges
     sorted_connected_nodes:
         list of ids of nodes that are connected.
-        order matches that of S_mat
+        order matches that of S
     S_mat_type:
         string identifier for nature of scattering matrix
     scat_loss:
         parameter describing fractional scattering loss
     S_mat_params:
-        dictionary of any additional parameters used to generate S_mat
+        dictionary of any additional parameters used to generate S
     inwave:
         dictionary of inwave amplitudes
         {node id: amplitude, ... }
@@ -45,10 +45,12 @@ class Node(Component):
         array of inwave amplitudes
     outwave_np:
         array of outwave amplitudes
-    S_mat:
+    S:
         numpy array specifying scattering matrix
-    iS_mat:
-        numpy array specifying inverse scattering matrix"""
+    S_inv:
+        numpy array specifying inverse scattering matrix
+    dS:
+        derivative of S with respect to k0"""
 
     def __init__(
         self,
@@ -113,8 +115,13 @@ class Node(Component):
             "outwave_np": np.zeros(0, dtype=np.complex128),
             "S_mat_type": "COE",
             "S_mat_params": {},
-            "S_mat": np.zeros(0, dtype=np.complex128),
-            "iS_mat": np.zeros(0, dtype=np.complex128),
+            "get_S": lambda k0: np.array(
+                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
+            ),
+            "get_S_inv": lambda k0: np.array(
+                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
+            ),
+            "get_dS": lambda k0: np.zeros((2, 2), dtype=np.complex128),
         }
         return default_values
 

@@ -20,7 +20,7 @@ from tqdm import tqdm
 from complex_network import utils
 from complex_network.networks import pole_calculator
 from complex_network.networks.network import Network
-
+from complex_network.scattering_matrices import node_matrix
 
 @dataclass
 class PerturbationStatus:
@@ -92,6 +92,40 @@ class NetworkPerturbator:
         self.status.perturbation_value = value
         self.status.link_id = link_index
 
+    def perturb_segment_n(self, link_index: int, value: complex) -> None:
+        """Change the refractive index of a segment link so that it becomes
+        base_n + value. Update its neighbouring node scattering matrices
+        according to the fresnel coefficients"""
+        link = self.perturbed_network.get_link(link_index)
+
+        # Need to copy this to avoid a recursion error
+        copied_function = copy.deepcopy(link.Dn)
+
+        def new_Dn(k0: complex) -> complex:
+            return copied_function(k0) + value
+
+        link.Dn = new_Dn
+
+        self.status.perturbation_type = "link_n"
+        self.status.perturbation_value = value
+        self.status.link_id = link_index
+
+        # Update node scattering matrices (new fresnel matrices)
+        # ---------|    O     |------|     O    |---------
+        # link_one | node_one | link | node_two | link_two
+        node_one = self.perturbed_network.get_node(link.node_indices[0])
+        node_two = self.perturbed_network.get_node(link.node_indices[1])
+
+        # Get the right link indices and links
+        first, second = node_one.sorted_connected_links
+        link_one_index = first if first != link_index else second 
+        link_one = self.perturbed_network.get_link(link_one_index)
+        first, second = node_two.sorted_connected_links
+        link_two_index = first if first != link_index else second 
+        link_two = self.perturbed_network.get_link(link_two_index)
+
+        return None
+
     # -------------------------------------------------------------------------
     # Methods associated with iterative perturbations
     # -------------------------------------------------------------------------
@@ -113,15 +147,17 @@ class NetworkPerturbator:
         # Set up list for storing poles
         poles = {
             "direct": [pole],
-            "wigner": [pole],
-            "wigner_residue": [pole],
+            "formula": [pole],
+            "formula_residue": [pole],
+            "formula_residue_i": [pole],
             "volume_residue": [pole],
             "volume_residue_i": [pole]
         }
         pole_shifts = {
             "direct": [],
-            "wigner": [],
-            "wigner_residue": [],
+            "formula": [],
+            "formula_residue": [],
+            "formula_residue_i": [],
             "volume_residue": [],
             "volume_residue_i": []
         }
@@ -153,13 +189,13 @@ class NetworkPerturbator:
                 old_pole, "Dn", perturbed_link_index=link_index
             )
             pole_shift = -np.trace(ws_Dn) / np.trace(ws_k0) * Dn_shift
-            poles["wigner"].append(poles["wigner"][-1] + pole_shift)
-            pole_shifts["wigner"].append(pole_shift)
+            poles["formula"].append(poles["formula"][-1] + pole_shift)
+            pole_shifts["formula"].append(pole_shift)
 
             # 3) Work out pole shift from Wigner-Smith operator residues
             # (formula)
             ws_k0_res = pole_calculator.get_residue(
-                self.unperturbed_network.get_wigner_smith, pole
+                self.unperturbed_network.get_wigner_smith, old_pole
             )
 
             func = functools.partial(
@@ -167,17 +203,25 @@ class NetworkPerturbator:
                 variable="Dn",
                 perturbed_link_index=link_index,
             )
-            ws_Dn_res = pole_calculator.get_residue(func, pole)
+            ws_Dn_res = pole_calculator.get_residue(func, old_pole)
 
             pole_shift = -np.trace(ws_Dn_res) / np.trace(ws_k0_res) * Dn_shift
-            poles["wigner_residue"].append(
-                poles["wigner_residue"][-1] + pole_shift
+            poles["formula_residue"].append(
+                poles["formula_residue"][-1] + pole_shift
             )
-            pole_shifts["wigner_residue"].append(pole_shift)
+            pole_shifts["formula_residue"].append(pole_shift)
 
-            # 4) Work out pole shift from volume Wigner-Smith operator residues
+            # 4) Formula residue with 1j
+            pole_shift = -np.trace(ws_Dn_res) / 1j * Dn_shift
+            poles["formula_residue_i"].append(
+                poles["formula_residue_i"][-1] + pole_shift
+            )
+            pole_shifts["formula_residue_i"].append(pole_shift)
+
+
+            # 5) Work out pole shift from volume Wigner-Smith operator residues
             ws_k0_res = pole_calculator.get_residue(
-                self.unperturbed_network.get_wigner_smith_volume, pole
+                self.unperturbed_network.get_wigner_smith_volume, old_pole
             )
 
             func = functools.partial(
@@ -185,7 +229,7 @@ class NetworkPerturbator:
                 variable="Dn",
                 perturbed_link_index=link_index,
             )
-            ws_Dn_res = pole_calculator.get_residue(func, pole)
+            ws_Dn_res = pole_calculator.get_residue(func, old_pole)
 
             pole_shift = -np.trace(ws_Dn_res) / np.trace(ws_k0_res) * Dn_shift
             poles["volume_residue"].append(
@@ -193,7 +237,7 @@ class NetworkPerturbator:
             )
             pole_shifts["volume_residue"].append(pole_shift)
 
-            # 4) Same as 4, but assume ws_k0_res has trace i
+            # 6) Same as 5, but assume ws_k0_res has trace i
             pole_shift = -np.trace(ws_Dn_res) / 1j * Dn_shift
             
             poles["volume_residue_i"].append(

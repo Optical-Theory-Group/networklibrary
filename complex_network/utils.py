@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import binary_erosion, generate_binary_structure
-from skimage import measure
 
 
 def get_adjugate(M: np.ndarray) -> np.ndarray:

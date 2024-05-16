@@ -1,12 +1,18 @@
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import scipy
 
+from complex_network.components.component import Component
 
-def get_S_mat(
+# -----------------------------------------------------------------------------
+# Methods for constant node scattering matrices (independent of k0)
+# -----------------------------------------------------------------------------
+
+
+def get_constant_node_S_closure(
     S_mat_type: str, size: int, S_mat_params: dict[str, Any] | None = None
-) -> np.ndarray:
+) -> Callable:
     """Generate a random node scattering matrix of a given size.
 
     S_mat_params must contain at least "S_mat_type". Options are
@@ -112,4 +118,71 @@ def get_S_mat(
         S_mat_bot_row = np.concatenate((S21, S22), axis=1)
         S_mat = np.concatenate((S_mat_top_row, S_mat_bot_row), axis=0)
 
-    return S_mat
+    # We want to return a function, not a matrix (even though it's a constant
+    # function)
+    get_S = lambda k0: S_mat
+    return get_S
+
+
+def get_inverse_matrix_closure(func: Callable) -> Callable:
+    """Get closure for inverse scattering matrix"""
+
+    def get_S_inv(k0: complex) -> np.ndarray:
+        return np.linalg.inv(func(k0))
+
+    return get_S_inv
+
+
+def get_zero_matrix_closure(size: int) -> Callable:
+    """Get closure for zero matrices of given size.
+
+    Mostly used for the derivative matrix in the case that the scattering
+    matrix is constant."""
+
+    def get_zero_matrix(k0, *args, **kwargs) -> np.ndarray:
+        return np.zeros((size, size), dtype=np.complex128)
+
+    return get_zero_matrix
+
+
+def get_permuted_matrix_closure(
+    component: Component, matrix_case: str, sorted_indices: list[int]
+) -> Callable:
+    """Produces closures that permute the indices of scattering matrices
+    returned by a scattering matrix function.
+
+    These are needed properly permute the matrix functions. Permutations
+    are required, for example, if the relabelling of network indices results in
+    a new order in a node's sorted_indices, since the node scattering matrix by
+    definition acts on a vector ordered by these indices.
+
+    matrix_case should be either "get_S", "get_S_inv" or "get_dS"."""
+    func = getattr(component, matrix_case, None)
+    if func is None:
+        raise ValueError(f"Invalid matrix_case {matrix_case}")
+
+    def get_permuted_matrix(k0: complex, *args, **kwargs) -> np.ndarray:
+        matrix = func(k0, *args, **kwargs)
+        return matrix[:, sorted_indices][sorted_indices, :]
+
+    return get_permuted_matrix
+
+
+# -----------------------------------------------------------------------------
+# Fresnel node matrices used primarily for link segments
+# -----------------------------------------------------------------------------
+
+
+def fresnel(n1: complex, n2: complex) -> np.ndarray:
+    """Fresnel scattering matrix
+
+    n1 | n2
+    """
+
+    r = (n1 - n2) / (n1 + n2)
+    r2 = (n2 - n1) / (n1 + n2)
+    t = 2 * n1 / (n1 + n2)
+    t2 = t
+
+    S = np.array([[r, t2], [t, r2]])
+    return S

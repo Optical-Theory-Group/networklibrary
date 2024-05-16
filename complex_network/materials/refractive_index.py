@@ -28,8 +28,8 @@ def dn_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
 
     The input is assumed to be given as a wavenumber in units 1/m."""
     k0 = np.real(k0)
-    # Denominator is just n_glass, multiplied by 2 because we differentiate
-    # a square root
+    # Denominator is just n multiplied by 2 because we differentiate a square
+    # root
     denominator = 2 * n_sellmeier_k0(k0, B, C)
 
     wavelength = 2 * np.pi / k0

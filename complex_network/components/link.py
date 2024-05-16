@@ -38,10 +38,12 @@ class Link(Component):
         array of inwave amplitudes
     outwave_np:
         array of outwave amplitudes
-    S_mat:
-        propagation matrix
-    iS_mat:
-        inverse propagation matrix"""
+    get_S:
+        function that returns the propagation matrix
+    get_S_inv:
+        function that returns the inverse propagation matrix
+    get_dS:
+        function that returns the derivative of the propagation matrix"""
 
     def __init__(
         self,
@@ -72,7 +74,7 @@ class Link(Component):
     @property
     def power_direction(self) -> float:
         """Direction in which net power flows within the link.
-        
+
         Output is 1 or -1"""
         return np.sign(
             np.abs(self.inwave_np[0]) ** 2 - np.abs(self.outwave_np[0]) ** 2
@@ -95,29 +97,11 @@ class Link(Component):
             "outwave": {},
             "inwave_np": np.array([0 + 0j, 0 + 0j]),
             "outwave_np": np.array([0 + 0j, 0 + 0j]),
-            "S_mat": np.array([[0, 1 + 0j], [1 + 0j, 0]]),
-            "iS_mat": np.array([[0, 1 + 0j], [1 + 0j, 0]]),
+            "get_S": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
+            "get_S_inv": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
+            "get_dS": lambda k0: np.array([[0, 0], [0, 0]]),
         }
         return default_values
-
-    def update_S_matrices(self, k0: float | complex) -> None:
-        """Function to set the scattering matrix of the link."""
-        length = self.length
-        n = self.n(k0)
-        Dn = self.Dn(k0)
-
-        self.S_mat = np.array(
-            [
-                [0, np.exp(1j * (n + Dn) * k0 * length)],
-                [np.exp(1j * (n + Dn) * k0 * length), 0],
-            ]
-        )
-        self.iS_mat = np.array(
-            [
-                [0, np.exp(-1j * (n + Dn) * k0 * length)],
-                [np.exp(-1j * (n + Dn) * k0 * length), 0],
-            ]
-        )
 
     def draw(
         self,

@@ -5,17 +5,18 @@ itself."""
 
 import logging
 import math
-
+from typing import Any
 import numpy as np
 import scipy
+import copy
 from scipy.spatial import ConvexHull
-
+import functools
 import logconfig
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.networks.network import Network
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.scattering_matrices.scattering_matrix import get_S_mat
+from complex_network.scattering_matrices import node_matrix, link_matrix
 
 # from line_profiler_pycharm import profile
 
@@ -105,19 +106,23 @@ def _initialise_nodes(
         # Set up scattering matrices
         if node.node_type == "external":
             # This matrix just transfers power onwards
-            node.S_mat = np.array(
+            # There is no physics here
+            node.get_S = lambda k0: np.array(
                 [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
             )
-            node.iS_mat = np.array(
+            node.get_S_inv = lambda k0: np.array(
                 [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
             )
-            continue
-
-        node.S_mat_params = spec.node_S_mat_params
-        node.S_mat = get_S_mat(
-            spec.node_S_mat_type, size, spec.node_S_mat_params
-        )
-        node.iS_mat = np.linalg.inv(node.S_mat)
+            node.get_dS = lambda k0: np.array(
+                [[0.0, 0.0], [0.0, 0.0]], dtype=np.complex128
+            )
+        elif node.node_type == "internal":
+            node.S_mat_params = spec.node_S_mat_params
+            node.get_S = node_matrix.get_constant_node_S_closure(
+                spec.node_S_mat_type, size, spec.node_S_mat_params
+            )
+            node.get_S_inv = node_matrix.get_inverse_matrix_closure(node.get_S)
+            node.get_dS = node_matrix.get_zero_matrix_closure(size)
 
 
 def _initialise_links(
@@ -149,6 +154,14 @@ def _initialise_links(
         link.material = spec.material
         link.n = spec.material.n
         link.dn = spec.material.dn
+
+        link.get_S = link_matrix.get_propagation_matrix_closure(link)
+        link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(
+            link
+        )
+        link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(
+            link
+        )
 
 
 def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:

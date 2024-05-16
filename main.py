@@ -38,21 +38,10 @@ network = network_factory.generate_network(spec)
 network.draw(show_indices=True)
 pole = 12532230.332102112 - 11.136143180724291j
 
-ws = network.get_wigner_smith(pole)
-res = get_residue(network.get_wigner_smith, pole, radius=1e-2, degree=10)
-
-A = network.get_S_ee_inv(pole)
-B = network.get_dS_ee(pole)
+k0 = 2 * np.pi / (500e-9)
+S1 = network.get_S_ee(k0)
 
 
-# # Testing the hypothesis
-# inv_fac = network.get_inv_factor(pole)
-# eigs, w = np.linalg.eig(inv_fac)
-# eigs = np.where(np.isclose(eigs, 0.0), 1.0, eigs)
-# rebuilt = w @ np.diag(eigs) @ np.linalg.inv(w)
-
-# P_ei = network.get_P_ei(pole)
-# S_ii = network.get_S_ii()
-# P_ie = network.get_P_ie(pole)
-# S_ee = P_ei @ np.linalg.inv(rebuilt) @ S_ii @ P_ie
-
+network.add_node_to_link(9, 0.5)
+network.draw(show_indices=True)
+S2 = network.get_S_ee(k0)
