@@ -3,16 +3,12 @@
 This is used for the links' optical properties."""
 
 import functools
-from typing import Callable
 
 import numpy as np
 
 from complex_network.materials.material import Material
-from complex_network.materials.refractive_index import (
-    dn_sellmeier_k0,
-    n_sellmeier_k0,
-)
-
+from complex_network.materials.refractive_index import (dn_sellmeier_k0,
+                                                        n_sellmeier_k0)
 
 # Dictionaries containing sellmeier coefficients, which are used to calculate
 # refractive indices. See https://en.wikipedia.org/wiki/Sellmeier_equation

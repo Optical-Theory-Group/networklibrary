@@ -655,3 +655,22 @@
                 U_3[q, p] = partial_sum
 
         return U_3
+
+
+
+    def perturb_link_n(self, link_index: int, value: complex) -> None:
+        """Change the refractive index of a link so that it becomes
+        base_n + value"""
+        link = self.perturbed_network.get_link(link_index)
+
+        # Need to copy this to avoid a recursion error
+        copied_function = copy.deepcopy(link.Dn)
+
+        def new_Dn(k0: complex) -> complex:
+            return copied_function(k0) + value
+
+        link.Dn = new_Dn
+
+        self.status.perturbation_type = "link_n"
+        self.status.perturbation_value = value
+        self.status.link_id = link_index

@@ -5,9 +5,10 @@ use them. They are not really of any use anymore since the network calculations
 can all be done analytically. This may be deleted in the future. If you want to
 use these, paste them back into the network class"""
 
+import warnings
+
 import numpy as np
 from tqdm import tqdm
-import warnings
 
 # -------------------------------------------------------------------------
 # Iterative scattering methods

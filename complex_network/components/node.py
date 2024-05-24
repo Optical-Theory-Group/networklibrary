@@ -1,16 +1,11 @@
 """Class module for network nodes."""
 
-import logging
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-import logconfig
 from complex_network.components.component import Component
-
-logconfig.setup_logging()
-logger = logging.getLogger(__name__)
 
 
 class Node(Component):

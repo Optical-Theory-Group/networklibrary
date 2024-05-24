@@ -1,17 +1,14 @@
 """Main network class module."""
 
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-from tqdm.notebook import tqdm
-from typing import Callable
-import functools
-import copy
+
 from complex_network.components.link import Link
 from complex_network.components.node import Node
-from complex_network.scattering_matrices import node_matrix, link_matrix
+from complex_network.scattering_matrices import link_matrix, node_matrix
 
 
 class Network:
@@ -237,6 +234,20 @@ class Network:
         if link is None:
             raise ValueError(f"Link {index} does not exist.")
         return link
+
+    def get_node_by_position(self, position: np.ndarray) -> Node:
+        """Find the node with a given position."""
+        for node in self.nodes:
+            if np.allclose(node.position, position):
+                return node
+        raise ValueError("Node not found.")
+
+    def get_link_by_node_indices(self, node_indices: tuple[int, int]) -> Link:
+        """Find the link that connects the nodes with given indices."""
+        for link in self.links:
+            if sorted(link.node_indices) == sorted(node_indices):
+                return link
+        raise ValueError("Link not found.")
 
     def reset_dict_indices(self) -> None:
         """Go through the node and link dictionaries and generate a new
@@ -482,6 +493,144 @@ class Network:
         self.reset_dict_indices()
         self._reset_fields()
         self._set_matrix_calc_utils()
+
+    def add_segment_to_link(
+        self,
+        link_index: int,
+        fractional_positions: tuple[float, float],
+        node_S_matrix_type: str = "fresnel",
+    ) -> None:
+        """Add a segment to a link.
+
+        Initially the segment will have the same refractive index as the
+        original link. The nodes will be given fresnel scattering matrices.
+
+        The segment looks like this
+
+        O       |--------|    O     |-----------|     O     |--------|    O
+        node_one link_one first_node middle_link second_node link_two node_two
+
+        Apologies for future developers for naming convention here. Go through
+        it carefully with an example network."""
+
+        # Sort for consistency and extract ratios
+        fractional_positions = np.sort(fractional_positions)
+        s1, s2 = fractional_positions
+
+        original_link = self.get_link(link_index)
+        node_one_index, node_two_index = original_link.node_indices
+        node_one = self.get_node(node_one_index)
+        node_two = self.get_node(node_two_index)
+        node_one_position = node_one.position
+        node_two_position = node_two.position
+
+        # Work out the new node positions
+        # This is so we can find them after all the index relabeling
+        first_node_position = node_one.position + s1 * (
+            node_two.position - node_one.position
+        )
+        second_node_position = node_one.position + s2 * (
+            node_two.position - node_one.position
+        )
+
+        # Add first node and find its index
+        self.add_node_to_link(link_index, s1)
+        first_node_index = self.get_node_by_position(first_node_position).index
+
+        # Find the link that connects the new node and node_two
+        # Note: node_two_index may have changed!
+        node_two_index = self.get_node_by_position(node_two_position).index
+        second_link_index = self.get_link_by_node_indices(
+            (first_node_index, node_two_index)
+        ).index
+
+        # Add second node and find its index
+        # Ratio is its fractional position along the new link
+        ratio = (s2 - s1) / (1 - s1)
+        self.add_node_to_link(second_link_index, ratio)
+
+        first_node_index = self.get_node_by_position(first_node_position).index
+        second_node_index = self.get_node_by_position(
+            second_node_position
+        ).index
+        middle_link = self.get_link_by_node_indices(
+            (first_node_index, second_node_index)
+        )
+
+        self.update_segment_matrices(middle_link)
+
+    def update_segment_matrices(self, link: Link) -> None:
+        """Update the link and node scattering matrices at a segment.
+        
+        This is needed because the node scattering matrices will likely be
+        Fresnel matrices, which need to be updated when the link's refractive
+        index has changed."""
+
+        # Update link scattering matrices
+        link.get_S = link_matrix.get_propagation_matrix_closure(link)
+        link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(
+            link
+        )
+        link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(
+            link
+        )
+
+        node_one_index, node_two_index = link.node_indices
+        node_one = self.get_node(node_one_index)
+        node_two = self.get_node(node_two_index)
+        link_one_index = (
+            node_one.sorted_connected_links[0]
+            if node_one.sorted_connected_links[0] != link.index
+            else node_one.sorted_connected_links[1]
+        )
+        link_two_index = (
+            node_two.sorted_connected_links[0]
+            if node_two.sorted_connected_links[0] != link.index
+            else node_two.sorted_connected_links[1]
+        )
+        link_one = self.get_link(link_one_index)
+        link_two = self.get_link(link_two_index)
+
+        # Update node scattering matrices
+        # Note that we need to be careful about the order of the refractive
+        # indices on either side of the nodes, i.e. which one is "n1" and which
+        # is "n2" within the Fresnel formulas. The order is ultimately
+        # determined by the numerical order of sorted_connected_nodes. 
+        sorted_connected_nodes = node_one.sorted_connected_nodes
+        first_link = (
+            link_one if sorted_connected_nodes[0] != node_two.index else link
+        )
+        second_link = link if first_link.index == link_one.index else link_one
+        perturbed_link_number = 1 if first_link.index == link.index else 2
+
+        node_one.get_S = node_matrix.get_S_fresnel_closure(
+            first_link, second_link
+        )
+        node_one.get_S_inv = node_matrix.get_S_fresnel_inverse_closure(
+            first_link, second_link
+        )
+        node_one.get_dS = node_matrix.get_S_fresnel_derivative_closure(
+            first_link, second_link, perturbed_link_number
+        )
+
+        # Same, but the other node. Can maybe do both in a loop but the 
+        # way in which first_link and second_link are determined is different
+        sorted_connected_nodes = node_two.sorted_connected_nodes
+        first_link = (
+            link_two if sorted_connected_nodes[0] != node_one.index else link
+        )
+        second_link = link if first_link.index == link_two.index else link_two
+        perturbed_link_number = 1 if first_link.index == link.index else 2
+
+        node_two.get_S = node_matrix.get_S_fresnel_closure(
+            first_link, second_link
+        )
+        node_two.get_S_inv = node_matrix.get_S_fresnel_inverse_closure(
+            first_link, second_link
+        )
+        node_two.get_dS = node_matrix.get_S_fresnel_derivative_closure(
+            first_link, second_link, perturbed_link_number
+        )
 
     # -------------------------------------------------------------------------
     #  Direct scattering methods
@@ -1252,7 +1401,6 @@ class Network:
 
     def get_U_0(self, k0: float | complex) -> np.ndarray:
         """Calculate the U_0 matrix (see theory notes)"""
-        self.update_links(k0)
 
         num_externals = self.num_external_nodes
         U_0 = np.zeros((num_externals, num_externals), dtype=np.complex128)
@@ -1282,7 +1430,7 @@ class Network:
                 for link in self.links:
                     length = link.length
                     n = link.n(k0)
-                    Dn = link.Dn(k0)
+                    Dn = link.Dn
 
                     # Get the field distribution associated with q
                     # illumination
@@ -1332,8 +1480,6 @@ class Network:
             case _:
                 pass
 
-        self.update_links(k0)
-
         num_externals = self.num_external_nodes
         U_1 = np.zeros((num_externals, num_externals), dtype=np.complex128)
 
@@ -1361,9 +1507,9 @@ class Network:
                 for link in self.links:
                     length = link.length
                     n = link.n(k0)
-                    Dn = link.Dn(k0)
                     dn = link.dn(k0)
-                    dDn = link.dDn(k0)
+
+                    Dn = link.Dn
 
                     q_o = O_int_vectors[q]
                     q_i = I_int_vectors[q]
@@ -1384,7 +1530,7 @@ class Network:
                     # Factor related to refractive index derivative
                     match variable:
                         case "k0":
-                            factor = length * (n + Dn + k0 * (dn + dDn))
+                            factor = length * (n + Dn + k0 * (dn))
                         case "Dn":
                             if link.index != perturbed_link_index:
                                 continue
@@ -1422,8 +1568,6 @@ class Network:
             case _:
                 pass
 
-        self.update_links(k0)
-
         num_externals = self.num_external_nodes
         U_2 = np.zeros((num_externals, num_externals), dtype=np.complex128)
 
@@ -1452,9 +1596,8 @@ class Network:
                 for link in self.links:
                     length = link.length
                     n = link.n(k0)
-                    Dn = link.Dn(k0)
                     dn = link.dn(k0)
-                    dDn = link.dDn(k0)
+                    Dn = link.Dn
 
                     q_o = O_int_vectors[q]
                     q_i = I_int_vectors[q]
@@ -1477,7 +1620,7 @@ class Network:
                         case "k0":
                             factor = (
                                 0.5
-                                * (dn + dDn)
+                                * (dn)
                                 / (n + Dn)
                                 * np.imag(k0)
                                 / np.real(k0)
@@ -1520,8 +1663,6 @@ class Network:
             case _:
                 pass
 
-        self.update_links(k0)
-
         num_externals = self.num_external_nodes
         U_3 = np.zeros((num_externals, num_externals), dtype=np.complex128)
 
@@ -1561,7 +1702,7 @@ class Network:
                 for link in self.links:
                     length = link.length
                     n = link.n(k0)
-                    Dn = link.Dn(k0)
+                    Dn = link.Dn
 
                     q_o = O_int_vectors[q]
                     q_i = I_int_vectors[q]

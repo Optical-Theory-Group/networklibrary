@@ -2,10 +2,8 @@
 components of the networks.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-
-import numpy as np
 
 from complex_network.materials.dielectric import Dielectric
 from complex_network.materials.material import Material

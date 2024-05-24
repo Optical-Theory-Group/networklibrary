@@ -3,26 +3,15 @@
 This should be used to generate networks, rather than the network class
 itself."""
 
-import logging
-import math
-from typing import Any
 import numpy as np
 import scipy
-import copy
 from scipy.spatial import ConvexHull
-import functools
-import logconfig
+
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.networks.network import Network
 from complex_network.networks.network_spec import NetworkSpec
-from complex_network.scattering_matrices import node_matrix, link_matrix
-
-# from line_profiler_pycharm import profile
-
-
-logconfig.setup_logging()
-logger = logging.getLogger(__name__)
+from complex_network.scattering_matrices import link_matrix, node_matrix
 
 
 def generate_network(spec: NetworkSpec) -> Network:

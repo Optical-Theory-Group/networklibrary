@@ -11,8 +11,8 @@ from complex_network.networks.network_perturbator import (NetworkPerturbator,
                                                           pole_calculator)
 from complex_network.networks.network_spec import NetworkSpec
 from complex_network.networks.pole_calculator import (contour_integral,
-                                                  contour_integral_segment,
-                                                  find_pole, sweep)
+                                                      contour_integral_segment,
+                                                      find_pole, sweep)
 
 np.random.seed(1)
 

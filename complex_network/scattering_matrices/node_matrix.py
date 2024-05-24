@@ -4,6 +4,7 @@ import numpy as np
 import scipy
 
 from complex_network.components.component import Component
+from complex_network.components.link import Link
 
 # -----------------------------------------------------------------------------
 # Methods for constant node scattering matrices (independent of k0)
@@ -173,16 +174,95 @@ def get_permuted_matrix_closure(
 # -----------------------------------------------------------------------------
 
 
-def fresnel(n1: complex, n2: complex) -> np.ndarray:
-    """Fresnel scattering matrix
+def get_S_fresnel_closure(first_link: Link, second_link: Link) -> np.ndarray:
+    """Standard Fresnel scattering matrix"""
 
-    n1 | n2
-    """
+    def get_S_fresnel(k0: complex) -> np.ndarray:
+        n1 = first_link.n(k0) + first_link.Dn
+        n2 = second_link.n(k0) + second_link.Dn
 
-    r = (n1 - n2) / (n1 + n2)
-    r2 = (n2 - n1) / (n1 + n2)
-    t = 2 * n1 / (n1 + n2)
-    t2 = t
+        r = (n1 - n2) / (n1 + n2)
+        r2 = (n2 - n1) / (n1 + n2)
+        t = 2 * n1 / (n1 + n2)
+        t2 = 2 * n2 / (n1 + n2)
 
-    S = np.array([[r, t2], [t, r2]])
-    return S
+        S = np.array([[r, t2], [t, r2]])
+        return S
+
+    return get_S_fresnel
+
+
+def get_S_fresnel_inverse_closure(
+    first_link: Link, second_link: Link
+) -> np.ndarray:
+    """Standard Fresnel scattering matrix inverse"""
+
+    def get_S_fresnel_inverse(k0: complex) -> np.ndarray:
+        n1 = first_link.n(k0) + first_link.Dn
+        n2 = second_link.n(k0) + second_link.Dn
+
+        r = (n1 - n2) / (n1 + n2)
+        r2 = -r
+        t = 2 * n1 / (n1 + n2)
+        t2 = 2 * n2 / (n1 + n2)
+
+        S = np.array([[r, t2], [t, r2]])
+        return np.linalg.inv(S)
+
+    return get_S_fresnel_inverse
+
+
+def get_S_fresnel_derivative_closure(
+    first_link: Link, second_link: Link, perturbed_link_number: int = None
+) -> np.ndarray:
+    """Standard Fresnel scattering matrix derivative.
+
+    Note: The Dn derivative is with respect to Dn in the link segment!
+
+    Perturbed link number tells which of the links (first or second) is the
+    segment. This should be either 1 or 2. 1 means first_link is the perturbed
+    one. 2 means second link is."""
+
+    def get_S_fresnel_derivative(
+        k0: complex, variable: str = "k0"
+    ) -> np.ndarray:
+        VALID_VARIABLES = ["k0", "Dn"]
+
+        n1 = first_link.n(k0) + first_link.Dn
+        n2 = second_link.n(k0) + second_link.Dn
+
+        match variable:
+            case "k0":
+                dn1 = first_link.dn(k0)
+                dn2 = second_link.dn(k0)
+
+            case "Dn":
+                if perturbed_link_number not in [1, 2]:
+                    raise ValueError(
+                        "perturbed_link_number must be either 1 or 2."
+                    )
+
+                if perturbed_link_number == 1:
+                    dn1 = 1.0
+                    dn2 = 0.0
+                else:
+                    dn1 = 0.0
+                    dn2 = 1.0
+            case _:
+                raise ValueError(
+                    f"Invalid variable {variable}. Pick one "
+                    f"from {VALID_VARIABLES}"
+                )
+
+        # This comes from the quotient rule
+        dr = ((dn1 - dn2) * (n1 + n2) - (n1 - n2) * (dn1 + dn2)) / (
+            n1 + n2
+        ) ** 2
+        dr2 = -dr
+        dt = (dn1 * (n1 + n2) - n1 * (dn1 + dn2)) / (n1 + n2) ** 2
+        dt2 = (dn2 * (n1 + n2) - n2 * (dn1 + dn2)) / (n1 + n2) ** 2
+
+        S = np.array([[dr, dt2], [dt, dr2]])
+        return S
+
+    return get_S_fresnel_derivative

@@ -1,10 +1,11 @@
 """Factory methods for returning closures that compute link scattering
 matrices."""
 
-import numpy as np
-from complex_network.components.link import Link
 from typing import Callable
 
+import numpy as np
+
+from complex_network.components.link import Link
 
 # -----------------------------------------------------------------------------
 # Standard propagation matrices for single mode waveguides
@@ -18,10 +19,10 @@ def get_propagation_matrix_closure(link: Link) -> Callable:
             [
                 [
                     0.0,
-                    np.exp(1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length),
+                    np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                 ],
                 [
-                    np.exp(1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length),
+                    np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                     0.0,
                 ],
             ]
@@ -40,13 +41,13 @@ def get_propagation_matrix_inverse_closure(link: Link) -> Callable:
                     0.0,
                     1.0
                     / np.exp(
-                        1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length
+                        1j * (link.n(k0) + link.Dn) * k0 * link.length
                     ),
                 ],
                 [
                     1.0
                     / np.exp(
-                        1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length
+                        1j * (link.n(k0) + link.Dn) * k0 * link.length
                     ),
                     0.0,
                 ],
@@ -68,10 +69,10 @@ def get_propagation_matrix_derivative_closure(link: Link) -> Callable:
             [
                 [
                     0.0,
-                    np.exp(1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length),
+                    np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                 ],
                 [
-                    np.exp(1j * (link.n(k0) + link.Dn(k0)) * k0 * link.length),
+                    np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                     0.0,
                 ],
             ]
@@ -83,9 +84,9 @@ def get_propagation_matrix_derivative_closure(link: Link) -> Callable:
                     1j
                     * link.length
                     * (
-                        k0 * (link.dn(k0) + link.dDn(k0))
+                        k0 * link.dn(k0)
                         + link.n(k0)
-                        + link.Dn(k0)
+                        + link.Dn
                     )
                 )
             case "Dn":

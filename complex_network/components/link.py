@@ -1,16 +1,11 @@
 """Class module for network links."""
 
-import logging
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-import logconfig
 from complex_network.components.component import Component
-
-logconfig.setup_logging()
-logger = logging.getLogger(__name__)
 
 
 class Link(Component):
@@ -89,8 +84,7 @@ class Link(Component):
             "length": 0.0,
             "n": lambda k0: 1.0,
             "dn": lambda k0: 0.0,
-            "Dn": lambda k0: 0.0,
-            "dDn": lambda k0: 0.0,
+            "Dn": 0.0,
             "material": None,
             "sorted_connected_nodes": [],
             "inwave": {},
