@@ -40,103 +40,103 @@ x, y, data = sweep(k_min, k_max, 1 * 10**2, network)
 plt.figure()
 plt.imshow(1 / data)
 plt.colorbar()
-min_index = np.argmin(data)
-row, col = np.unravel_index(min_index, data.shape)
-pole_guess = x[row, col] + 1j * y[row, col]
+# min_index = np.argmin(data)
+# row, col = np.unravel_index(min_index, data.shape)
+# pole_guess = x[row, col] + 1j * y[row, col]
 
-# Check how good the guess is
-S = network.get_S_ee(n, pole_guess)
-S_inv = network.get_S_ee_inv(n, pole_guess)
-det = np.abs(np.linalg.det(S))
-det_inv = np.abs(np.linalg.det(S_inv))
-print(f"Pole guess determinant: {det}")
-print(f"Pole guess determinant inerse: {det_inv}")
+# # Check how good the guess is
+# S = network.get_S_ee(n, pole_guess)
+# S_inv = network.get_S_ee_inv(n, pole_guess)
+# det = np.abs(np.linalg.det(S))
+# det_inv = np.abs(np.linalg.det(S_inv))
+# print(f"Pole guess determinant: {det}")
+# print(f"Pole guess determinant inerse: {det_inv}")
 
-# Hone in on pole
-pole = find_pole(network, pole_guess)
-pole = 12532234.746804317 - 18.467637263524797j
-S = network.get_S_ee(n, pole)
-S_inv = network.get_S_ee_inv(n, pole)
-det = np.abs(np.linalg.det(S))
-det_inv = np.abs(np.linalg.det(S_inv))
-print(f"Pole determinant: {det}")
-print(f"Pole determinant inerse: {det_inv}")
+# # Hone in on pole
+# pole = find_pole(network, pole_guess)
+# pole = 12532234.746804317 - 18.467637263524797j
+# S = network.get_S_ee(n, pole)
+# S_inv = network.get_S_ee_inv(n, pole)
+# det = np.abs(np.linalg.det(S))
+# det_inv = np.abs(np.linalg.det(S_inv))
+# print(f"Pole determinant: {det}")
+# print(f"Pole determinant inerse: {det_inv}")
 
-network_perturbator = NetworkPerturbator(network)
-factor = 1
-points_per_cycle = 250
-thetas = np.linspace(0, factor * 2 * np.pi, factor * points_per_cycle)
-k0s_real = network_perturbator.node_eigenvalue_perturbation_iterative(
-    1, 0, thetas, pole, n
-)
+# network_perturbator = NetworkPerturbator(network)
+# factor = 1
+# points_per_cycle = 250
+# thetas = np.linspace(0, factor * 2 * np.pi, factor * points_per_cycle)
+# k0s_real = network_perturbator.node_eigenvalue_perturbation_iterative(
+#     1, 0, thetas, pole, n
+# )
 
-colors = ["tab:blue", "tab:orange"]
+# colors = ["tab:blue", "tab:orange"]
 
-plt.figure()
-for i in range(factor):
-    plt.plot(
-        np.real(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
-        np.imag(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
-        color=colors[i % 2],
-    )
-# plt.scatter(np.real(k0s_theory), np.imag(k0s_theory), color="tab:orange")
-a = k0s_real[0]
-b = k0s_real[-1]
+# plt.figure()
+# for i in range(factor):
+#     plt.plot(
+#         np.real(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
+#         np.imag(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
+#         color=colors[i % 2],
+#     )
+# # plt.scatter(np.real(k0s_theory), np.imag(k0s_theory), color="tab:orange")
+# a = k0s_real[0]
+# b = k0s_real[-1]
 
-# New sweep
-k0_min = np.real(b) - 14 + 0j
-k0_max = np.real(a) + 14 - 210j
-lam_min = 2 * np.pi / (k0_max.real * 1e-9)
-lam_max = 2 * np.pi / (k0_min.real * 1e-9)
+# # New sweep
+# k0_min = np.real(b) - 14 + 0j
+# k0_max = np.real(a) + 14 - 210j
+# lam_min = 2 * np.pi / (k0_max.real * 1e-9)
+# lam_max = 2 * np.pi / (k0_min.real * 1e-9)
 
-# new_x, new_y, data = sweep(k0_min, k0_max, 1 * 10**2, network)
-fig, ax = plt.subplots()
-im = ax.imshow(
-    1 / data,
-    extent=(lam_min, lam_max, k0_max.imag, k0_min.imag),
-    aspect="auto",
-)
-ax.set_xticks(
-    [
-        lam_min,
-        lam_min + 0.25 * (lam_max - lam_min),
-        lam_min + 0.5 * (lam_max - lam_min),
-        lam_min + 0.75 * (lam_max - lam_min),
-        lam_max,
-    ]
-)
-ax.set_xticklabels(["501.3614", "501.3625", "501.3636", "501.3648", "501.3659"])
-ax.set_yticks([0.0, -50, -100, -150, -200])
-# x_data = np.array(k0s_real).real
-# y_data = np.array(k0s_real).imag
-# ax.scatter(np.array(k0s_real).real, np.array(k0s_real).imag)
-# Add a colorbar
-cbar = fig.colorbar(im, ax=ax)
-cbar.set_ticks([0.0, 200, 400, 600, 800, 1000])  
-plot_area_position = ax.get_position()
-plot_area_width = plot_area_position.width
-plot_area_height = plot_area_position.height
-fig_width_inches = fig.get_figwidth()
-fig_height_inches = fig.get_figheight()
-print(plot_area_width, plot_area_height, fig_width_inches, fig_height_inches)
-# Print the size of the plot area
-fig, ax = plt.subplots(figsize=(6.4*0.6200000000000001, 4.8*0.77))
-for i in range(factor):
-    plt.plot(
-        np.real(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
-        np.imag(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
-        color="black",
-        linewidth=10
-    )
-plot_area_position = ax.get_position()
-plot_area_width = plot_area_position.width
-plot_area_height = plot_area_position.height
-fig_width_inches = fig.get_figwidth()
-fig_height_inches = fig.get_figheight()
-print(plot_area_width, plot_area_height, fig_width_inches, fig_height_inches)
+# # new_x, new_y, data = sweep(k0_min, k0_max, 1 * 10**2, network)
+# fig, ax = plt.subplots()
+# im = ax.imshow(
+#     1 / data,
+#     extent=(lam_min, lam_max, k0_max.imag, k0_min.imag),
+#     aspect="auto",
+# )
+# ax.set_xticks(
+#     [
+#         lam_min,
+#         lam_min + 0.25 * (lam_max - lam_min),
+#         lam_min + 0.5 * (lam_max - lam_min),
+#         lam_min + 0.75 * (lam_max - lam_min),
+#         lam_max,
+#     ]
+# )
+# ax.set_xticklabels(["501.3614", "501.3625", "501.3636", "501.3648", "501.3659"])
+# ax.set_yticks([0.0, -50, -100, -150, -200])
+# # x_data = np.array(k0s_real).real
+# # y_data = np.array(k0s_real).imag
+# # ax.scatter(np.array(k0s_real).real, np.array(k0s_real).imag)
+# # Add a colorbar
+# cbar = fig.colorbar(im, ax=ax)
+# cbar.set_ticks([0.0, 200, 400, 600, 800, 1000])  
+# plot_area_position = ax.get_position()
+# plot_area_width = plot_area_position.width
+# plot_area_height = plot_area_position.height
+# fig_width_inches = fig.get_figwidth()
+# fig_height_inches = fig.get_figheight()
+# print(plot_area_width, plot_area_height, fig_width_inches, fig_height_inches)
+# # Print the size of the plot area
+# fig, ax = plt.subplots(figsize=(6.4*0.6200000000000001, 4.8*0.77))
+# for i in range(factor):
+#     plt.plot(
+#         np.real(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
+#         np.imag(k0s_real)[i * points_per_cycle : (i + 1) * points_per_cycle],
+#         color="black",
+#         linewidth=10
+#     )
+# plot_area_position = ax.get_position()
+# plot_area_width = plot_area_position.width
+# plot_area_height = plot_area_position.height
+# fig_width_inches = fig.get_figwidth()
+# fig_height_inches = fig.get_figheight()
+# print(plot_area_width, plot_area_height, fig_width_inches, fig_height_inches)
 
 
-fig.savefig("hook.svg", format="svg")
+# fig.savefig("hook.svg", format="svg")
 # network_copy = copy.deepcopy(network)
 # network_copy.perturb_node_eigenvalue(1,0, np.exp(1j*4*np.pi))
 # S = network.get_S_ee(n, k0s_real[-1])

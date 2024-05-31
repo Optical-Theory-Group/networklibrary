@@ -561,7 +561,7 @@ class Network:
 
     def update_segment_matrices(self, link: Link) -> None:
         """Update the link and node scattering matrices at a segment.
-        
+
         This is needed because the node scattering matrices will likely be
         Fresnel matrices, which need to be updated when the link's refractive
         index has changed."""
@@ -595,7 +595,7 @@ class Network:
         # Note that we need to be careful about the order of the refractive
         # indices on either side of the nodes, i.e. which one is "n1" and which
         # is "n2" within the Fresnel formulas. The order is ultimately
-        # determined by the numerical order of sorted_connected_nodes. 
+        # determined by the numerical order of sorted_connected_nodes.
         sorted_connected_nodes = node_one.sorted_connected_nodes
         first_link = (
             link_one if sorted_connected_nodes[0] != node_two.index else link
@@ -613,7 +613,7 @@ class Network:
             first_link, second_link, perturbed_link_number
         )
 
-        # Same, but the other node. Can maybe do both in a loop but the 
+        # Same, but the other node. Can maybe do both in a loop but the
         # way in which first_link and second_link are determined is different
         sorted_connected_nodes = node_two.sorted_connected_nodes
         first_link = (
@@ -631,6 +631,36 @@ class Network:
         node_two.get_dS = node_matrix.get_S_fresnel_derivative_closure(
             first_link, second_link, perturbed_link_number
         )
+
+    def translate_node(
+        self, node_index: int, translation_vector: np.ndarray
+    ) -> None:
+        """Translate node given by node_index in the plane by
+        translation_vector"""
+
+        # Update the node itself
+        node = self.get_node(node_index)
+        node.position = node.position + translation_vector
+
+        # Update all the connecting links
+        for link_index in node.sorted_connected_links:
+            link = self.get_link(link_index)
+
+            # Update length
+            node_one_index, node_two_index = link.node_indices
+            node_one = self.get_node(node_one_index)
+            node_two = self.get_node(node_two_index)
+            length = np.linalg.norm(node_one.position - node_two.position)
+            link.length = length
+
+            # Update links matrices
+            link.get_S = link_matrix.get_propagation_matrix_closure(link)
+            link.get_S_inv = (
+                link_matrix.get_propagation_matrix_inverse_closure(link)
+            )
+            link.get_dS = (
+                link_matrix.get_propagation_matrix_derivative_closure(link)
+            )
 
     # -------------------------------------------------------------------------
     #  Direct scattering methods
@@ -1455,6 +1485,110 @@ class Network:
                     ) + I_mp * np.conj(I_mq) * (
                         np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     )
+
+                U_0[q, p] = partial_sum
+
+        return U_0
+
+    def get_U_0_unconjugated(self, k0: float | complex) -> np.ndarray:
+        """Calculate the U_0 matrix (see theory notes)"""
+
+        num_externals = self.num_external_nodes
+        U_0 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+
+        # First work out all of the fields throughout the network
+        S_ie = self.get_S_ie(k0)
+
+        O_int_vectors = []
+        I_int_vectors = []
+
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Internal fields
+            outgoing_vector = S_ie @ incident_field
+            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
+            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            O_int_vectors.append(new_O)
+            I_int_vectors.append(new_I)
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+                # Get the field distribution associated with q
+                # illumination
+                q_o = O_int_vectors[q]
+                q_i = I_int_vectors[q]
+                p_o = O_int_vectors[p]
+                p_i = I_int_vectors[p]
+
+                partial_sum = 0.0 + 0.0j
+
+                for link in self.links:
+                    length = link.length
+                    n = link.n(k0)
+                    Dn = link.Dn
+
+                    # Find the fields in the link
+                    node_one_index = link.sorted_connected_nodes[0]
+                    node_two_index = link.sorted_connected_nodes[1]
+
+                    key = f"{node_one_index},{node_two_index}"
+                    index = self.internal_scattering_map[key]
+                    I_mp = p_i[index]
+                    I_mq = q_i[index]
+                    O_mp = p_o[index]
+                    O_mq = q_o[index]
+
+                    partial_sum -= O_mp * O_mq * (
+                        np.exp(2.0j * (n + Dn) * k0 * length) - 1.0
+                    ) + I_mp * I_mq * (
+                        1.0 - np.exp(-2.0j * (n + Dn) * k0 * length)
+                    )
+
+                    # Node contributions
+                    # z = 0
+                    near_term = (
+                        O_mp * O_mq - O_mp * I_mq + I_mp * O_mq - I_mp * I_mq
+                    )
+
+                    # z = L
+                    far_I_mp = O_mp * np.exp(1j * (n + Dn) * k0 * length)
+                    far_O_mp = I_mp * np.exp(-1j * (n + Dn) * k0 * length)
+                    far_I_mq = O_mq * np.exp(1j * (n + Dn) * k0 * length)
+                    far_O_mq = I_mq * np.exp(-1j * (n + Dn) * k0 * length)
+
+                    if link.nature == "external":
+                        far_term = 0.0
+                    else:
+                        far_term = (
+                            far_O_mp * far_O_mq
+                            - far_O_mp * far_I_mq
+                            + far_I_mp * far_O_mq
+                            - far_I_mp * far_I_mq
+                        )
+                    print(-near_term - far_term)
+                    partial_sum += -near_term - far_term
+
+                # Node contributions
+                # for node in self.internal_nodes:
+                #     sorted_connected_nodes = node.sorted_connected_nodes
+                #     node_index = node.index
+                #     keys = [
+                #         f"{node_index},{connected_index}"
+                #         for connected_index in sorted_connected_nodes
+                #     ]
+
+                #     # Get field component vector
+                #     I_p = np.zeros(len(keys), dtype=np.complex128)
+                #     I_q = np.zeros(len(keys), dtype=np.complex128)
+                #     for i, key in enumerate(keys):
+                #         I_p[i] = p_i[self.internal_scattering_map[key]]
+                #         I_q[i] = q_i[self.internal_scattering_map[key]]
+
+                #     S = node.get_S(k0)
+                #     matrix = np.identity(len(S), dtype=np.complex128) - S.T @ S
+                #     partial_sum += np.dot(I_p, matrix @ I_q)
 
                 U_0[q, p] = partial_sum
 
