@@ -1192,6 +1192,13 @@ class Network:
         This will be zero at a pole"""
         return np.linalg.det(self.get_inv_factor(k0))
 
+    def get_S_ee_inv_det(self, k0: float | complex) -> complex:
+        """Calculate det(I - S_ii P_ii)
+
+        This will be zero at a pole"""
+        return np.linalg.det(self.get_S_ee_inv(k0))
+
+
     # -------------------------------------------------------------------------
     # Methods for getting derivatives and Wigner-Smith operators
     # -------------------------------------------------------------------------

@@ -85,11 +85,12 @@ class NetworkPerturbator:
 
     def track_pole_segment_n(
         self,
-        pole: complex,
+        poles: list[complex],
         link_index: int,
         Dn_values: np.ndarray,
     ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
-        """Track the motion of a pole as one performs link_n perturbations
+        """Track the motion of a list of poles as one performs link_n
+        perturbations
 
         Dn_values should be an array of values that the link's
         Dn value will go through (actual values, not changes).
@@ -98,24 +99,18 @@ class NetworkPerturbator:
         """
 
         # Set up list for storing poles
-        poles = {
-            "direct": [pole],
-            "formula": [pole],
-            "formula_residue": [pole],
-            "formula_residue_i": [pole],
-            "volume_residue": [pole],
-            "volume_residue_i": [pole],
+        poles_dict = {
+            "direct": [[pole] for pole in poles],
+            "formula": [[pole] for pole in poles],
+            "volume": [[pole] for pole in poles],
         }
-        pole_shifts = {
-            "direct": [],
-            "formula": [],
-            "formula_residue": [],
-            "formula_residue_i": [],
-            "volume_residue": [],
-            "volume_residue_i": [],
+        pole_shifts_dict = {
+            "direct": [[] for _ in poles],
+            "formula": [[] for _ in poles],
+            "volume": [[] for _ in poles],
         }
 
-        old_pole = pole
+        old_poles = copy.deepcopy(poles)
         previous_Dn_value = Dn_values[0]
 
         for Dn_value in tqdm(Dn_values[1:]):
@@ -127,78 +122,70 @@ class NetworkPerturbator:
             # Do the perturbation
             self.perturb_segment_n(link_index, Dn_shift)
 
-            # 1) Find the new pole using numerical root finding
-            new_pole = pole_calculator.find_pole(
-                self.perturbed_network, old_pole
-            )
-            poles["direct"].append(new_pole)
-            pole_shift = new_pole - old_pole
-            pole_shifts["direct"].append(pole_shift)
+            new_poles = []
 
-            # 2) Work out pole shift from raw Wigner-Smith operators
-            # (formulas and no residues)
-            ws_k0 = self.unperturbed_network.get_wigner_smith(old_pole)
-            ws_Dn = self.unperturbed_network.get_wigner_smith(
-                old_pole, "Dn", perturbed_link_index=link_index
-            )
-            pole_shift = -np.trace(ws_Dn) / np.trace(ws_k0) * Dn_shift
-            poles["formula"].append(poles["formula"][-1] + pole_shift)
-            pole_shifts["formula"].append(pole_shift)
+            for i, old_pole in enumerate(old_poles):
+                # -------------------------------------------------------------
+                # 1) Find the new pole using numerical root finding
+                new_pole = pole_calculator.find_pole(
+                    self.perturbed_network, old_pole
+                )
+                new_poles.append(new_pole)
 
-            # 3) Work out pole shift from Wigner-Smith operator residues
-            # (formula)
-            ws_k0_res = pole_calculator.get_residue(
-                self.unperturbed_network.get_wigner_smith, old_pole
-            )
+                # Add new pole to the data dictionary
+                poles_dict["direct"][i].append(new_pole)
 
-            func = functools.partial(
-                self.unperturbed_network.get_wigner_smith,
-                variable="Dn",
-                perturbed_link_index=link_index,
-            )
-            ws_Dn_res = pole_calculator.get_residue(func, old_pole)
+                new_pole_shift = new_pole - old_pole
+                pole_shifts_dict["direct"][i].append(new_pole_shift)
 
-            pole_shift = -np.trace(ws_Dn_res) / np.trace(ws_k0_res) * Dn_shift
-            poles["formula_residue"].append(
-                poles["formula_residue"][-1] + pole_shift
-            )
-            pole_shifts["formula_residue"].append(pole_shift)
+                # -------------------------------------------------------------
+                # 2) Work out pole shift from Wigner-Smith operator residues
+                ws_k0_residue = pole_calculator.get_residue(
+                    self.unperturbed_network.get_wigner_smith, old_pole
+                )
 
-            # 4) Formula residue with 1j
-            pole_shift = -np.trace(ws_Dn_res) / 1j * Dn_shift
-            poles["formula_residue_i"].append(
-                poles["formula_residue_i"][-1] + pole_shift
-            )
-            pole_shifts["formula_residue_i"].append(pole_shift)
+                func = functools.partial(
+                    self.unperturbed_network.get_wigner_smith,
+                    variable="Dn",
+                    perturbed_link_index=link_index,
+                )
+                ws_Dn_residue = pole_calculator.get_residue(func, old_pole)
 
-            # 5) Work out pole shift from volume Wigner-Smith operator residues
-            ws_k0_res = pole_calculator.get_residue(
-                self.unperturbed_network.get_wigner_smith_volume, old_pole
-            )
+                new_pole_shift = (
+                    -np.trace(ws_Dn_residue)
+                    / np.trace(ws_k0_residue)
+                    * Dn_shift
+                )
+                new_pole = old_pole + new_pole_shift
 
-            func = functools.partial(
-                self.unperturbed_network.get_wigner_smith_volume,
-                variable="Dn",
-                perturbed_link_index=link_index,
-            )
-            ws_Dn_res = pole_calculator.get_residue(func, old_pole)
+                poles_dict["formula"][i].append(new_pole)
+                pole_shifts_dict["formula"][i].append(new_pole_shift)
 
-            pole_shift = -np.trace(ws_Dn_res) / np.trace(ws_k0_res) * Dn_shift
-            poles["volume_residue"].append(
-                poles["volume_residue"][-1] + pole_shift
-            )
-            pole_shifts["volume_residue"].append(pole_shift)
+                # -------------------------------------------------------------
+                # 3) Work out pole shift from volume integrals
+                ws_k0_residue = pole_calculator.get_residue(
+                    self.unperturbed_network.get_wigner_smith_volume, old_pole
+                )
 
-            # 6) Same as 5, but assume ws_k0_res has trace i
-            pole_shift = -np.trace(ws_Dn_res) / 1j * Dn_shift
+                func = functools.partial(
+                    self.unperturbed_network.get_wigner_smith_volume,
+                    variable="Dn",
+                    perturbed_link_index=link_index,
+                )
+                ws_Dn_residue = pole_calculator.get_residue(func, old_pole)
 
-            poles["volume_residue_i"].append(
-                poles["volume_residue_i"][-1] + pole_shift
-            )
-            pole_shifts["volume_residue_i"].append(pole_shift)
+                new_pole_shift = (
+                    -np.trace(ws_Dn_residue)
+                    / np.trace(ws_k0_residue)
+                    * Dn_shift
+                )
+                new_pole = old_pole + new_pole_shift
+
+                poles_dict["volume"][i].append(new_pole)
+                pole_shifts_dict["volume"][i].append(new_pole_shift)
 
             # Update the networks
-            old_pole = new_pole
+            old_poles = copy.deepcopy(new_poles)
             self.update()
 
-        return poles, pole_shifts
+        return poles_dict, pole_shifts_dict

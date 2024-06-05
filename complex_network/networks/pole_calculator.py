@@ -230,6 +230,11 @@ def inv_factor_det(k0: np.ndarray, network: Network) -> float:
     det = network.get_inv_factor_det(k)
     return np.abs(det)
 
+def inv_S_det(k0: np.ndarray, network: Network) -> float:
+    k = k0[0] + 1j * k0[1]
+    det = network.get_S_ee_inv_det(k)
+    return np.abs(det)
+
 
 def inverse_determinant(k0: np.ndarray, network: Network) -> float:
     """
@@ -302,7 +307,7 @@ def sweep(
     for i in tqdm(range(len(k0_reals)), leave=False):
         for j in tqdm(range(len(k0_imags)), leave=False):
             k0 = k0_r[i, j] + 1j * k0_i[i, j]
-            new_data = inv_factor_det(np.array([k0.real, k0.imag]), network)
+            new_data = inv_S_det(np.array([k0.real, k0.imag]), network)
             data[i, j] = new_data
 
     return k0_r, k0_i, data
