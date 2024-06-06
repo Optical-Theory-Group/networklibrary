@@ -1,5 +1,5 @@
-function [R1NS,R1NP,T1NS,T1NP] = calc_fresnel_multilayer(nJ,dJ,k0,KR)
-% function [R1NS,R1NP,T1NS,T1NP] = calc_gen_fresnel_multilayer(nJ,dJ,KZ)
+function [R1NS,R1NP,R2NS,R2NP,T1NS,T1NP] = calc_fresnel_multilayer(nJ,dJ,k0,KR)
+% function [R1NS,R1NP,R2NS,R2NP,T1NS,T1NP] = calc_gen_fresnel_multilayer(nJ,dJ,KZ)
 %
 % Inputs
 %   nJ  = vector of refractive indices for layer structure [n1,...nj,...nN]
@@ -20,11 +20,13 @@ function [R1NS,R1NP,T1NS,T1NP] = calc_fresnel_multilayer(nJ,dJ,k0,KR)
     end
 
     [MP0, MS0] = transfer_matrix_multi_MAT(KZ,nJ,dJ);
-    [R1NP,R1NS,T1NP,T1NS] = trans_mat_2_fresnel_MAT(MP0,MS0);
+    [R1NP,R1NS,R2NP,R2NS,T1NP,T1NS] = trans_mat_2_fresnel_MAT(MP0,MS0);
 
     % remove problematic NaNs and Infs
     R1NP(~isfinite(R1NP)) = 0;
     R1NS(~isfinite(R1NS)) = 0;
+    R2NP(~isfinite(R1NP)) = 0;
+    R2NS(~isfinite(R1NS)) = 0;
     T1NP(~isfinite(R1NP)) = 0;
     T1NS(~isfinite(R1NS)) = 0;
 end
