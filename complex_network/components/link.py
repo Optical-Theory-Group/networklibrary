@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from complex_network.components.component import Component
+from complex_network.scattering_matrices import link_matrix
 
 
 class Link(Component):

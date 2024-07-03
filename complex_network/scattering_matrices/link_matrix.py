@@ -5,13 +5,11 @@ from typing import Callable
 
 import numpy as np
 
-from complex_network.components.link import Link
-
 # -----------------------------------------------------------------------------
 # Standard propagation matrices for single mode waveguides
 # -----------------------------------------------------------------------------
 
-def get_propagation_matrix_closure(link: Link) -> Callable:
+def get_propagation_matrix_closure(link) -> Callable:
     """Standard propagation matrix for links"""
 
     def get_propagation_matrix(k0: complex) -> np.ndarray:
@@ -31,7 +29,7 @@ def get_propagation_matrix_closure(link: Link) -> Callable:
     return get_propagation_matrix
 
 
-def get_propagation_matrix_inverse_closure(link: Link) -> Callable:
+def get_propagation_matrix_inverse_closure(link) -> Callable:
     """Standard propagation matrix inverse for links"""
 
     def get_propagation_matrix_inverse(k0: complex) -> np.ndarray:
@@ -57,7 +55,7 @@ def get_propagation_matrix_inverse_closure(link: Link) -> Callable:
     return get_propagation_matrix_inverse
 
 
-def get_propagation_matrix_derivative_closure(link: Link) -> Callable:
+def get_propagation_matrix_derivative_closure(link) -> Callable:
     """Standard propagation matrix derivative for links"""
 
     def get_propagation_matrix_derivative(

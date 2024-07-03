@@ -559,6 +559,16 @@ class Network:
 
         self.update_segment_matrices(middle_link)
 
+    def update_link_matrices(self, link: Link) -> None:
+        """Update link scattering matrices (normally used after altering Dn)"""
+        link.get_S = link_matrix.get_propagation_matrix_closure(link)
+        link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(
+            link
+        )
+        link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(
+            link
+        )
+
     def update_segment_matrices(self, link: Link) -> None:
         """Update the link and node scattering matrices at a segment.
 
@@ -567,13 +577,7 @@ class Network:
         index has changed."""
 
         # Update link scattering matrices
-        link.get_S = link_matrix.get_propagation_matrix_closure(link)
-        link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(
-            link
-        )
-        link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(
-            link
-        )
+        self.update_link_matrices(link)
 
         node_one_index, node_two_index = link.node_indices
         node_one = self.get_node(node_one_index)
@@ -1198,7 +1202,6 @@ class Network:
         This will be zero at a pole"""
         return np.linalg.det(self.get_S_ee_inv(k0))
 
-
     # -------------------------------------------------------------------------
     # Methods for getting derivatives and Wigner-Smith operators
     # -------------------------------------------------------------------------
@@ -1240,15 +1243,21 @@ class Network:
         kwargs should contain any additional arguments required for calculating
         the derivative. This is particularly relevant for perturbation
         derivatives."""
-        U_0 = self.get_U_0(k0)
-        U_1 = self.get_U_1(k0, variable, **kwargs)
-        U_2 = self.get_U_2(k0, variable, **kwargs)
-        U_3 = self.get_U_3(k0, variable, **kwargs)
+        U_0_links = self.get_U_0_links(k0)
+        U_1_links = self.get_U_1_links(k0, variable, **kwargs)
+        U_2_links = self.get_U_2_links(k0, variable, **kwargs)
+        U_3_links = self.get_U_3_links(k0, variable, **kwargs)
+
+        S_prod_nodes = self.get_S_prod_nodes(k0)
+        ws_nodes = self.get_ws_nodes(k0, variable, **kwargs)
 
         pre_factor = np.linalg.inv(
-            np.identity(len(U_0), dtype=np.complex128) - U_0
+            np.identity(len(U_0_links), dtype=np.complex128)
+            + U_0_links
+            + S_prod_nodes
         )
-        post_factor = U_1 + U_2 + U_3
+
+        post_factor = U_1_links + U_2_links + U_3_links + ws_nodes
         ws_volume = pre_factor @ post_factor
         return ws_volume
 
@@ -1436,8 +1445,8 @@ class Network:
     # to combine their calculations into one function to reduce redundancy
     # -------------------------------------------------------------------------
 
-    def get_U_0(self, k0: float | complex) -> np.ndarray:
-        """Calculate the U_0 matrix (see theory notes)"""
+    def get_S_prod_nodes(self, k0: float | complex) -> np.ndarray:
+        """Work out contributions to S^dag S from the node integrals"""
 
         num_externals = self.num_external_nodes
         U_0 = np.zeros((num_externals, num_externals), dtype=np.complex128)
@@ -1462,19 +1471,75 @@ class Network:
         for q in range(num_externals):
             for p in range(num_externals):
 
+                # Get the field distribution associated with q
+                # illumination
+                q_o = O_int_vectors[q]
+                q_i = I_int_vectors[q]
+                p_o = O_int_vectors[p]
+                p_i = I_int_vectors[p]
+                partial_sum = 0.0 + 0.0j
+
+                for node in self.internal_nodes:
+                    sorted_connected_nodes = node.sorted_connected_nodes
+                    node_index = node.index
+                    keys = [
+                        f"{node_index},{connected_index}"
+                        for connected_index in sorted_connected_nodes
+                    ]
+
+                    # Get field component vector
+                    I_p = np.zeros(len(keys), dtype=np.complex128)
+                    I_q = np.zeros(len(keys), dtype=np.complex128)
+                    for i, key in enumerate(keys):
+                        I_p[i] = p_i[self.internal_scattering_map[key]]
+                        I_q[i] = q_i[self.internal_scattering_map[key]]
+
+                    S = node.get_S(k0)
+                    matrix = np.conj(S.T) @ S - np.identity(
+                        len(S), dtype=np.complex128
+                    )
+                    partial_sum += np.dot(np.conj(I_q), matrix @ I_p)
+
+                U_0[q, p] = partial_sum
+        return U_0
+
+    def get_U_0_links(self, k0: float | complex) -> np.ndarray:
+        """Calculate the U_0 matrix (see theory notes)"""
+
+        num_externals = self.num_external_nodes
+        U_0 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+
+        # First work out all of the fields throughout the network
+        S_ie = self.get_S_ie(k0)
+
+        O_int_vectors = []
+        I_int_vectors = []
+
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Internal fields
+            outgoing_vector = S_ie @ incident_field
+            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
+            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            O_int_vectors.append(new_O)
+            I_int_vectors.append(new_I)
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+                # Get the field distribution associated with q
+                # illumination
+                q_o = O_int_vectors[q]
+                q_i = I_int_vectors[q]
+                p_o = O_int_vectors[p]
+                p_i = I_int_vectors[p]
                 partial_sum = 0.0 + 0.0j
 
                 for link in self.links:
                     length = link.length
                     n = link.n(k0)
                     Dn = link.Dn
-
-                    # Get the field distribution associated with q
-                    # illumination
-                    q_o = O_int_vectors[q]
-                    q_i = I_int_vectors[q]
-                    p_o = O_int_vectors[p]
-                    p_i = I_int_vectors[p]
 
                     # Find the fields in the link
                     node_one_index = link.sorted_connected_nodes[0]
@@ -1488,9 +1553,9 @@ class Network:
                     O_mq = q_o[index]
 
                     partial_sum += O_mp * np.conj(O_mq) * (
-                        1.0 - np.exp(-2 * (n + Dn) * np.imag(k0) * length)
+                        np.exp(-2 * (n + Dn) * np.imag(k0) * length) - 1.0
                     ) + I_mp * np.conj(I_mq) * (
-                        np.exp(2 * (n + Dn) * np.imag(k0) * length) - 1.0
+                        1.0 - np.exp(2 * (n + Dn) * np.imag(k0) * length)
                     )
 
                 U_0[q, p] = partial_sum
@@ -1601,7 +1666,99 @@ class Network:
 
         return U_0
 
-    def get_U_1(
+    def get_ws_nodes(
+        self,
+        k0: float | complex,
+        variable: str = "k0",
+        **kwargs: dict[str, Any],
+    ) -> np.ndarray:
+        """Work out contributions to S^dag S from the node integrals"""
+
+        num_externals = self.num_external_nodes
+        U_3 = np.zeros((num_externals, num_externals), dtype=np.complex128)
+
+        S_ie = self.get_S_ie(k0)
+        dS_ie = self.get_dS_ie(k0, variable, **kwargs)
+
+        # Get the scattered fields for each incident field
+        O_int_vectors = []
+        I_int_vectors = []
+        dO_int_vectors = []
+        dI_int_vectors = []
+
+        for i in range(num_externals):
+            incident_field = np.zeros(num_externals, dtype=np.complex128)
+            incident_field[i] = 1.0
+
+            # Full length interior field vector
+            outgoing_vector = S_ie @ incident_field
+            doutgoing_vector = dS_ie @ incident_field
+
+            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
+            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_dO = doutgoing_vector[: int(len(outgoing_vector) / 2)]
+            new_dI = doutgoing_vector[int(len(outgoing_vector) / 2) :]
+
+            O_int_vectors.append(new_O)
+            I_int_vectors.append(new_I)
+            dO_int_vectors.append(new_dO)
+            dI_int_vectors.append(new_dI)
+
+        internal_scattering_map = self.internal_scattering_map
+
+        for q in range(num_externals):
+            for p in range(num_externals):
+
+                q_o = O_int_vectors[q]
+                q_i = I_int_vectors[q]
+                dq_o = dO_int_vectors[q]
+                dq_i = dI_int_vectors[q]
+
+                p_o = O_int_vectors[p]
+                p_i = I_int_vectors[p]
+                dp_o = dO_int_vectors[p]
+                dp_i = dI_int_vectors[p]
+
+                partial_sum = 0.0 + 0.0j
+
+                for node in self.internal_nodes:
+                    sorted_connected_nodes = node.sorted_connected_nodes
+                    node_index = node.index
+                    keys = [
+                        f"{node_index},{connected_index}"
+                        for connected_index in sorted_connected_nodes
+                    ]
+
+                    # Get field component vectors
+                    I_p = np.zeros(len(keys), dtype=np.complex128)
+                    I_q = np.zeros(len(keys), dtype=np.complex128)
+                    dI_p = np.zeros(len(keys), dtype=np.complex128)
+                    dI_q = np.zeros(len(keys), dtype=np.complex128)
+
+                    for i, key in enumerate(keys):
+                        I_p[i] = p_i[internal_scattering_map[key]]
+                        dI_p[i] = dp_i[internal_scattering_map[key]]
+                        I_q[i] = q_i[internal_scattering_map[key]]
+                        dI_q[i] = dq_i[internal_scattering_map[key]]
+
+                    S = node.get_S(k0)
+                    dS = node.get_dS(k0, variable)
+
+                    # First term
+                    matrix = -1j * np.conj(S.T) @ dS
+                    partial_sum += np.dot(np.conj(I_q), matrix @ I_p)
+
+                    # Second term
+                    matrix = 1j * (
+                        np.identity(len(S), dtype=np.complex128)
+                        - np.conj(S.T) @ S
+                    )
+                    partial_sum += np.dot(np.conj(I_q), matrix @ dI_p)
+
+                U_3[q, p] = partial_sum
+        return U_3
+
+    def get_U_1_links(
         self,
         k0: float | complex,
         variable: str = "k0",
@@ -1690,7 +1847,7 @@ class Network:
 
         return U_1
 
-    def get_U_2(
+    def get_U_2_links(
         self,
         k0: float | complex,
         variable: str = "k0",
@@ -1784,7 +1941,7 @@ class Network:
 
         return U_2
 
-    def get_U_3(
+    def get_U_3_links(
         self,
         k0: float | complex,
         variable: str = "k0",
@@ -1895,9 +2052,12 @@ class Network:
         show_external_indices: bool = False,
         equal_aspect: bool = False,
         highlight_nodes: list[int] | None = None,
+        highlight_links: list[int] | None = None,
         highlight_perturbed: bool = True,
         hide_axes: bool = False,
+        draw_boundary: float | None = None,
         title: str | None = None,
+        save_dir: str | None = None,
     ) -> None:
         """Draw network"""
 
@@ -1905,6 +2065,14 @@ class Network:
             ax = plt.gca()  # use current axis if none is given
         if equal_aspect:
             ax.set_aspect("equal")
+
+        # Boundary
+        if draw_boundary is not None:
+            t = np.linspace(-draw_boundary, draw_boundary, 10**6)
+            y = np.sqrt(draw_boundary**2 - t**2)
+            linewidth = 1.5
+            ax.plot(t, y, linestyle="--", color="black")
+            ax.plot(t, -y, linestyle="--", color="black")
 
         # Title
         if title is not None:
@@ -1915,19 +2083,40 @@ class Network:
             node_1_index, node_2_index = link.node_indices
             node_1_pos = self.get_node(node_1_index).position
             node_2_pos = self.get_node(node_2_index).position
-            link.draw(ax, node_1_pos, node_2_pos, show_indices)
+            color = (
+                "red"
+                if highlight_links is not None
+                and link.index in highlight_links
+                else None
+            )
+            link.draw(ax, node_1_pos, node_2_pos, show_indices, color=color)
+
+        # Highlight links
+        # if highlight_links is not None:
+        #     for link_index in highlight_links:
+        #         link = self.get_link(link_index)
+        #         node_1_index, node_2_index = link.node_indices
+        #         node_1_pos = self.get_node(node_1_index).position
+        #         node_2_pos = self.get_node(node_2_index).position
+        #         link.draw(ax, node_1_pos, node_2_pos, color="red")
 
         # Plot nodes
         for node in self.nodes:
             if node.is_perturbed:
                 continue
-            node.draw(ax, show_indices, show_external_indices)
+            color = (
+                "red"
+                if highlight_nodes is not None
+                and node.index in highlight_nodes
+                else None
+            )
+            node.draw(ax, show_indices, show_external_indices, color=color)
 
         # Highlight nodes
-        if highlight_nodes is not None:
-            for node_index in highlight_nodes:
-                node = self.get_node(node_index)
-                node.draw(ax, color="red")
+        # if highlight_nodes is not None:
+        #     for node_index in highlight_nodes:
+        #         node = self.get_node(node_index)
+        #         node.draw(ax, color="red")
 
         # Custom highlighting for perturbations
         if highlight_perturbed:
@@ -1959,6 +2148,9 @@ class Network:
             )
             ax.set_xticklabels([])
             ax.set_yticklabels([])
+
+        if save_dir is not None:
+            plt.savefig(save_dir, format="svg", bbox_inches="tight")
 
     def plot_fields(
         self,

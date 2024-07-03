@@ -143,7 +143,7 @@ def tanh_sinh(function, start, end):
 def get_residue(
     function,
     pole: complex,
-    radius: float = 0.1,
+    radius: float = 1e-1,
     scheme: Any = None,
     degree: int = 10,
 ) -> complex:

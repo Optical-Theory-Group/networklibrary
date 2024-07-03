@@ -202,7 +202,7 @@ def get_S_fresnel_inverse_closure(
         n2 = second_link.n(k0) + second_link.Dn
 
         r = (n1 - n2) / (n1 + n2)
-        r2 = -r
+        r2 = (n2 - n1) / (n1 + n2)
         t = 2 * n1 / (n1 + n2)
         t2 = 2 * n2 / (n1 + n2)
 
@@ -259,10 +259,9 @@ def get_S_fresnel_derivative_closure(
             n1 + n2
         ) ** 2
         dr2 = -dr
-        dt = (dn1 * (n1 + n2) - n1 * (dn1 + dn2)) / (n1 + n2) ** 2
-        dt2 = (dn2 * (n1 + n2) - n2 * (dn1 + dn2)) / (n1 + n2) ** 2
-
-        S = np.array([[dr, dt2], [dt, dr2]])
-        return S
+        dt = 2 * (dn1 * (n1 + n2) - n1 * (dn1 + dn2)) / (n1 + n2) ** 2
+        dt2 = 2 * (dn2 * (n1 + n2) - n2 * (dn1 + dn2)) / (n1 + n2) ** 2
+        dS = np.array([[dr, dt2], [dt, dr2]])
+        return dS
 
     return get_S_fresnel_derivative

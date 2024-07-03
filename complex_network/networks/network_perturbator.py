@@ -80,6 +80,67 @@ class NetworkPerturbator:
         self.perturbed_network.update_segment_matrices(link)
 
     # -------------------------------------------------------------------------
+    # Pump network with gain
+    # -------------------------------------------------------------------------
+
+    def uniform_pump(self, value: complex) -> None:
+        """Pump all links in the network by altering the imaginary parts of the
+        link refractive indices"""
+
+        for link in self.perturbed_network.internal_links:
+            Dn = link.Dn
+            new_Dn = Dn + value
+            link.Dn = new_Dn
+            self.perturbed_network.update_link_matrices(link)
+
+    def selective_pump(self, link_index: int, value: complex) -> None:
+        """Pump a link in the network by altering the imaginary part of its
+        refractive indices"""
+        link = self.perturbed_network.get_link(link_index)
+        Dn = link.Dn
+        new_Dn = Dn + value
+        link.Dn = new_Dn
+        self.perturbed_network.update_link_matrices(link)
+
+    def custom_pump(self, pump_profile: dict, value: complex) -> None:
+        """Pump according to a pump profile dict, which tells us the relative
+        amount that each link should be pumped"""
+
+        # Clear out zeros and divide by sum
+        cleaned = {key: max(val, 0) for key, val in pump_profile.items()}
+        s = sum([val for _, val in cleaned.items()])
+        ratios = {key: val / s for key, val in cleaned.items()}
+
+        for link in self.perturbed_network.internal_links:
+            Dn = link.Dn
+            new_Dn = Dn + value * ratios[link.index]
+            link.Dn = new_Dn
+            self.perturbed_network.update_link_matrices(link)
+
+    def get_Q_pump_links(self, pole: complex) -> None:
+        """Work out the pole shift for each link that would result if gain
+        were added to it"""
+
+        data_dict = {}
+        for link in self.unperturbed_network.internal_links:
+            link_index = link.index
+            func = functools.partial(
+                self.unperturbed_network.get_wigner_smith,
+                variable="Dn",
+                perturbed_link_index=link_index,
+            )
+            ws_Dn_residue = pole_calculator.get_residue(func, pole)
+            ws_k0_residue = pole_calculator.get_residue(
+                self.unperturbed_network.get_wigner_smith, pole
+            )
+
+            pole_shift = (
+                -(-1j)*np.trace(ws_Dn_residue) / np.trace(ws_k0_residue)
+            )
+            data_dict[link_index] = pole_shift
+        return data_dict
+
+    # -------------------------------------------------------------------------
     # Methods associated with iterative perturbations
     # -------------------------------------------------------------------------
 
@@ -110,7 +171,6 @@ class NetworkPerturbator:
             "volume": [[] for _ in poles],
         }
 
-        old_poles = copy.deepcopy(poles)
         previous_Dn_value = Dn_values[0]
 
         for Dn_value in tqdm(Dn_values[1:]):
@@ -122,24 +182,24 @@ class NetworkPerturbator:
             # Do the perturbation
             self.perturb_segment_n(link_index, Dn_shift)
 
-            new_poles = []
-
-            for i, old_pole in enumerate(old_poles):
-                # -------------------------------------------------------------
-                # 1) Find the new pole using numerical root finding
+            # -------------------------------------------------------------
+            # 1) Find the new pole using numerical root finding
+            for i, pole_list in enumerate(poles_dict["direct"]):
+                old_pole = pole_list[-1]
                 new_pole = pole_calculator.find_pole(
                     self.perturbed_network, old_pole
                 )
-                new_poles.append(new_pole)
+                pole_list.append(new_pole)
 
                 # Add new pole to the data dictionary
-                poles_dict["direct"][i].append(new_pole)
-
                 new_pole_shift = new_pole - old_pole
                 pole_shifts_dict["direct"][i].append(new_pole_shift)
 
-                # -------------------------------------------------------------
-                # 2) Work out pole shift from Wigner-Smith operator residues
+            # -------------------------------------------------------------
+            # 2) Work out pole shift from Wigner-Smith operator residues
+            for i, pole_list in enumerate(poles_dict["formula"]):
+                old_pole = pole_list[-1]
+
                 ws_k0_residue = pole_calculator.get_residue(
                     self.unperturbed_network.get_wigner_smith, old_pole
                 )
@@ -158,11 +218,14 @@ class NetworkPerturbator:
                 )
                 new_pole = old_pole + new_pole_shift
 
-                poles_dict["formula"][i].append(new_pole)
+                pole_list.append(new_pole)
                 pole_shifts_dict["formula"][i].append(new_pole_shift)
 
-                # -------------------------------------------------------------
-                # 3) Work out pole shift from volume integrals
+            # -------------------------------------------------------------
+            # 3) Work out pole shift from volume integrals
+            for i, pole_list in enumerate(poles_dict["volume"]):
+                old_pole = pole_list[-1]
+
                 ws_k0_residue = pole_calculator.get_residue(
                     self.unperturbed_network.get_wigner_smith_volume, old_pole
                 )
@@ -181,11 +244,167 @@ class NetworkPerturbator:
                 )
                 new_pole = old_pole + new_pole_shift
 
-                poles_dict["volume"][i].append(new_pole)
+                pole_list.append(new_pole)
                 pole_shifts_dict["volume"][i].append(new_pole_shift)
 
             # Update the networks
-            old_poles = copy.deepcopy(new_poles)
+            self.update()
+
+        return poles_dict, pole_shifts_dict
+
+    def track_pole_uniform_pump(
+        self,
+        poles: list[complex],
+        Dn_values: np.ndarray,
+    ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
+        """Track the motion of a list of poles as one pumps the network
+        uniformly
+
+        Dn_values should be an array of values that the link's
+        Dn value will go through (actual values, not changes).
+
+        It is assumed that Dn_values[0] is the current value for the network!
+        """
+
+        # Set up list for storing poles
+        poles_dict = {
+            "direct": [[pole] for pole in poles],
+        }
+        pole_shifts_dict = {
+            "direct": [[] for _ in poles],
+        }
+
+        previous_Dn_value = Dn_values[0]
+
+        for Dn_value in tqdm(Dn_values[1:]):
+
+            # This is the change in Dn compared to the previous value
+            Dn_shift = Dn_value - previous_Dn_value
+            previous_Dn_value = Dn_value
+
+            # Do the perturbation
+            self.uniform_pump(Dn_shift)
+
+            # -------------------------------------------------------------
+            # 1) Find the new pole using numerical root finding
+            for i, pole_list in enumerate(poles_dict["direct"]):
+                old_pole = pole_list[-1]
+                new_pole = pole_calculator.find_pole(
+                    self.perturbed_network, old_pole
+                )
+                pole_list.append(new_pole)
+
+                # Add new pole to the data dictionary
+                new_pole_shift = new_pole - old_pole
+                pole_shifts_dict["direct"][i].append(new_pole_shift)
+
+            # Update the networks
+            self.update()
+
+        return poles_dict, pole_shifts_dict
+
+    def track_pole_selective_pump(
+        self,
+        link_index: int,
+        poles: list[complex],
+        Dn_values: np.ndarray,
+    ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
+        """Track the motion of a list of poles as one pumps the network
+        uniformly
+
+        Dn_values should be an array of values that the link's
+        Dn value will go through (actual values, not changes).
+
+        It is assumed that Dn_values[0] is the current value for the network!
+        """
+
+        # Set up list for storing poles
+        poles_dict = {
+            "direct": [[pole] for pole in poles],
+        }
+        pole_shifts_dict = {
+            "direct": [[] for _ in poles],
+        }
+
+        previous_Dn_value = Dn_values[0]
+
+        for Dn_value in tqdm(Dn_values[1:]):
+
+            # This is the change in Dn compared to the previous value
+            Dn_shift = Dn_value - previous_Dn_value
+            previous_Dn_value = Dn_value
+
+            # Do the perturbation
+            self.selective_pump(link_index, Dn_shift)
+
+            # -------------------------------------------------------------
+            # 1) Find the new pole using numerical root finding
+            for i, pole_list in enumerate(poles_dict["direct"]):
+                old_pole = pole_list[-1]
+                new_pole = pole_calculator.find_pole(
+                    self.perturbed_network, old_pole
+                )
+                pole_list.append(new_pole)
+
+                # Add new pole to the data dictionary
+                new_pole_shift = new_pole - old_pole
+                pole_shifts_dict["direct"][i].append(new_pole_shift)
+
+            # Update the networks
+            self.update()
+
+        return poles_dict, pole_shifts_dict
+
+    def track_pole_custom_pump(
+        self,
+        target_pole: complex,
+        poles: list[complex],
+        Dn_values: np.ndarray,
+    ) -> tuple[dict[str, list[complex]], dict[str, list[complex]]]:
+        """Track the motion of a list of poles as one pumps the network
+        uniformly
+
+        Dn_values should be an array of values that the link's
+        Dn value will go through (actual values, not changes).
+
+        It is assumed that Dn_values[0] is the current value for the network!
+        """
+
+        # Set up list for storing poles
+        poles_dict = {
+            "direct": [[pole] for pole in poles],
+        }
+        pole_shifts_dict = {
+            "direct": [[] for _ in poles],
+        }
+
+        previous_Dn_value = Dn_values[0]
+
+        for Dn_value in tqdm(Dn_values[1:]):
+
+            # This is the change in Dn compared to the previous value
+            Dn_shift = Dn_value - previous_Dn_value
+            previous_Dn_value = Dn_value
+
+            # Get the latst pump profile and do the perturbation
+            Q_dict = self.get_Q_pump_links(target_pole)
+            pump_profile = {key: np.imag(val) for key, val in Q_dict.items()}
+            self.custom_pump(pump_profile, Dn_shift)
+
+            # -------------------------------------------------------------
+            # 1) Find the new pole using numerical root finding
+            for i, pole_list in enumerate(poles_dict["direct"]):
+                old_pole = pole_list[-1]
+                new_pole = pole_calculator.find_pole(
+                    self.perturbed_network, old_pole
+                )
+                pole_list.append(new_pole)
+
+                # Add new pole to the data dictionary
+                new_pole_shift = new_pole - old_pole
+                pole_shifts_dict["direct"][i].append(new_pole_shift)
+
+            # Update the networks
             self.update()
 
         return poles_dict, pole_shifts_dict
