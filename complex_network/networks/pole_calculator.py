@@ -145,7 +145,7 @@ def get_residue(
     pole: complex,
     radius: float = 1e-1,
     scheme: Any = None,
-    degree: int = 10,
+    degree: int = 5,
 ) -> complex:
     """Find the pole of a function numerically using a contour integral.
 
