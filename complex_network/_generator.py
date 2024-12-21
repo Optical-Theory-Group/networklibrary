@@ -17,7 +17,7 @@ from typing import Union
 import numpy as np
 from scipy.spatial import ConvexHull, Delaunay, Voronoi
 
-import logconfig
+import complex_network._logconfig as _logconfig
 
 from .components.link import Link
 from .components.node import Node
@@ -25,7 +25,7 @@ from .components.node import Node
 # from line_profiler_pycharm import profile
 
 
-logconfig.setup_logging()
+_logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 

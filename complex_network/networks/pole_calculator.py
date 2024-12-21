@@ -145,7 +145,7 @@ def get_residue(
     pole: complex,
     radius: float = 1e-1,
     scheme: Any = None,
-    degree: int = 5,
+    degree: int = 10,
 ) -> complex:
     """Find the pole of a function numerically using a contour integral.
 
@@ -305,7 +305,7 @@ def sweep(
     data = np.zeros((num_points, num_points))
 
     for i in tqdm(range(len(k0_reals)), leave=False):
-        for j in tqdm(range(len(k0_imags)), leave=False):
+        for j in range(len(k0_imags)):
             k0 = k0_r[i, j] + 1j * k0_i[i, j]
             new_data = inv_S_det(np.array([k0.real, k0.imag]), network)
             data[i, j] = new_data

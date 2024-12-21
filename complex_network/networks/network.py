@@ -2,6 +2,7 @@
 
 from typing import Any, Callable
 
+import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -2070,7 +2071,7 @@ class Network:
         if draw_boundary is not None:
             t = np.linspace(-draw_boundary, draw_boundary, 10**6)
             y = np.sqrt(draw_boundary**2 - t**2)
-            linewidth = 1.5
+            linewidth = 1
             ax.plot(t, y, linestyle="--", color="black")
             ax.plot(t, -y, linestyle="--", color="black")
 
@@ -2242,3 +2243,91 @@ class Network:
         for node_index in highlight_nodes:
             node = self.get_node(node_index)
             node.draw(ax, color="red")
+
+    def plot_internal(
+        self,
+        k0: complex,
+        highlight_nodes: list[int] | None = None,
+        title: str = "Field distribution",
+        max_val: float | None = None,
+        save_dir: str | None = None,
+        lw: float = 1.0,
+    ) -> None:
+        """Show internal field distribution in the network"""
+        if highlight_nodes is None:
+            highlight_nodes = []
+
+        fig, ax = plt.subplots()
+        # ax.set_aspect("equal")
+        ax.set_title(title)
+        ax.set_aspect("equal")
+        # Get link intensities to define the colormap
+        # Plot links
+        maxes = []
+        for link in self.links:
+            node_index, _ = link.node_indices
+            inwave = link.inwave[str(node_index)]
+            outwave = link.outwave[str(node_index)]
+            z = np.linspace(0, link.length, 10**4)
+            field = inwave * np.exp(
+                1j * k0 * (link.n(k0) + link.Dn) * z
+            ) + outwave * np.exp(-1j * k0 * (link.n(k0) + link.Dn) * z)
+            intensity = np.abs(field) ** 2
+            max_val = np.max(intensity)
+            maxes.append(max_val)
+
+        norm = mcolors.Normalize(vmin=np.min(maxes), vmax=np.max(maxes))
+        cmap = plt.cm.coolwarm
+        cmap = mcolors.LinearSegmentedColormap.from_list(
+            "MyCmapName", ["b", "r"]
+        )
+
+        # Plot links
+        for i, link in enumerate(self.links):
+            node_1_index, node_2_index = link.node_indices
+            node_1_pos = self.get_node(node_1_index).position
+            node_2_pos = self.get_node(node_2_index).position
+            color = cmap(norm(maxes[i]))
+            link.draw(ax, node_1_pos, node_2_pos, color=color, lw=lw)
+
+            # arrow = FancyArrowPatch(
+            #     (cx, cy),  # Starting point of the arrowhead
+            #     (cx + dx, cy + dy),  # Ending point of the arrowhead
+            #     arrowstyle='->',  # Arrow style
+            #     mutation_scale=1e-6,  # Increase this value for a chunkier arrowhead
+            #     color=color,  # Arrow color
+            # )
+
+            # # Add the arrow to the axis
+            # ax.add_patch(arrow)
+            # arrowhead_size = 0.0000005 * length
+            # ax.arrow(
+            #     cx,
+            #     cy,
+            #     dx,
+            #     dy,
+            #     lw=0.0,
+            #     head_width=arrowhead_size,
+            #     head_length=arrowhead_size,
+            #     color=color,
+            # )
+
+        # Add the colorbar
+        sm = plt.cm.ScalarMappable(norm, cmap)
+        cbar = fig.colorbar(sm, ax=ax, orientation="vertical")
+
+        # background color
+        bg_color = cmap(0)
+        # ax.set_facecolor(bg_color)
+
+        # external nodes
+        for node in self.external_nodes:
+            node.draw(ax, color="white")
+
+        # Highlight nodes
+        for node_index in highlight_nodes:
+            node = self.get_node(node_index)
+            node.draw(ax, color="red")
+
+        if save_dir is not None:
+            plt.savefig(save_dir, format="svg", bbox_inches="tight")

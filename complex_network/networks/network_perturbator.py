@@ -135,7 +135,7 @@ class NetworkPerturbator:
             )
 
             pole_shift = (
-                -(-1j)*np.trace(ws_Dn_residue) / np.trace(ws_k0_residue)
+                -(-1j) * np.trace(ws_Dn_residue) / np.trace(ws_k0_residue)
             )
             data_dict[link_index] = pole_shift
         return data_dict
@@ -143,6 +143,38 @@ class NetworkPerturbator:
     # -------------------------------------------------------------------------
     # Methods associated with iterative perturbations
     # -------------------------------------------------------------------------
+
+    def get_animation_data_segment_n(
+        self,
+        link_index: int,
+        Dn_values: np.ndarray,
+        k0_min: complex,
+        k0_max: complex,
+        num_points: int,
+    ) -> np.ndarray:
+
+        data = []
+        previous_Dn_value = Dn_values[0]
+
+        for Dn_value in tqdm(Dn_values[1:], leave=False):
+
+            # This is the change in Dn compared to the previous value
+            Dn_shift = Dn_value - previous_Dn_value
+            previous_Dn_value = Dn_value
+
+            # Do the perturbation
+            self.perturb_segment_n(link_index, Dn_shift)
+
+            # Get the data here
+            _, _, new_data = pole_calculator.sweep(
+                k0_min, k0_max, num_points, self.perturbed_network
+            )
+            data.append(new_data)
+
+            # Update the networks
+            self.update()
+
+        return data
 
     def track_pole_segment_n(
         self,

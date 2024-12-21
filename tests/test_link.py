@@ -4,11 +4,11 @@ import unittest
 
 import numpy as np
 
-import logconfig
+import complex_network._logconfig as _logconfig
 from complex_network.components.link import LINK
 from complex_network.utils import compare_dict
 
-logconfig.setup_logging()
+_logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 class LinkTestCase(unittest.TestCase):

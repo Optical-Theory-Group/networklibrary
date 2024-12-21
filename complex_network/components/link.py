@@ -105,6 +105,7 @@ class Link(Component):
         node_2_pos: np.ndarray,
         show_index: bool = False,
         color: None = None,
+        lw: float = 1.0,
     ) -> None:
         """Draw link on figure."""
         node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
@@ -125,5 +126,5 @@ class Link(Component):
             else:
                 linecol = "#9678B4"
         ax.plot(
-            [node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol, lw=1.0
+            [node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol, lw=lw
         )

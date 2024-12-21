@@ -15,14 +15,14 @@ from datetime import datetime, timedelta
 
 import h5py
 
-import logconfig
+import complex_network._logconfig as _logconfig
 from complex_network.networks.network import Network
 
 from ._dict_hdf5 import (load_dict_from_hdf5,
                          recursively_save_dict_contents_to_group)
 from .utils import update_progress
 
-logconfig.setup_logging()
+_logconfig.setup_logging()
 logger = logging.getLogger(__name__)
 
 
