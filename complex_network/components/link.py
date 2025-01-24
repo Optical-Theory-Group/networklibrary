@@ -6,11 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from complex_network.components.component import Component
-from complex_network.scattering_matrices import link_matrix
 
 
 class Link(Component):
-    """Class that defines links/fibres in the network
+    """Class that defines links/fibers in the network
 
     Attributes:
     ----------
@@ -53,7 +52,7 @@ class Link(Component):
 
     @property
     def link_type(self) -> str:
-        """Alias for nature"""
+        """Alias for nature."""
         return self.nature
 
     @link_type.setter
@@ -107,7 +106,10 @@ class Link(Component):
         color: None = None,
         lw: float = 1.0,
     ) -> None:
-        """Draw link on figure."""
+        """Draw link on figure.
+        
+        Should be provided with a figure axis. Primarily called by the network
+        class."""
         node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
         node_2_x, node_2_y = node_2_pos[0], node_2_pos[1]
 

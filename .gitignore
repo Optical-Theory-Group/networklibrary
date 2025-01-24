@@ -1,20 +1,8 @@
-# Ignore the following files
-.ipynb_checkpoints
-.DS_Store
-.db
-*.log
-*.h5
-*conflicted*
-simulation.log
 .gitignore
-
-#
-## Ignore the following directories
 *pycache*/
-output/*
-.idea/
-complexnetworklibrary/defunct/
 /.mypy_cache
-work/*
-.gitignore
-presentations/*
+work/
+main.py
+matt_simulation.ipynb
+ws_paper_poles.ipynb
+ws_paper

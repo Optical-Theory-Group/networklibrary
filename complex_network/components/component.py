@@ -60,7 +60,7 @@ class Component:
     def reset_values(self, data: dict[str, Any] | None = None) -> None:
         """Mostly used to set default values of the component.
 
-        Specific details implemented in subclasses."""
+        Specific details are implemented in subclasses."""
         default_values = self.get_default_values()
         if data is not None:
             default_values.update(data)
@@ -68,7 +68,7 @@ class Component:
             setattr(self, key, value)
 
     def reset_fields(self) -> None:
-        """Reset the values of the fields to be zero"""
+        """Reset the values of the fields to be zero."""
         for key in self.inwave.keys():
             self.inwave[key] = 0 + 0j
         for key in self.outwave.keys():
