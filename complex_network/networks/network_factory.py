@@ -561,8 +561,9 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
     return nodes, links
 
 
-def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
-    ) -> tuple[dict, dict]:
+def _generate_voronoi_nodes_links_slab(
+        spec: NetworkSpec,
+) -> tuple[dict, dict]:
     seed_nodes = spec.num_seed_nodes
     exit_nodes = spec.num_external_nodes
     network_size = spec.network_size
@@ -592,7 +593,6 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
             "External size is not valid for slab networks. Use external offset only instead."
             )
 
-
     if isinstance(exit_nodes, int):
         num_left_external_nodes, num_right_external_nodes = (
             exit_nodes,
@@ -608,12 +608,13 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
 
     correct_exits = False
     # switch to ensure correct number of exit nodes get generated
+    _generation_attempts = 0
     while not correct_exits:
         # generate exit seed node positions
-        xoutL = -np.array([exit_size / 2] * (lhs_exits - 1))
-        xoutR = np.array([exit_size / 2] * (rhs_exits - 1))
-        youtL = network_width * (np.random.random(lhs_exits - 1) - 0.5)
-        youtR = network_width * (np.random.random(rhs_exits - 1) - 0.5)
+        xoutL = -np.array([exit_size / 2] * (lhs_exits))
+        xoutR = np.array([exit_size / 2] * (rhs_exits))
+        youtL = network_width * (np.random.random(lhs_exits) - 0.5)
+        youtR = network_width * (np.random.random(rhs_exits) - 0.5)
         xoutinf = exit_size * np.array([-1 / 2, -1 / 2, 1 / 2, 1 / 2])
         youtinf = network_width * np.array([-1 / 2, 1 / 2, -1 / 2, 1 / 2])
 
@@ -631,10 +632,10 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
         vor_vertices = vor.vertices
         vor_ridges = vor.ridge_vertices
 
-        from scipy.spatial import voronoi_plot_2d
-        import matplotlib.pyplot as plt
-        voronoi_plot_2d(vor)
-        plt.show()
+        # from scipy.spatial import voronoi_plot_2d
+        # import matplotlib.pyplot as plt
+        # voronoi_plot_2d(vor)
+        # plt.show()
 
         # add nodes
         _internal_nodes = 0
@@ -668,8 +669,6 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
                 links[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
                 _link_count = _link_count + 1
 
-        # self.count_nodes()
-
         # now trim everything outside vertical width of network
         # look for intersections of ridges with upper/lower part of boundary rectangle
         intersectionsU = {}
@@ -684,7 +683,7 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
             A = nodes[str(connection1.node_indices[0])].position
             B = nodes[str(connection1.node_indices[1])].position
             Ax, Ay = A
-            xb, yb = (network_length / 2, network_width / 2)
+            xb, yb = (exit_size / 2, network_width / 2)
 
             # upper boundary
             C = (-xb, yb)
@@ -703,8 +702,7 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
             if (int_ptU is not None) and \
                     (int_ptL is not None):  # intersect with upper and lower boundary
                 # upper node
-
-                intersect_node_idU = max([int(key) for key in nodes.keys()]) + 1 # generate unique id
+                intersect_node_idU = max([int(key) for key in nodes.keys()]) + 1  # generate unique id
                 edge_node_ids_upper.append(intersect_node_idU)
                 nodes[(str(intersect_node_idU))] = Node(intersect_node_idU, "internal", int_ptU)
                 _internal_nodes += 1
@@ -771,28 +769,32 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
                                                         'node2': initnode,
                                                         }
 
-        # self.count_nodes()
-
         # remove all exterior nodes (will automatically remove associated connections)
         nodes_to_remove = []
         links_to_remove = []
-        for node in nodes.values():
+        for key, node in nodes.items():
             Ax, Ay = node.position
-            # if (abs(Ax) > xb) or (abs(Ay) > yb):
-            if  (abs(Ay) > yb):
-                nodes_to_remove.append(node.index)
+            if (abs(Ax) > xb) or (abs(Ay) > yb):
+                nodes_to_remove.append(key)
 
                 # find associated connected links
                 for key, link in links.items():
                     if node.index in link.node_indices:
                         links_to_remove.append(key)
 
-        for nid in nodes_to_remove:
-            nodes.pop(str(nid))
+        for key in nodes_to_remove:
+            nodes.pop(key)
 
         links_to_remove_unique = list(set(links_to_remove))
         for lid in links_to_remove_unique:
             links.pop(lid)
+
+        # remove any nodes that are left floating i.e. without any connections
+        remaining_node_keys = [key for key in nodes.keys()]
+        connected_nodes = np.unique(np.ndarray.flatten(np.array([link.node_indices for link in links.values()])))
+        nodes_to_remove = [key for key in remaining_node_keys if int(key) not in connected_nodes]
+        for nid in nodes_to_remove:
+            nodes.pop(str(nid))
 
         # get ids of nodes on upper boundary
         uppernode_ids = [interx['node1'] for interx in intersectionsU.values()]
@@ -817,24 +819,23 @@ def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
             links[str(_link_count)] = Link(_link_count, "internal", (id1, id2))
             _link_count = _link_count + 1
 
-
         # check number of exit nodes
         exit_nodesids = [node.index for node in nodes.values() if node.node_type == 'external'] 
         nodes_l = sum([1 if nodes[str(nodeid)].position[0] < 0 else 0 for nodeid in exit_nodesids])
         nodes_r = sum([1 if nodes[str(nodeid)].position[0] > 0 else 0 for nodeid in exit_nodesids])
-        nodes_t = len(exit_nodesids)
 
-        print([nodes_l, nodes_r, nodes_t, num_left_external_nodes, num_right_external_nodes, exit_nodes])
+        if (nodes_l == lhs_exits) and (nodes_r == rhs_exits) :
+            correct_exits = True
+        else:  # unsuitable network so we reinitialise and try again
+            UserWarning("Incorrect number of exit nodes generated - retrying network generation")
+            nodes = {}
+            links = {}
 
-        # if (nodes_l == lhs_exits) and (nodes_r == rhs_exits) :
-        correct_exits = True
-        # else: # unsuitable network so we reinitialise and try again
-        #     UserWarning("Incorrect number of exit nodes generated - retrying network generation")
-        #     nodes = {}
-        #     links = {}
-
-        #     _internal_nodes = 0
-        #     _exit_nodes = 0
+            _internal_nodes = 0
+            _exit_nodes = 0
+            _generation_attempts += 1
+            if _generation_attempts > 20:
+                raise ValueError("Failed to generate network with correct number of exit nodes. Likely your selected parameters are incompatible.")
 
     # points_int_x = np.random.uniform(0, network_length, num_seed_nodes)
     # points_int_y = np.random.uniform(0, network_height, num_seed_nodes)
