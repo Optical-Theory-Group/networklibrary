@@ -7,7 +7,15 @@ from typing import Any
 
 from complex_network.materials.dielectric import Dielectric
 from complex_network.materials.material import Material
+from complex_network.components.node import Node
 
+VALID_NETWORK_TYPES = [
+        "delaunay",
+        "voronoi",
+        "buffon",
+        # "linear",
+        # "archimedean",
+    ]
 
 @dataclass
 class NetworkSpec:
@@ -18,7 +26,7 @@ class NetworkSpec:
     ----------
     network_type: str
         Type of network to be created. See network_factory for details.
-        
+
     node_S_mat_type: str
         Type of scattering matrix used. See get_S_mat in network_factory for
         details.
@@ -37,17 +45,75 @@ class NetworkSpec:
     """
 
     network_type: str
-    num_internal_nodes: int
-    num_external_nodes: int
-    num_seed_nodes: int
     network_shape: str
-    network_size: float | tuple[float, float]
-    external_size: float
-    external_offset: float
-    node_S_mat_type: str
-    node_S_mat_params: dict[str, Any]
+    num_internal_nodes: int = None
+    num_external_nodes: int = None
+    num_seed_nodes: int = None
+    network_size: float | tuple[float, float] = None
+    external_size: float = None
+    external_offset: float = None
+    node_S_mat_type: str = None
+    node_S_mat_params: dict[str, Any] = None
     material: Material | None = None
 
+    
     def __post_init__(self) -> None:
-        if self.material is None:
-            self.material = Dielectric("glass")
+        """Set default values for the network spec if nothing specified."""
+        default_flag = False
+        defaults = NetworkSpec.get_default_values(self.network_type, self.network_shape)
+        for key, value in defaults.items():
+            if getattr(self, key) is None:
+                setattr(self, key, value)
+                default_flag = True
+
+        if default_flag:
+            UserWarning("Some default values have been set for the network spec.")
+
+
+    @staticmethod
+    def get_default_values(network_type: str, network_shape: str) -> dict[str, Any]:
+        """Default values for the network spec."""
+
+        match network_type:
+            case "delaunay":
+                default_values: dict[str, Any] = {
+                    "num_internal_nodes": 30,
+                    "num_external_nodes": 10,
+                    "num_seed_nodes": 0,
+                }
+            case "voronoi":
+                default_values: dict[str, Any] = {
+                    "num_internal_nodes": 0,
+                    "num_external_nodes": 4,
+                    "num_seed_nodes": 50,
+                }
+            case "buffon":
+                default_values: dict[str, Any] = {
+                    "num_internal_nodes": 0,
+                    "num_external_nodes": 30, 
+                    "num_seed_nodes": 0,
+                }
+            case "linear":
+                raise NotImplementedError
+            case "archimedean":
+                raise NotImplementedError
+            case _:
+                raise ValueError(
+                    f"network_type '{network_type}' is invalid."
+                    f"Please choose one from {VALID_NETWORK_TYPES}."
+                )
+            
+        node_defaults = Node.get_default_values()
+
+        default_values.update(
+        {"network_type": "delaunay",
+            "network_shape": network_shape,
+            "network_size": 200. if network_shape == "circular" else (200., 200.),
+            "external_size": 220. if network_shape == "circular" else None,
+            "external_offset": None if network_shape == "circular" else 20.,
+            "node_S_mat_type": node_defaults["S_mat_type"],
+            "node_S_mat_params": node_defaults["S_mat_params"],
+            "material": Dielectric("glass"),
+        })
+
+        return default_values

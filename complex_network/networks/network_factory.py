@@ -10,20 +10,12 @@ from scipy.spatial import ConvexHull
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.networks.network import Network
-from complex_network.networks.network_spec import NetworkSpec
+from complex_network.networks.network_spec import NetworkSpec, VALID_NETWORK_TYPES
 from complex_network.scattering_matrices import link_matrix, node_matrix
-
 
 def generate_network(spec: NetworkSpec) -> Network:
     """Main method for building a network."""
-    VALID_NETWORK_TYPES = [
-        "delaunay",
-        "voronoi",
-        "buffon",
-        "linear",
-        "archimedean",
-    ]
-
+    
     match spec.network_type:
         case "delaunay":
             nodes, links = _generate_delaunay_nodes_links(spec)
@@ -343,191 +335,595 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     return nodes, links
 
 
-def _generate_voronoi_nodes_links(
-    spec: NetworkSpec,
+def _generate_voronoi_nodes_links(spec: NetworkSpec,
+    ) -> tuple[dict, dict]:
+    network_shape = spec.network_shape
+    
+    if network_shape == "circular":
+        nodes, links = _generate_voronoi_nodes_links_circular(spec)
+    elif network_shape == "slab":
+        nodes, links = _generate_voronoi_nodes_links_slab(spec)
+
+    return nodes, links
+
+
+def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
 ) -> tuple[dict, dict]:
-    num_seed_nodes = spec.num_seed_nodes
+    seed_nodes = spec.num_seed_nodes
     num_external_nodes = spec.num_external_nodes
     network_shape = spec.network_shape
     network_size = spec.network_size
-    external_size = spec.external_size
+    exit_size = spec.external_size
 
     nodes = {}
     links = {}
 
-    if network_shape == "circular":
-        # Check type of network_size
-        if not isinstance(network_size, float):
-            raise ValueError(
-                "network_size must be a float for a circular Voronoi network"
-            )
-        # Check type of network_size
-        if not isinstance(external_size, float):
-            raise ValueError(
-                "external_size must be a float for a circular Voronoi network"
-            )
-        # Radius of external nodes must be bigger than radius of internal nodes
-        if external_size <= network_size:
-            raise ValueError("external_size must be larger than network_size")
-
-        # Generate random points in the interior
-        theta_int = 2 * np.pi * np.random.random(num_seed_nodes)
-        r_int = network_size * np.sqrt(np.random.random(num_seed_nodes))
-        points_int = np.array(
-            [r_int * np.cos(theta_int), r_int * np.sin(theta_int)]
-        ).T
-
-        vor = scipy.spatial.Voronoi(points_int)
-        vor_vertices = vor.vertices
-        vor_ridge_vertices = vor.ridge_vertices
-        vor_ridge_points = vor.ridge_points
-
-        # Set up nodes, excluding those lying beyond the extent of the network
-        removed_node_indices = []
-        for i, vertex in enumerate(vor_vertices):
-            r = scipy.linalg.norm(vertex)
-            if r > network_size:
-                removed_node_indices.append(i)
-            else:
-                nodes[str(i)] = Node(i, "internal", vertex)
-        remaining_node_indices = [int(i) for i in list(nodes.keys())]
-
-        # Set up links
-        edge_node_indices = []
-        for i, ridge_vertices in enumerate(vor_ridge_vertices):
-            # Presence of -1 indicates a ridge that extends to infinity
-            # These are dealt with later
-            if -1 in ridge_vertices:
-                first, second = ridge_vertices
-                edge_node_index = first if second == -1 else second
-                edge_node_indices.append(str(edge_node_index))
-                continue
-
-            # Make sure that link isn't to a node that has been discarded.
-            # Note, however, that if a node was connected to a now removed
-            # node, that node will become an edge node that will ultimately
-            # connect to an external node
-            first, second = ridge_vertices
-            if (
-                first in removed_node_indices
-                and second in removed_node_indices
-            ):
-                continue
-            elif first in removed_node_indices:
-                edge_node_indices.append(str(second))
-            elif second in removed_node_indices:
-                edge_node_indices.append(str(first))
-            else:
-                links[str(i)] = Link(i, "internal", tuple(ridge_vertices))
-
-        # Prune linear chains at the edge of the network
-        nodes, links, new_edge_node_indices = deep_prune_edge_chains(
-            nodes, links
+    # Check type of network_size
+    if not isinstance(network_size, float):
+        raise ValueError(
+            "network_size must be a float for a circular Voronoi network"
         )
-        edge_node_indices += new_edge_node_indices
+    # Check type of network_size
+    if not isinstance(exit_size, float):
+        raise ValueError(
+            "external_size must be a float for a circular Voronoi network"
+        )
+    # Radius of external nodes must be bigger than radius of internal nodes
+    if exit_size <= network_size:
+        raise ValueError("external_size must be larger than network_size")
 
-        # Generate external nodes at the edge_node_indices return after pruning
-        # get centroid first of all nodes
+    # generate random internal points
+    t = 2 * np.pi * np.random.random(seed_nodes)
+    r = network_size * np.sqrt(
+        np.random.random(seed_nodes))  # square root gives a more uniform distribution of points
+    points = np.array([r * np.cos(t), r * np.sin(t)]).T
 
-        xs = [node.position[0] for _, node in nodes.items()]
-        ys = [node.position[1] for _, node in nodes.items()]
-        cx = sum(xs) / len(xs)
-        cy = sum(ys) / len(ys)
+    # do Voronoi meshing
+    vor = scipy.spatial.Voronoi(points)
+    vor_vertices = vor.vertices
+    vor_ridges = vor.ridge_vertices
+    vor_ridge_points = vor.ridge_points
 
-        remaining_node_indices = list(nodes.keys())
-        remaining_link_indices = list(links.keys())
-        i = int(remaining_node_indices[-1]) + 1
-        j = int(remaining_link_indices[-1]) + 1
-
-        # If the number of external nodes is less than the number of
-        # edge nodes found so far, pick a random subset of them
-        np.random.shuffle(edge_node_indices)
-        num_so_far = 0
-        for edge_node_index in edge_node_indices:
-            if edge_node_index not in remaining_node_indices:
-                continue
-            new_edge_node = nodes[edge_node_index]
-            x, y = new_edge_node.position
-            theta = np.arctan2(y - cy, x - cx)
-            new_position = external_size * np.array(
-                [np.cos(theta), np.sin(theta)]
-            )
-            nodes[str(i)] = Node(i, "external", new_position)
-            links[str(j)] = Link(j, "external", (int(edge_node_index), i))
-            i += 1
-            j += 1
-            num_so_far += 1
-            if num_so_far >= num_external_nodes:
-                break
-
-    elif network_shape == "slab":
-        # Check type of network_size
-        if not isinstance(network_size, tuple) or len(network_size) != 2:
-            raise ValueError(
-                "network_size must be a tuple of two floats for a slab "
-                "Voronoi network"
-            )
-        # Check type of network_size
-        if not isinstance(external_size, float):
-            raise ValueError(
-                "external_size must be a float for a circular delaunay network"
-            )
-
-        # Unpack variables specific to the slab shaped networks
-        network_length, network_height = network_size
-
-        if isinstance(num_external_nodes, int):
-            num_left_external_nodes, num_right_external_nodes = (
-                num_external_nodes,
-                num_external_nodes,
-            )
+    # add nodes
+    _internal_nodes = 0
+    _exit_nodes = 0
+    _link_count = 0
+    vertices_outside = []
+    for number, vertex in enumerate(vor_vertices):
+        # only add points lying within specified network size
+        if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:
+            nodes[str(number)] = Node(number, "internal", vertex)
+            _internal_nodes += 1
         else:
-            num_left_external_nodes, num_right_external_nodes = (
-                num_external_nodes
+            # find vertices outside exit_size
+            vertices_outside.append(number)
+
+    # remove any ridges that lie wholly outside exit_size
+    ridge_inds_to_delete = []
+    for number, ridge in enumerate(vor_ridges):
+        sortridge = np.sort(ridge)  # will mean -1 is always first if it exists, otherwise doesn't matter
+        if sortridge[0] == -1:
+            if np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size:
+                ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
+        elif (np.linalg.norm(vor_vertices[sortridge[0]]) > exit_size) and \
+                (np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size):
+            ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
+
+    vor_ridge_points = [vor_ridge_points[num] for num, ridge in enumerate(vor_ridges) if
+                        num not in ridge_inds_to_delete]
+    vor_ridges = [ridge for num, ridge in enumerate(vor_ridges) if num not in ridge_inds_to_delete]
+
+    # loop over ridges and mark ridges with one vertex outsize network as being infinite
+    for number, ridge in enumerate(vor_ridges):
+        if ridge[0] in vertices_outside:
+            vor_ridges[number][0] = -1
+        if ridge[1] in vertices_outside:
+            vor_ridges[number][1] = -1
+
+    for number, ridge in enumerate(vor_ridges):
+        if -1 in ridge:  # infinite extending exit ridges
+            ridge.remove(-1)
+            id0 = ridge[0]
+            vertex = vor_vertices[id0]
+            if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:  # lies within network size
+                _exit_nodes += 1
+                id1 = len(vor_vertices) + _exit_nodes
+                # calculate position of exit node
+                perpids = vor_ridge_points[number]
+                pos = nodes[str(id0)].position
+                pid0_pos = points[perpids[0]]
+                pid1_pos = points[perpids[1]]
+                mid = 0.5 * (np.array(pid0_pos) + np.array(pid1_pos))
+                midx = mid[0]
+                midy = mid[1]
+                grad = (pos[1] - midy) / (pos[0] - midx)
+
+                sqrtfac = np.sqrt((1 + grad ** 2) * exit_size ** 2 - (-grad * mid[0] + mid[1]) ** 2)
+                denom = (1 + grad ** 2)
+
+                # one solution of y - y1 = m (x - x1) and x^2 + y^2 = r^2
+                x1 = (grad ** 2 * midx - grad * midy + sqrtfac) / denom
+                x2 = (grad ** 2 * midx - grad * midy - sqrtfac) / denom
+
+                y1 = (grad * sqrtfac - grad * midx + midy) / denom
+                y2 = (-grad * sqrtfac - grad * midx + midy) / denom
+
+                d1 = np.linalg.norm([x1-pos[0], y1-pos[1]])
+                d2 = np.linalg.norm([x2-pos[0], y2-pos[1]])
+                if d1 < d2:
+                    x = x1
+                    y = y1
+                else:
+                    x = x2
+                    y = y2
+
+                nodes[str(id1)] = Node(id1, "external", (x, y),)
+
+                links[str(_link_count)] = Link(_link_count, "external", (id0, id1))
+                _link_count = _link_count + 1
+        elif any([r in vertices_outside for r in ridge]):  # one of vertices is outside
+            pass
+        else:  # finite ridge in network
+            id0 = ridge[0]
+            id1 = ridge[1]
+            links[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
+            _link_count = _link_count + 1
+            
+    # # Generate random points in the interior
+    # theta_int = 2 * np.pi * np.random.random(num_seed_nodes)
+    # r_int = network_size * np.sqrt(np.random.random(num_seed_nodes))
+    # points_int = np.array(
+    #     [r_int * np.cos(theta_int), r_int * np.sin(theta_int)]
+    # ).T
+
+    # vor = scipy.spatial.Voronoi(points_int)
+    # vor_vertices = vor.vertices
+    # vor_ridge_vertices = vor.ridge_vertices
+    # vor_ridge_points = vor.ridge_points
+
+    # # Set up nodes, excluding those lying beyond the extent of the network
+    # removed_node_indices = []
+    # for i, vertex in enumerate(vor_vertices):
+    #     r = scipy.linalg.norm(vertex)
+    #     if r > network_size:
+    #         removed_node_indices.append(i)
+    #     else:
+    #         nodes[str(i)] = Node(i, "internal", vertex)
+    # remaining_node_indices = [int(i) for i in list(nodes.keys())]
+
+    # # Set up links
+    # edge_node_indices = []
+    # for i, ridge_vertices in enumerate(vor_ridge_vertices):
+    #     # Presence of -1 indicates a ridge that extends to infinity
+    #     # These are dealt with later
+    #     if -1 in ridge_vertices:
+    #         first, second = ridge_vertices
+    #         edge_node_index = first if second == -1 else second
+    #         edge_node_indices.append(str(edge_node_index))
+    #         continue
+
+    #     # Make sure that link isn't to a node that has been discarded.
+    #     # Note, however, that if a node was connected to a now removed
+    #     # node, that node will become an edge node that will ultimately
+    #     # connect to an external node
+    #     first, second = ridge_vertices
+    #     if (
+    #         first in removed_node_indices
+    #         and second in removed_node_indices
+    #     ):
+    #         continue
+    #     elif first in removed_node_indices:
+    #         edge_node_indices.append(str(second))
+    #     elif second in removed_node_indices:
+    #         edge_node_indices.append(str(first))
+    #     else:
+    #         links[str(i)] = Link(i, "internal", tuple(ridge_vertices))
+
+    # # Prune linear chains at the edge of the network
+    # nodes, links, new_edge_node_indices = deep_prune_edge_chains(
+    #     nodes, links
+    # )
+    # edge_node_indices += new_edge_node_indices
+
+    # # Generate external nodes at the edge_node_indices return after pruning
+    # # get centroid first of all nodes
+
+    # xs = [node.position[0] for _, node in nodes.items()]
+    # ys = [node.position[1] for _, node in nodes.items()]
+    # cx = sum(xs) / len(xs)
+    # cy = sum(ys) / len(ys)
+
+    # remaining_node_indices = list(nodes.keys())
+    # remaining_link_indices = list(links.keys())
+    # i = int(remaining_node_indices[-1]) + 1
+    # j = int(remaining_link_indices[-1]) + 1
+
+    # # If the number of external nodes is less than the number of
+    # # edge nodes found so far, pick a random subset of them
+    # np.random.shuffle(edge_node_indices)
+    # num_so_far = 0
+    # for edge_node_index in edge_node_indices:
+    #     if edge_node_index not in remaining_node_indices:
+    #         continue
+    #     new_edge_node = nodes[edge_node_index]
+    #     x, y = new_edge_node.position
+    #     theta = np.arctan2(y - cy, x - cx)
+    #     new_position = external_size * np.array(
+    #         [np.cos(theta), np.sin(theta)]
+    #     )
+    #     nodes[str(i)] = Node(i, "external", new_position)
+    #     links[str(j)] = Link(j, "external", (int(edge_node_index), i))
+    #     i += 1
+    #     j += 1
+    #     num_so_far += 1
+    #     if num_so_far >= num_external_nodes:
+    #         break
+    return nodes, links
+
+
+def _generate_voronoi_nodes_links_slab(spec: NetworkSpec,
+    ) -> tuple[dict, dict]:
+    seed_nodes = spec.num_seed_nodes
+    exit_nodes = spec.num_external_nodes
+    network_size = spec.network_size
+    # Unpack variables specific to the slab shaped networks
+    network_length, network_width = network_size
+
+    exit_size = network_length + spec.external_offset
+
+    nodes = {}
+    links = {}
+    
+    # Check type of network_size
+    if not isinstance(network_size, tuple) or len(network_size) != 2:
+        raise ValueError(
+            "network_size must be a tuple of two floats for a slab "
+            "Voronoi network"
+        )
+    # Check type of network_size
+    if not isinstance(exit_size, float):
+        raise ValueError(
+            "external_size must be a float for a circular delaunay network"
+        )
+    
+    # Check if irrelevant external size parameter has been used
+    if spec.external_size is not None:
+        raise ValueError(
+            "External size is not valid for slab networks. Use external offset only instead."
             )
 
-        points_int_x = np.random.uniform(0, network_length, num_seed_nodes)
-        points_int_y = np.random.uniform(0, network_height, num_seed_nodes)
-        points_int = np.column_stack((points_int_x, points_int_y))
 
-        vor = scipy.spatial.Voronoi(points_int)
+    if isinstance(exit_nodes, int):
+        num_left_external_nodes, num_right_external_nodes = (
+            exit_nodes,
+            exit_nodes,
+        )
+    else:
+        num_left_external_nodes, num_right_external_nodes = (
+            exit_nodes
+        )
+
+    lhs_exits = num_left_external_nodes
+    rhs_exits = num_right_external_nodes
+
+    correct_exits = False
+    # switch to ensure correct number of exit nodes get generated
+    while not correct_exits:
+        # generate exit seed node positions
+        xoutL = -np.array([exit_size / 2] * (lhs_exits - 1))
+        xoutR = np.array([exit_size / 2] * (rhs_exits - 1))
+        youtL = network_width * (np.random.random(lhs_exits - 1) - 0.5)
+        youtR = network_width * (np.random.random(rhs_exits - 1) - 0.5)
+        xoutinf = exit_size * np.array([-1 / 2, -1 / 2, 1 / 2, 1 / 2])
+        youtinf = network_width * np.array([-1 / 2, 1 / 2, -1 / 2, 1 / 2])
+
+        # generate random internal points
+        xs = network_length * (np.random.random(seed_nodes) - 0.5)
+        ys = network_width * (np.random.random(seed_nodes) - 0.5)
+        x = np.concatenate((xs, xoutL, xoutR, xoutinf))
+        y = np.concatenate((ys, youtL, youtR, youtinf))
+        points = np.array([x, y]).T
+        if exit_size <= network_length:
+            raise ValueError('exit_size must be larger than network_size[0]')
+
+        # do Voronoi meshing
+        vor = scipy.spatial.Voronoi(points)
         vor_vertices = vor.vertices
-        vor_ridge_vertices = vor.ridge_vertices
-        vor_ridge_points = vor.ridge_points
+        vor_ridges = vor.ridge_vertices
 
-        # Set up nodes, excluding those lying beyond the extent of the network
-        removed_node_indices = []
-        for i, vertex in enumerate(vor_vertices):
-            out_left = vertex[0] < 0.0
-            out_right = vertex[0] > network_length
-            out_up = vertex[1] > network_height
-            out_down = vertex[1] < 0.0
-            out = out_left or out_right or out_up or out_down
-            if out:
-                removed_node_indices.append(i)
-            else:
-                nodes[str(i)] = Node(i, "internal", vertex)
-        remaining_node_indices = [int(i) for i in list(nodes.keys())]
+        from scipy.spatial import voronoi_plot_2d
+        import matplotlib.pyplot as plt
+        voronoi_plot_2d(vor)
+        plt.show()
 
-        # Set up links
-        edge_node_indices = []
-        for i, ridge_vertices in enumerate(vor_ridge_vertices):
-            # Presence of -1 indicates a ridge that extends to infinity
-            if -1 in ridge_vertices:
-                continue
+        # add nodes
+        _internal_nodes = 0
+        _exit_nodes = 0
+        _link_count = 0
+        for number, vertex in enumerate(vor_vertices):
+            nodes[(str(number))] = Node(number, "internal", vertex)
+            _internal_nodes += 1
 
-            # Make sure that link isn't to a node that has been discarded.
-            # Note, however, that if a node was connected to a now removed
-            # node, that node will become an edge node that will ultimately
-            # connect to an external node
-            first, second = ridge_vertices
-            if (
-                first not in removed_node_indices
-                and second not in removed_node_indices
-            ):
-                links[str(i)] = Link(i, "internal", tuple(ridge_vertices))
+        for number, ridge in enumerate(vor_ridges):
+            if -1 in ridge:  # infinite extending exit ridges
+                # check to see if it is desired output nodes
+                ridge.remove(-1)
+                id0 = ridge[0]
+                
+                vertex = vor_vertices[id0]
+                if np.abs(vertex[1]) < network_width / 2:  # lies within network size
+                    _exit_nodes += 1
+                    id1 = len(vor_vertices) + _exit_nodes + 1
+
+                    # calculate position of exit node
+                    x = np.sign(vertex[0]) * exit_size / 2
+                    y = vertex[1]
+                    nodes[(str(id1))] = Node(id1, "external", (x,y))
+                    links[str(_link_count)] = Link(_link_count, "external", (id0, id1))
+                    _link_count = _link_count + 1
+                pass
+            else:  # finite ridge in network
+                id0 = ridge[0]
+                id1 = ridge[1]
+                links[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
+                _link_count = _link_count + 1
+
+        # self.count_nodes()
+
+        # now trim everything outside vertical width of network
+        # look for intersections of ridges with upper/lower part of boundary rectangle
+        intersectionsU = {}
+        intersectionsL = {}
+        edge_node_ids_upper = []
+        edge_node_ids_lower = []
+        xb, yb = None, None
+
+        current_keys = [key for key in links.keys()]
+        for link_key in current_keys:
+            connection1 = links[link_key]
+            A = nodes[str(connection1.node_indices[0])].position
+            B = nodes[str(connection1.node_indices[1])].position
+            Ax, Ay = A
+            xb, yb = (network_length / 2, network_width / 2)
+
+            # upper boundary
+            C = (-xb, yb)
+            D = (xb, yb)
+
+            # lower boundary
+            E = (-xb, -yb)
+            F = (xb, -yb)
+
+            lineridge = [A, B]
+            lineupper = [C, D]
+            linelower = [E, F]
+            int_ptU = _intersection(lineupper, lineridge)
+            int_ptL = _intersection(linelower, lineridge)
+
+            if (int_ptU is not None) and \
+                    (int_ptL is not None):  # intersect with upper and lower boundary
+                # upper node
+
+                intersect_node_idU = max([int(key) for key in nodes.keys()]) + 1 # generate unique id
+                edge_node_ids_upper.append(intersect_node_idU)
+                nodes[(str(intersect_node_idU))] = Node(intersect_node_idU, "internal", int_ptU)
+                _internal_nodes += 1
+
+                # lower node
+                intersect_node_idL = max([int(key) for key in nodes.keys()]) + 1
+                edge_node_ids_lower.append(intersect_node_idL)
+                nodes[(str(intersect_node_idL))] = Node(intersect_node_idL, "internal", int_ptL)
+                _internal_nodes += 1
+
+                # connection within network
+                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_idU, intersect_node_idL))
+                _link_count = _link_count + 1
+
+                intersectionsU[intersect_node_idU] = {'ridge': link_key,
+                                                        'position': int_ptU,
+                                                        'node1': intersect_node_idU,
+                                                        'node2': intersect_node_idL,
+                                                        }
+
+                intersectionsL[intersect_node_idL] = {'ridge': link_key,
+                                                        'position': int_ptL,
+                                                        'node1': intersect_node_idL,
+                                                        'node2': intersect_node_idU,
+                                                        }
+            elif int_ptU is not None:  # intersect with upper boundary
+                # get id for node within bounding rectangle
+                if (abs(Ax) <= xb) and (abs(Ay) <= yb):
+                    initnode = connection1.node_indices[0]
+                else:
+                    initnode = connection1.node_indices[1]
+
+                intersect_node_id = max([int(key) for key in nodes.keys()]) + 1
+                edge_node_ids_upper.append(intersect_node_id)
+                nodes[(str(intersect_node_id))] = Node(intersect_node_id, "internal", int_ptU)
+                _internal_nodes += 1
+
+                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_id, initnode))
+                _link_count = _link_count + 1
+
+                intersectionsU[intersect_node_id] = {'ridge': link_key,
+                                                        'position': int_ptU,
+                                                        'node1': intersect_node_id,
+                                                        'node2': initnode,
+                                                        }
+            elif int_ptL is not None:  # intersect with lower boundary
+                # get id for node within bounding rectangle
+                if (abs(Ax) <= xb) and (abs(Ay) <= yb):
+                    initnode = connection1.node_indices[0]
+                else:
+                    initnode = connection1.node_indices[1]
+
+                intersect_node_id = max([int(key) for key in nodes.keys()]) + 1
+                edge_node_ids_lower.append(intersect_node_id)
+                nodes[(str(intersect_node_id))] = Node(intersect_node_id, "internal", int_ptL)
+                _internal_nodes += 1
+
+                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_id, initnode))
+                _link_count = _link_count + 1
+
+                intersectionsL[intersect_node_id] = {'ridge': link_key,
+                                                        'position': int_ptL,
+                                                        'node1': intersect_node_id,
+                                                        'node2': initnode,
+                                                        }
+
+        # self.count_nodes()
+
+        # remove all exterior nodes (will automatically remove associated connections)
+        nodes_to_remove = []
+        links_to_remove = []
+        for node in nodes.values():
+            Ax, Ay = node.position
+            # if (abs(Ax) > xb) or (abs(Ay) > yb):
+            if  (abs(Ay) > yb):
+                nodes_to_remove.append(node.index)
+
+                # find associated connected links
+                for key, link in links.items():
+                    if node.index in link.node_indices:
+                        links_to_remove.append(key)
+
+        for nid in nodes_to_remove:
+            nodes.pop(str(nid))
+
+        links_to_remove_unique = list(set(links_to_remove))
+        for lid in links_to_remove_unique:
+            links.pop(lid)
+
+        # get ids of nodes on upper boundary
+        uppernode_ids = [interx['node1'] for interx in intersectionsU.values()]
+        lowernode_ids = [interx['node1'] for interx in intersectionsL.values()]
+        uppernode_xpos = np.array([intersectionsU[nid]['position'][0] for nid in uppernode_ids])
+        lowernode_xpos = np.array([intersectionsL[nid]['position'][0] for nid in lowernode_ids])
+        sort_indexu = np.argsort(uppernode_xpos)
+        sort_indexl = np.argsort(lowernode_xpos)
+        sorted_ids_upper = [uppernode_ids[ii] for ii in sort_indexu]
+        sorted_ids_lower = [lowernode_ids[ii] for ii in sort_indexl]
+
+        # connect boundary nodes
+        for jj in range(0, len(sorted_ids_upper) - 1):
+            id1 = sorted_ids_upper[jj]
+            id2 = sorted_ids_upper[jj + 1]
+            links[str(_link_count)] = Link(_link_count, "internal", (id1, id2))
+            _link_count = _link_count + 1
+
+        for jj in range(0, len(sorted_ids_lower) - 1):
+            id1 = sorted_ids_lower[jj]
+            id2 = sorted_ids_lower[jj + 1]
+            links[str(_link_count)] = Link(_link_count, "internal", (id1, id2))
+            _link_count = _link_count + 1
+
+
+        # check number of exit nodes
+        exit_nodesids = [node.index for node in nodes.values() if node.node_type == 'external'] 
+        nodes_l = sum([1 if nodes[str(nodeid)].position[0] < 0 else 0 for nodeid in exit_nodesids])
+        nodes_r = sum([1 if nodes[str(nodeid)].position[0] > 0 else 0 for nodeid in exit_nodesids])
+        nodes_t = len(exit_nodesids)
+
+        print([nodes_l, nodes_r, nodes_t, num_left_external_nodes, num_right_external_nodes, exit_nodes])
+
+        # if (nodes_l == lhs_exits) and (nodes_r == rhs_exits) :
+        correct_exits = True
+        # else: # unsuitable network so we reinitialise and try again
+        #     UserWarning("Incorrect number of exit nodes generated - retrying network generation")
+        #     nodes = {}
+        #     links = {}
+
+        #     _internal_nodes = 0
+        #     _exit_nodes = 0
+
+    # points_int_x = np.random.uniform(0, network_length, num_seed_nodes)
+    # points_int_y = np.random.uniform(0, network_height, num_seed_nodes)
+    # points_int = np.column_stack((points_int_x, points_int_y))
+
+    # vor = scipy.spatial.Voronoi(points_int)
+    # vor_vertices = vor.vertices
+    # vor_ridge_vertices = vor.ridge_vertices
+    # vor_ridge_points = vor.ridge_points
+
+    # # Set up nodes, excluding those lying beyond the extent of the network
+    # removed_node_indices = []
+    # for i, vertex in enumerate(vor_vertices):
+    #     out_left = vertex[0] < 0.0
+    #     out_right = vertex[0] > network_length
+    #     out_up = vertex[1] > network_height
+    #     out_down = vertex[1] < 0.0
+    #     out = out_left or out_right or out_up or out_down
+    #     if out:
+    #         removed_node_indices.append(i)
+    #     else:
+    #         nodes[str(i)] = Node(i, "internal", vertex)
+    # remaining_node_indices = [int(i) for i in list(nodes.keys())]
+
+    # # Set up links
+    # edge_node_indices = []
+    # for i, ridge_vertices in enumerate(vor_ridge_vertices):
+    #     # Presence of -1 indicates a ridge that extends to infinity
+    #     if -1 in ridge_vertices:
+    #         continue
+
+    #     # Make sure that link isn't to a node that has been discarded.
+    #     # Note, however, that if a node was connected to a now removed
+    #     # node, that node will become an edge node that will ultimately
+    #     # connect to an external node
+    #     first, second = ridge_vertices
+    #     if (
+    #         first not in removed_node_indices
+    #         and second not in removed_node_indices
+    #     ):
+    #         links[str(i)] = Link(i, "internal", tuple(ridge_vertices))
 
     return nodes, links
+
+
+@staticmethod
+def _intersection(line1, line2):
+    """
+    Find the intersection of two line segments defined by their endpoints.
+
+    Parameters
+    ----------
+        line1 [(x1,y1),(x2,y2)]: A list containing two (x, y) coordinate tuples representing
+            the endpoints of the first line segment.
+        line2 [(x3,y3),(x4,y4)]: A list containing two (x, y) coordinate tuples representing
+            the endpoints of the second line segment.
+
+    Returns
+    -------
+        tuple: A tuple containing the (x, y) coordinates of the intersection point,
+            or None if the lines do not intersect.
+    """
+    # Unpack the coordinates of the line segments
+    p1, p2 = line1
+    p3, p4 = line2
+
+    # Convert to numpy arrays
+    p1, p2, p3, p4 = np.array(p1), np.array(p2), np.array(p3), np.array(p4)
+
+    # Calculate the denominator of the line intersection formula
+    den = np.linalg.det(np.array([p2 - p1, p4 - p3]))
+
+    # Check if the denominator is 0 (i.e. lines are parallel)
+    if den == 0:
+        return None
+    else:
+        # Calculate the numerator of the line intersection formula
+        num1 = np.linalg.det(np.array([p3 - p1, p4 - p3]))
+        num2 = np.linalg.det(np.array([p3 - p1, p2 - p1]))
+        # Calculate the intersection point parameter (t)
+        t1 = num1 / den
+        t2 = num2 / den
+
+        # Check if the intersection point is within both line segments
+        if 0 <= t1 <= 1 and 0 <= t2 <= 1:
+            # Calculate the intersection point and return as a tuple
+            return tuple(p1 + t1 * (p2 - p1))
+        else:
+            return None
 
 
 def _generate_buffon_network(network_spec: NetworkSpec):
