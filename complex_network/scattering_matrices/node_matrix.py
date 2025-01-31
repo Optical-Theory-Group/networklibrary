@@ -81,7 +81,7 @@ def get_constant_node_S_closure(
             S_mat = S_mat_params.get("S_mat", np.array(0))
             if S_mat.shape != (size, size):
                 raise ValueError(
-                    "Supplied scattering matrix is of incorrect"
+                    "Supplied scattering matrix is of incorrect shape."
                     f"Given: {S_mat.shape}"
                     f"Expected: {(size, size)}"
                 )

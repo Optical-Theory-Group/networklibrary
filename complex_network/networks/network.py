@@ -637,6 +637,21 @@ class Network:
             first_link, second_link, perturbed_link_number
         )
 
+    def update_node_scattering_matrix(self, node_index: int, node_S_mat_type: str, node_S_mat_params: dict) -> None:
+        """Update the S matrix of a node"""
+        node = self.get_node(node_index)
+
+        if node.node_type == "external":
+            raise ValueError("External nodes do not have modifiable scattering matrices.")
+        elif node.node_type == "internal":
+            node.S_mat_params = node_S_mat_params
+            node.get_S = node_matrix.get_constant_node_S_closure(
+                node_S_mat_type, node.degree, node_S_mat_params
+            )
+            node.get_S_inv = node_matrix.get_inverse_matrix_closure(node.get_S)
+            node.get_dS = node_matrix.get_zero_matrix_closure(node.degree)
+
+
     def translate_node(
         self, node_index: int, translation_vector: np.ndarray
     ) -> None:

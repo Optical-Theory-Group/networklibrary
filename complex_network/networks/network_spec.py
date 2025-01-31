@@ -17,13 +17,13 @@ class NetworkSpec:
     Attributes:
     ----------
     network_type: str
-
-
+        Type of network to be created. See network_factory for details.
+        
+    node_S_mat_type: str
+        Type of scattering matrix used. See get_S_mat in network_factory for
+        details.
 
     node_S_mat_params:
-        S_mat_type: str
-            Type of scattering matrix used. See get_S_mat in network_factory for
-            details.
         scat_loss: float
             Specify scattering loss parameter for node, i.e. fraction of power
             lost from the network.
