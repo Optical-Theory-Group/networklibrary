@@ -46,14 +46,14 @@ class NetworkSpec:
 
     network_type: str
     network_shape: str
-    num_internal_nodes: int = None
-    num_external_nodes: int = None
-    num_seed_nodes: int = None
-    network_size: float | tuple[float, float] = None
-    external_size: float = None
-    external_offset: float = None
-    node_S_mat_type: str = None
-    node_S_mat_params: dict[str, Any] = None
+    num_internal_nodes: int | None = None
+    num_external_nodes: int | None = None
+    num_seed_nodes: int | None = None
+    network_size: float | tuple[float, float] | None = None
+    external_size: float | None = None
+    external_offset: float | None = None
+    node_S_mat_type: str | None = None
+    node_S_mat_params: dict[str, Any] | None = None
     material: Material | None = None
 
     
