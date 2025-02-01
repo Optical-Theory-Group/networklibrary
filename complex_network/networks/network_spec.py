@@ -55,8 +55,8 @@ class NetworkSpec:
     node_S_mat_type: str | None = None
     node_S_mat_params: dict[str, Any] | None = None
     material: Material | None = None
+    fully_connected: bool | None = None
 
-    
     def __post_init__(self) -> None:
         """Set default values for the network spec if nothing specified."""
         default_flag = False
@@ -68,7 +68,6 @@ class NetworkSpec:
 
         if default_flag:
             UserWarning("Some default values have been set for the network spec.")
-
 
     @staticmethod
     def get_default_values(network_type: str, network_shape: str) -> dict[str, Any]:
@@ -92,6 +91,7 @@ class NetworkSpec:
                     "num_internal_nodes": 0,
                     "num_external_nodes": 30, 
                     "num_seed_nodes": 0,
+                    "fully_connected": True,
                 }
             case "linear":
                 raise NotImplementedError

@@ -2071,7 +2071,7 @@ class Network:
         highlight_links: list[int] | None = None,
         highlight_perturbed: bool = True,
         hide_axes: bool = False,
-        draw_boundary: float | None = None,
+        draw_boundary: float | tuple[float, float] | None = None,
         title: str | None = None,
         save_dir: str | None = None,
     ) -> None:
@@ -2084,11 +2084,22 @@ class Network:
 
         # Boundary
         if draw_boundary is not None:
-            t = np.linspace(-draw_boundary, draw_boundary, 10**6)
-            y = np.sqrt(draw_boundary**2 - t**2)
-            linewidth = 1
-            ax.plot(t, y, linestyle="--", color="black")
-            ax.plot(t, -y, linestyle="--", color="black")
+            if isinstance(draw_boundary, float):
+                t = np.linspace(-draw_boundary, draw_boundary, 10**6)
+                y = np.sqrt(draw_boundary**2 - t**2)
+                linewidth = 1
+                ax.plot(t, y, linestyle="--", color="black")
+                ax.plot(t, -y, linestyle="--", color="black")
+            elif isinstance(draw_boundary, tuple) and len(draw_boundary) == 2:
+                x1 =  draw_boundary[0]/2
+                x2 = -draw_boundary[0]/2
+                y1 =  draw_boundary[1]/2
+                y2 = -draw_boundary[1]/2
+                linewidth = 1
+                ax.plot([x1,x1], [y1,y2], linestyle="--", color="black")
+                ax.plot([x2,x2], [y1,y2], linestyle="--", color="black")
+                ax.plot([x1,x2], [y1,y1], linestyle="--", color="black")
+                ax.plot([x1,x2], [y2,y2], linestyle="--", color="black")
 
         # Title
         if title is not None:
