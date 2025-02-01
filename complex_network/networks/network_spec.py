@@ -83,8 +83,8 @@ class NetworkSpec:
             case "voronoi":
                 default_values: dict[str, Any] = {
                     "num_internal_nodes": 0,
-                    "num_external_nodes": 4,
-                    "num_seed_nodes": 50,
+                    "num_external_nodes": 10,
+                    "num_seed_nodes": 80,
                 }
             case "buffon":
                 default_values: dict[str, Any] = {
