@@ -10,12 +10,13 @@ from complex_network.materials.material import Material
 from complex_network.components.node import Node
 
 VALID_NETWORK_TYPES = [
-        "delaunay",
-        "voronoi",
-        "buffon",
-        # "linear",
-        # "archimedean",
-    ]
+    "delaunay",
+    "voronoi",
+    "buffon",
+    # "linear",
+    # "archimedean",
+]
+
 
 @dataclass
 class NetworkSpec:
@@ -60,17 +61,23 @@ class NetworkSpec:
     def __post_init__(self) -> None:
         """Set default values for the network spec if nothing specified."""
         default_flag = False
-        defaults = NetworkSpec.get_default_values(self.network_type, self.network_shape)
+        defaults = NetworkSpec.get_default_values(
+            self.network_type, self.network_shape
+        )
         for key, value in defaults.items():
             if getattr(self, key) is None:
                 setattr(self, key, value)
                 default_flag = True
 
         if default_flag:
-            UserWarning("Some default values have been set for the network spec.")
+            UserWarning(
+                "Some default values have been set for the network spec."
+            )
 
     @staticmethod
-    def get_default_values(network_type: str, network_shape: str) -> dict[str, Any]:
+    def get_default_values(
+        network_type: str, network_shape: str
+    ) -> dict[str, Any]:
         """Default values for the network spec."""
 
         match network_type:
@@ -89,7 +96,7 @@ class NetworkSpec:
             case "buffon":
                 default_values: dict[str, Any] = {
                     "num_internal_nodes": 0,
-                    "num_external_nodes": 30, 
+                    "num_external_nodes": 30,
                     "num_seed_nodes": 0,
                     "fully_connected": True,
                 }
@@ -102,18 +109,26 @@ class NetworkSpec:
                     f"network_type '{network_type}' is invalid."
                     f"Please choose one from {VALID_NETWORK_TYPES}."
                 )
-            
+
         node_defaults = Node.get_default_values()
 
         default_values.update(
-        {"network_type": "delaunay",
-            "network_shape": network_shape,
-            "network_size": 200. if network_shape == "circular" else (200., 200.),
-            "external_size": 220. if network_shape == "circular" else None,
-            "external_offset": None if network_shape == "circular" else 20.,
-            "node_S_mat_type": node_defaults["S_mat_type"],
-            "node_S_mat_params": node_defaults["S_mat_params"],
-            "material": Dielectric("glass"),
-        })
+            {
+                "network_type": "delaunay",
+                "network_shape": network_shape,
+                "network_size": (
+                    200.0 if network_shape == "circular" else (200.0, 200.0)
+                ),
+                "external_size": (
+                    220.0 if network_shape == "circular" else None
+                ),
+                "external_offset": (
+                    None if network_shape == "circular" else 20.0
+                ),
+                "node_S_mat_type": node_defaults["S_mat_type"],
+                "node_S_mat_params": node_defaults["S_mat_params"],
+                "material": Dielectric("glass"),
+            }
+        )
 
         return default_values

@@ -1,24 +1,33 @@
-# networklibrary: Python library for complex network class.
+# complex_network: Python library for complex, optical networks.
 
----
+This library provides a Python platform for generating and analysing random photonic networks.
 
-This library defines the Network Class, which can be used to generate and simulate the properties of various different types of complex networks.
+Please refer to the `examples` directory for demonstrations of common use cases.
 
----
+## 📂 Library structure
+```
+complex_network/                     
+├── components/                      
+│   ├── component.py                 # Base class for network components
+│   ├── link.py                      # Waveguides that connect nodes
+│   └── node.py                      # Junction points in the network
+├── materials/                       
+│   ├── dielectric.py                # Dielectric material properties
+│   ├── material.py                  # Base class for optical material properties
+│   └── refractive_index.py          # Refractive index dispersion
+├── networks/                        
+│   ├── network_factory.py           # Network generation methods
+│   ├── network_perturbator.py       # Network perturbation methods
+│   ├── network_spec.py              # Pre-generation network parameters
+│   ├── network.py                   # Core network class
+│   └── pole_calculator.py           # Methods for analysing scattering resonances
+├── scattering_matrices/             
+│   ├── link_matrix.py               # Methods for link scattering matrices
+│   └── node_matrix.py               # Methods for node scattering matrices
+├── ensemble.py                      
+├── hdf5ensemble.py                  
+└── utils.py                         
+```
 
-## complexnetworklibrary Package Structure
-A network/graph is a collection of nodes connected by edges. 
-
-| File           | Contents                                                                                    |
-|----------------|---------------------------------------------------------------------------------------------|
-| network.py     | Core Network class with network related properties/methods/functions                        |
-| node.py        | Node class with node related properties/methods/functions                                   |
-| link.py        | Link class with edge related properties/methods/functions                                   | 
-| ensemble.py    | A helper class to generate an ensemble of random networks and store in HDF5 format.         |
-| util.py        | Some custom utility functions used in other library classes                                 |
-| _generator.py  | base class inherited by Network class. Generator functions for different network topologies |
-| _dict_hdf5     | custom dict <--> hdf5 converter to handle complex numpy arrays                              |
-
-
-## Package versions
-See requirements.txt
+## 🔧 Package versions
+See `environment.yml` for a list of required packages.

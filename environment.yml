@@ -9,3 +9,5 @@ dependencies:
   - seaborn
   - scikit-image
   - h5py
+  - ipykernel
+  - ipympl

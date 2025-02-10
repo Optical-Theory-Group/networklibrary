@@ -129,9 +129,9 @@ class Node(Component):
         markersize: float = 6.0,
     ) -> None:
         """Draw node on figure.
-        
+
         Should be provided with a figure axis. Primarily called by the network
-        class."""
+        class's draw method."""
         if show_index:
             ax.text(self.x, self.y, self.index)
 

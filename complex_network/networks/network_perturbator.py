@@ -79,14 +79,19 @@ class NetworkPerturbator:
 
         self.perturbed_network.update_segment_matrices(link)
 
-    def change_node_scattering_matrix(self, node_index: int, new_node_S_mat_type: str, new_node_S_mat_params: dict) -> None:
+    def change_node_scattering_matrix(
+        self,
+        node_index: int,
+        new_node_S_mat_type: str,
+        new_node_S_mat_params: dict,
+    ) -> None:
         """Perturb the node scattering matrix by adding a value to the
         diagonal elements"""
         node = self.perturbed_network.get_node(node_index)
 
-        self.perturbed_network.update_node_scattering_matrix(node_index, new_node_S_mat_type, new_node_S_mat_params)
-
-
+        self.perturbed_network.update_node_scattering_matrix(
+            node_index, new_node_S_mat_type, new_node_S_mat_params
+        )
 
     # -------------------------------------------------------------------------
     # Pump network with gain

@@ -637,12 +637,16 @@ class Network:
             first_link, second_link, perturbed_link_number
         )
 
-    def update_node_scattering_matrix(self, node_index: int, node_S_mat_type: str, node_S_mat_params: dict) -> None:
+    def update_node_scattering_matrix(
+        self, node_index: int, node_S_mat_type: str, node_S_mat_params: dict
+    ) -> None:
         """Update the S matrix of a node"""
         node = self.get_node(node_index)
 
         if node.node_type == "external":
-            raise ValueError("External nodes do not have modifiable scattering matrices.")
+            raise ValueError(
+                "External nodes do not have modifiable scattering matrices."
+            )
         elif node.node_type == "internal":
             node.S_mat_params = node_S_mat_params
             node.get_S = node_matrix.get_constant_node_S_closure(
@@ -650,7 +654,6 @@ class Network:
             )
             node.get_S_inv = node_matrix.get_inverse_matrix_closure(node.get_S)
             node.get_dS = node_matrix.get_zero_matrix_closure(node.degree)
-
 
     def translate_node(
         self, node_index: int, translation_vector: np.ndarray
@@ -2091,15 +2094,15 @@ class Network:
                 ax.plot(t, y, linestyle="--", color="black")
                 ax.plot(t, -y, linestyle="--", color="black")
             elif isinstance(draw_boundary, tuple) and len(draw_boundary) == 2:
-                x1 =  draw_boundary[0]/2
-                x2 = -draw_boundary[0]/2
-                y1 =  draw_boundary[1]/2
-                y2 = -draw_boundary[1]/2
+                x1 = draw_boundary[0] / 2
+                x2 = -draw_boundary[0] / 2
+                y1 = draw_boundary[1] / 2
+                y2 = -draw_boundary[1] / 2
                 linewidth = 1
-                ax.plot([x1,x1], [y1,y2], linestyle="--", color="black")
-                ax.plot([x2,x2], [y1,y2], linestyle="--", color="black")
-                ax.plot([x1,x2], [y1,y1], linestyle="--", color="black")
-                ax.plot([x1,x2], [y2,y2], linestyle="--", color="black")
+                ax.plot([x1, x1], [y1, y2], linestyle="--", color="black")
+                ax.plot([x2, x2], [y1, y2], linestyle="--", color="black")
+                ax.plot([x1, x2], [y1, y1], linestyle="--", color="black")
+                ax.plot([x1, x2], [y2, y2], linestyle="--", color="black")
 
         # Title
         if title is not None:

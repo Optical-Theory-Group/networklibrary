@@ -107,9 +107,9 @@ class Link(Component):
         lw: float = 1.0,
     ) -> None:
         """Draw link on figure.
-        
+
         Should be provided with a figure axis. Primarily called by the network
-        class."""
+        class's draw method."""
         node_1_x, node_1_y = node_1_pos[0], node_1_pos[1]
         node_2_x, node_2_y = node_2_pos[0], node_2_pos[1]
 

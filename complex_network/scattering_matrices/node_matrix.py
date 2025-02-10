@@ -1,3 +1,6 @@
+"""Methods for returning closures that compute node scattering
+matrices."""
+
 from typing import Any, Callable
 
 import numpy as np

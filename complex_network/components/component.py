@@ -11,7 +11,9 @@ class Component:
     """Base class for network components.
 
     Defines some useful functions common to all components, such as
-    printing, saving to file etc."""
+    printing, saving to file etc.
+    
+    Note that "nature" referse to either "internal" or "external"."""
 
     def __init__(
         self, index: int, nature: str, data: dict[str, Any] | None = None
@@ -75,7 +77,6 @@ class Component:
             self.outwave[key] = 0 + 0j
         self.inwave_np = np.zeros(self.inwave_np.shape, dtype=np.complex128)
         self.outwave_np = np.zeros(self.outwave_np.shape, dtype=np.complex128)
-
 
     def to_dict(self) -> dict:
         """Return a dictionary of the component attributes."""

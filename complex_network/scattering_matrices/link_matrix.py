@@ -1,4 +1,4 @@
-"""Factory methods for returning closures that compute link scattering
+"""Methods for returning closures that compute link scattering
 matrices."""
 
 from typing import Callable
@@ -8,6 +8,7 @@ import numpy as np
 # -----------------------------------------------------------------------------
 # Standard propagation matrices for single mode waveguides
 # -----------------------------------------------------------------------------
+
 
 def get_propagation_matrix_closure(link) -> Callable:
     """Standard propagation matrix for links"""
@@ -38,15 +39,11 @@ def get_propagation_matrix_inverse_closure(link) -> Callable:
                 [
                     0.0,
                     1.0
-                    / np.exp(
-                        1j * (link.n(k0) + link.Dn) * k0 * link.length
-                    ),
+                    / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                 ],
                 [
                     1.0
-                    / np.exp(
-                        1j * (link.n(k0) + link.Dn) * k0 * link.length
-                    ),
+                    / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
                     0.0,
                 ],
             ]
@@ -81,11 +78,7 @@ def get_propagation_matrix_derivative_closure(link) -> Callable:
                 factor = (
                     1j
                     * link.length
-                    * (
-                        k0 * link.dn(k0)
-                        + link.n(k0)
-                        + link.Dn
-                    )
+                    * (k0 * link.dn(k0) + link.n(k0) + link.Dn)
                 )
             case "Dn":
                 factor = 1j * link.length * k0

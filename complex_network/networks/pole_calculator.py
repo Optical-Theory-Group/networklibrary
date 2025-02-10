@@ -1,3 +1,6 @@
+"""Moldule containing methods related to scattering resonances (complex plane
+operations)."""
+
 import functools
 from typing import Any
 
@@ -229,6 +232,7 @@ def inv_factor_det(k0: np.ndarray, network: Network) -> float:
     k = k0[0] + 1j * k0[1]
     det = network.get_inv_factor_det(k)
     return np.abs(det)
+
 
 def inv_S_det(k0: np.ndarray, network: Network) -> float:
     k = k0[0] + 1j * k0[1]

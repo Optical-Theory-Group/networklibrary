@@ -1,7 +1,4 @@
-"""Base class for network materials. 
-
-These define optical properties of the network links, such as refractive
-index."""
+"""Base class for network material properties."""
 
 from typing import Callable
 
@@ -15,7 +12,6 @@ class Material:
     define a custom refractive index function. For realistic materials with
     dispersion, use one of the sub classes instead, e.g. Dielectric in
     dielectric.py.
-
 
     If you want a constant refractive index, just provide n as a float. Don't
     worry about dn."""
