@@ -26,10 +26,10 @@ def generate_network(spec: NetworkSpec) -> Network:
         case "buffon":
             nodes, links = _generate_buffon_nodes_links(spec)
             nodes, links = _relabel_nodes_links(nodes, links)
-        case "linear":
-            nodes, links = _generate_linear_network(spec)
-        case "archimedean":
-            nodes, links = _generate_archimedean_network(spec)
+        # case "linear":
+        #     nodes, links = _generate_linear_network(spec)
+        # case "archimedean":
+        #     nodes, links = _generate_archimedean_network(spec)
         case _:
             raise ValueError(
                 f"network_type '{spec.network_type}' is invalid."
@@ -89,13 +89,13 @@ def _initialise_nodes(
         if node.node_type == "external":
             # This matrix just transfers power onwards
             # There is no physics here
-            node.get_S = lambda k0: np.array(
+            node.get_S = np.array(
                 [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
             )
-            node.get_S_inv = lambda k0: np.array(
+            node.get_S_inv = np.array(
                 [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
             )
-            node.get_dS = lambda k0: np.array(
+            node.get_dS = np.array(
                 [[0.0, 0.0], [0.0, 0.0]], dtype=np.complex128
             )
         elif node.node_type == "internal":
@@ -172,6 +172,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
                                       network. Not needed for circular."""
     num_internal_nodes = spec.num_internal_nodes
     num_external_nodes = spec.num_external_nodes
+    random_seed = spec.random_seed
 
     network_shape = spec.network_shape
     network_size = spec.network_size
@@ -181,6 +182,8 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     nodes = {}
     links = {}
 
+    # random seed 
+    np.random.seed(random_seed)
     if network_shape == "circular":
         # Check type of network_size
         if not isinstance(network_size, float):
@@ -358,6 +361,10 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
 
     nodes: dict[str, Node] = {}
     links: dict[str, Link] = {}
+
+    #random seed
+    random_seed = spec.random_seed
+    np.random.seed(spec.random_seed)
 
     # Check type of network_size
     if not isinstance(network_size, float):
@@ -570,6 +577,9 @@ def _generate_voronoi_nodes_links_slab(
     network_size = spec.network_size
     # Unpack variables specific to the slab shaped networks
     network_length, network_width = network_size
+    #random seed
+    random_seed = spec.random_seed
+    np.random.seed(spec.random_seed)
 
     exit_size = network_length + spec.external_offset
 
@@ -949,6 +959,9 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     _link_index = 0
     _fiber_index = 0
     fibers: dict[str, Link] = {}  # collection of full edge to edge links
+    #random seed
+    random_seed = spec.random_seed
+    np.random.seed(spec.random_seed)
 
     while _external_nodes != external_link_number:
         # determine missing number of external nodes
@@ -1088,129 +1101,129 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
 
     return nodes, links
 
-def _generate_linear_network(network_spec: NetworkSpec):
-    """Generates a linear network with all nodes on a straight line
+# def _generate_linear_network(network_spec: NetworkSpec):
+#     """Generates a linear network with all nodes on a straight line
 
-    Parameters
-    ----------
-    spec : Dictionary specifying properties of network:
-        Keys:
-            internal_nodes: number of internal nodes of network
-            network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
-            external_size: two external nodes placed at +/-external_size/2"""
-    node_number = spec["internal_nodes"]
-    network_size = spec["network_size"]
-    external_size = spec["external_size"]
+#     Parameters
+#     ----------
+#     spec : Dictionary specifying properties of network:
+#         Keys:
+#             internal_nodes: number of internal nodes of network
+#             network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
+#             external_size: two external nodes placed at +/-external_size/2"""
+#     node_number = spec["internal_nodes"]
+#     network_size = spec["network_size"]
+#     external_size = spec["external_size"]
 
-    if external_size < network_size:
-        raise ValueError("external_size must be larger than network_size.")
+#     if external_size < network_size:
+#         raise ValueError("external_size must be larger than network_size.")
 
-    # generate random positions
-    x = network_size * (np.random.random(node_number) - 0.5)
-    xs = sorted(x)
+#     # generate random positions
+#     x = network_size * (np.random.random(node_number) - 0.5)
+#     xs = sorted(x)
 
-    # add external nodes
-    xs = np.insert(xs, 0, -external_size / 2)
-    xs = np.append(xs, external_size / 2)
+#     # add external nodes
+#     xs = np.insert(xs, 0, -external_size / 2)
+#     xs = np.append(xs, external_size / 2)
 
-    for index in range(0, len(xs)):
-        if index == 0 or index == len(xs) - 1:
-            self.add_node(index, (xs[index], 0), "external")
-        else:
-            self.add_node(index, (xs[index], 0), "internal")
+#     for index in range(0, len(xs)):
+#         if index == 0 or index == len(xs) - 1:
+#             self.add_node(index, (xs[index], 0), "external")
+#         else:
+#             self.add_node(index, (xs[index], 0), "internal")
 
-    for index in range(0, len(xs) - 1):
-        if index == 0 or index == len(xs) - 2:
-            self.add_connection(
-                index,
-                index + 1,
-                xs[index + 1] - xs[index],
-                self.k,
-                self.n,
-                "external",
-            )
-        else:
-            self.add_connection(
-                index, index + 1, xs[index + 1] - xs[index], self.k, self.n
-            )
+#     for index in range(0, len(xs) - 1):
+#         if index == 0 or index == len(xs) - 2:
+#             self.add_connection(
+#                 index,
+#                 index + 1,
+#                 xs[index + 1] - xs[index],
+#                 self.k,
+#                 self.n,
+#                 "external",
+#             )
+#         else:
+#             self.add_connection(
+#                 index, index + 1, xs[index + 1] - xs[index], self.k, self.n
+#             )
 
-    self.count_nodes()
+#     self.count_nodes()
 
 
-def _generate_archimedean_network(network_spec: NetworkSpec):
-    """
-    Generates a network formed from Euclidean uniform/Archimedean/Catalan tilings
-        see https://en.wikipedia.org/wiki/List_of_Euclidean_uniform_tilings
+# def _generate_archimedean_network(network_spec: NetworkSpec):
+#     """
+#     Generates a network formed from Euclidean uniform/Archimedean/Catalan tilings
+#         see https://en.wikipedia.org/wiki/List_of_Euclidean_uniform_tilings
 
-    Parameters
-    ----------
-    spec : Dictionary specifying properties of network:
-        Keys:
-            internal_nodes: number of internal nodes of network
-            network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
-            external_size: two external nodes placed at +/-external_size/2
+#     Parameters
+#     ----------
+#     spec : Dictionary specifying properties of network:
+#         Keys:
+#             internal_nodes: number of internal nodes of network
+#             network_size: all internal nodes will be distributed randomly within range [-1/2,1/2]*network_size
+#             external_size: two external nodes placed at +/-external_size/2
 
-            num_layers':3,
-            'scale': network_rad,
-            'type': 'square',
-            'external_nodes': 5} # square,triangular, honeycomb
+#             num_layers':3,
+#             'scale': network_rad,
+#             'type': 'square',
+#             'external_nodes': 5} # square,triangular, honeycomb
 
-    Parameters
-    ----------
-    spec : TYPE
-        DESCRIPTION.
+#     Parameters
+#     ----------
+#     spec : TYPE
+#         DESCRIPTION.
 
-    Returns
-    -------
-    None.
+#     Returns
+#     -------
+#     None.
 
-    """
-    external_link_number = spec["external_nodes"]
+#     """
+#     external_link_number = spec["external_nodes"]
 
-    network_size, external_size = self.generate_tiling(spec)
+#     network_size, external_size = self.generate_tiling(spec)
 
-    points = [
-        np.array(node.position)
-        for node in self.nodes
-        if node.node_type == "internal"
-    ]
-    numbers = [
-        node.number for node in self.nodes if node.node_type == "internal"
-    ]
-    node_number = max(numbers) + 1
+#     points = [
+#         np.array(node.position)
+#         for node in self.nodes
+#         if node.node_type == "internal"
+#     ]
+#     numbers = [
+#         node.number for node in self.nodes if node.node_type == "internal"
+#     ]
+#     node_number = max(numbers) + 1
 
-    # find network nodes on convex hull
-    hullids = ConvexHull(points)
-    # add some external links
-    for ii in range(0, external_link_number):
-        theta = 2 * math.pi * np.random.random(1)
-        externalx = external_size * np.cos(theta)[0]
-        externaly = external_size * np.sin(theta)[0]
-        self.add_node(node_number + ii, (externalx, externaly), "external")
+#     # find network nodes on convex hull
+#     hullids = ConvexHull(points)
+#     # add some external links
+#     for ii in range(0, external_link_number):
+#         theta = 2 * math.pi * np.random.random(1)
+#         externalx = external_size * np.cos(theta)[0]
+#         externaly = external_size * np.sin(theta)[0]
+#         self.add_node(node_number + ii, (externalx, externaly), "external")
 
-        # find appropriate connection to closest point on convex hull
-        min_distance = 2 * external_size
+#         # find appropriate connection to closest point on convex hull
+#         min_distance = 2 * external_size
 
-        for number in hullids.vertices:
-            node = self.get_node(numbers[number])
+#         for number in hullids.vertices:
+#             node = self.get_node(numbers[number])
 
-            newdistance = np.sqrt(
-                (externalx - node.position[0]) ** 2
-                + (externaly - node.position[1]) ** 2
-            )
+#             newdistance = np.sqrt(
+#                 (externalx - node.position[0]) ** 2
+#                 + (externaly - node.position[1]) ** 2
+#             )
 
-            if newdistance < min_distance:
-                min_distance = newdistance
-                nearest_id = node.number
+#             if newdistance < min_distance:
+#                 min_distance = newdistance
+#                 nearest_id = node.number
 
-        self.add_connection(
-            node_number + ii,
-            nearest_id,
-            min_distance,
-            self.k,
-            self.n,
-            "external",
-        )
+#         self.add_connection(
+#             node_number + ii,
+#             nearest_id,
+#             min_distance,
+#             self.k,
+#             self.n,
+#             "external",
+#         )
 
 
 # -----------------------------------------------------------------------------

@@ -13,6 +13,24 @@ from complex_network.components.link import Link
 # Methods for constant node scattering matrices (independent of k0)
 # -----------------------------------------------------------------------------
 
+class ConstantNodeS:
+    def __init__(self, S_mat: np.ndarray) -> None:
+        self.S_mat = S_mat
+    def __call__(self,*args, **kwargs) -> np.ndarray:
+        return self.S_mat
+    
+class ConstantNodeSInv:
+    def __init__(self, S_mat: np.ndarray) -> None:
+        self.S_mat_inv = np.linalg.inv(S_mat())
+    def __call__(self,*args, **kwargs) -> np.ndarray:
+        return self.S_mat_inv
+    
+class ZeroMatrix:
+    def __init__(self, size: int) -> None:
+        self.size = size
+    def __call__(self, k0: complex, *args, **kwargs) -> np.ndarray:
+        return np.zeros((self.size, self.size), dtype=np.complex128)
+
 
 def get_constant_node_S_closure(
     S_mat_type: str, size: int, S_mat_params: dict[str, Any] | None = None
@@ -124,17 +142,13 @@ def get_constant_node_S_closure(
 
     # We want to return a function, not a matrix (even though it's a constant
     # function)
-    get_S = lambda k0: S_mat
-    return get_S
+    return ConstantNodeS(S_mat)
 
 
 def get_inverse_matrix_closure(func: Callable) -> Callable:
     """Get closure for inverse scattering matrix"""
 
-    def get_S_inv(k0: complex) -> np.ndarray:
-        return np.linalg.inv(func(k0))
-
-    return get_S_inv
+    return ConstantNodeSInv(func)
 
 
 def get_zero_matrix_closure(size: int) -> Callable:
@@ -143,10 +157,7 @@ def get_zero_matrix_closure(size: int) -> Callable:
     Mostly used for the derivative matrix in the case that the scattering
     matrix is constant."""
 
-    def get_zero_matrix(k0, *args, **kwargs) -> np.ndarray:
-        return np.zeros((size, size), dtype=np.complex128)
-
-    return get_zero_matrix
+    return ZeroMatrix(size)
 
 
 def get_permuted_matrix_closure(

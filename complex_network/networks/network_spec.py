@@ -47,6 +47,7 @@ class NetworkSpec:
 
     network_type: str
     network_shape: str
+    random_seed: int | None = None
     num_internal_nodes: int | None = None
     num_external_nodes: int | None = None
     num_seed_nodes: int | None = None
@@ -127,7 +128,7 @@ class NetworkSpec:
                 ),
                 "node_S_mat_type": node_defaults["S_mat_type"],
                 "node_S_mat_params": node_defaults["S_mat_params"],
-                "material": Dielectric("glass"),
+                "material": Dielectric("glass")
             }
         )
 

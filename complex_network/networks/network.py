@@ -6,6 +6,8 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.sparse import identity,csr_matrix,csc_matrix
+import scipy.sparse.linalg as la
 
 from complex_network.components.link import Link
 from complex_network.components.node import Node
@@ -912,6 +914,7 @@ class Network:
                     ]
                 )
 
+                
         return network_matrix
 
     def _get_network_step_matrix(self, k0: float | complex) -> np.ndarray:
@@ -1019,29 +1022,26 @@ class Network:
 
         # Bracketed part to be inverted
         bracket = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
-        inv = np.linalg.inv(bracket)
+        # S_ee = P_ei @ inv(bracket) @ S_ii @ P_ie
 
-        S_ee = P_ei @ inv @ S_ii @ P_ie
+        # Instead of computing the inverse, solve the linear system bracket@x = S_ii@P_ie such that x = bracket^-1@S_ii@P_ie 
+        # for faster implementation
+        solution = np.linalg.solve(bracket, S_ii@P_ie)
+        S_ee = P_ei @ solution
+
         return S_ee
 
     def get_S_ee_inv(self, k0: float | complex) -> np.ndarray:
         """Get the external inverse scattering matrix from the inverse
-        formula
+        formula"""
+        # S_ee_inv = P_ei_inv @ S_ii_inv @ inv @ P_ie_inv
 
-        I_e = S^-1_ee @ O_e"""
-        P_ei_inv = self.get_P_ei_inv(k0)
-        P_ie_inv = P_ei_inv.T
-        S_ii_inv = self.get_S_ii_inv(k0)
-        P_ii_inv = self.get_P_ii_inv(k0)
+        # Instead of computing the inverse, call the S_ee function. Since the See matrix is often small
+        # it is better we use the func that is already optimized and invert it
+        S_ee = self.get_S_ee(k0)
+        S_ee_inv = np.linalg.inv(S_ee)
+        
 
-        # Bracketed part to be inverted
-        bracket = (
-            np.identity(len(S_ii_inv), dtype=np.complex128)
-            - P_ii_inv @ S_ii_inv
-        )
-        inv = np.linalg.inv(bracket)
-
-        S_ee_inv = P_ei_inv @ S_ii_inv @ inv @ P_ie_inv
         return S_ee_inv
 
     def get_S_ie(self, k0: float | complex) -> np.ndarray:
@@ -1052,16 +1052,15 @@ class Network:
         S_ii = self.get_S_ii(k0)
         P_ii = self.get_P_ii(k0)
 
-        # Bracketed part to be inverted
-        bracket_top = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
-        bracket_bottom = (
-            np.identity(len(S_ii), dtype=np.complex128) - P_ii @ S_ii
-        )
-        inv_top = np.linalg.inv(bracket_top)
-        inv_bottom = np.linalg.inv(bracket_bottom)
+        S_ii_shape = S_ii.shape[0]
 
-        top = inv_top @ S_ii @ P_ie
-        bottom = inv_bottom @ P_ie
+        # Bracketed part to be inverted
+        bracket_top = np.eye(S_ii_shape, dtype=np.complex128) - S_ii @ P_ii
+        bracket_bottom = np.eye(S_ii_shape, dtype=np.complex128) - P_ii @ S_ii
+
+        top = np.linalg.solve(bracket_top, S_ii @ P_ie)
+        bottom = np.linalg.solve(bracket_bottom, P_ie)
+
         S_ie = np.block([[top], [bottom]])
         return S_ie
 

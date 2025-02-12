@@ -91,6 +91,20 @@ class Node(Component):
     def y(self) -> float:
         """y coordinate of the node."""
         return self.position[1]
+    @staticmethod
+    def get_default_S(self, k0: complex) -> np.ndarray:
+        """Default scattering matrix for the node."""
+        return np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    @staticmethod
+    def get_default_S_inv(self, k0: complex) -> np.ndarray:
+        """Default inverse scattering matrix for the node."""
+        return np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    @staticmethod
+    def get_default_dS(self, k0: complex) -> np.ndarray:
+        """Default derivative of the scattering matrix for the node."""
+        return np.zeros((2, 2), dtype=np.complex128)
 
     @staticmethod
     def get_default_values() -> dict[str, Any]:
@@ -110,13 +124,9 @@ class Node(Component):
             "outwave_np": np.zeros(0, dtype=np.complex128),
             "S_mat_type": "COE",
             "S_mat_params": {},
-            "get_S": lambda k0: np.array(
-                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
-            ),
-            "get_S_inv": lambda k0: np.array(
-                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
-            ),
-            "get_dS": lambda k0: np.zeros((2, 2), dtype=np.complex128),
+            "get_S": Node.get_default_S,
+            "get_S_inv": Node.get_default_S_inv,
+            "get_dS": Node.get_default_dS,
         }
         return default_values
 
