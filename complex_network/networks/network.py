@@ -6,12 +6,11 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.sparse import identity,csr_matrix,csc_matrix
-import scipy.sparse.linalg as la
 
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.scattering_matrices import link_matrix, node_matrix
+
 
 
 class Network:
@@ -1021,7 +1020,7 @@ class Network:
         P_ii = self.get_P_ii(k0)
 
         # Bracketed part to be inverted
-        bracket = np.identity(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
+        bracket = np.eye(len(S_ii), dtype=np.complex128) - S_ii @ P_ii
         # S_ee = P_ei @ inv(bracket) @ S_ii @ P_ie
 
         # Instead of computing the inverse, solve the linear system bracket@x = S_ii@P_ie such that x = bracket^-1@S_ii@P_ie 
