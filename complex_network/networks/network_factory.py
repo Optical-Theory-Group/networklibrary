@@ -11,12 +11,16 @@ import copy
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.networks.network import Network
-from complex_network.networks.network_spec import NetworkSpec, VALID_NETWORK_TYPES
+from complex_network.networks.network_spec import (
+    NetworkSpec,
+    VALID_NETWORK_TYPES,
+)
 from complex_network.scattering_matrices import link_matrix, node_matrix
+
 
 def generate_network(spec: NetworkSpec) -> Network:
     """Main method for building a network."""
-    
+
     match spec.network_type:
         case "delaunay":
             nodes, links = _generate_delaunay_nodes_links(spec)
@@ -36,6 +40,7 @@ def generate_network(spec: NetworkSpec) -> Network:
                 f"Please choose one from {VALID_NETWORK_TYPES}."
             )
 
+    _fix_labeling(nodes, links)
     # By this point we have nodes that all have an index, but don't know what
     # links or other nodes they are connected to. The links are also all
     # numbered and know what two nodes they connect. These two methods finish
@@ -44,6 +49,14 @@ def generate_network(spec: NetworkSpec) -> Network:
     _initialise_nodes(nodes, links, spec)
     return Network(nodes, links)
 
+
+def _fix_labeling(nodes: dict[str, Node], links: dict[str, Link]) -> None:
+    """Ensure that nodes are labeled in order with no missing ids and that
+    links attach nodes correctly"""
+    new_index = 0
+    for _, node in nodes.items():
+        node.index = new_index
+        new_index += 1
 
 def _initialise_nodes(
     nodes: dict[str, Node], links: dict[str, Link], spec: NetworkSpec
@@ -182,7 +195,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     nodes = {}
     links = {}
 
-    # random seed 
+    # random seed
     np.random.seed(random_seed)
     if network_shape == "circular":
         # Check type of network_size
@@ -283,10 +296,17 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
         right_external_points = np.copy(right_edge_points)
         right_external_points[:, 0] = network_length + external_offset
 
-        points_edge = np.vstack((left_edge_points - network_length/2, right_edge_points - network_height/2))
+        points_edge = np.vstack(
+            (
+                left_edge_points - network_length / 2,
+                right_edge_points - network_height / 2,
+            )
+        )
         points_external = np.vstack(
-            (left_external_points - network_length/2, 
-             right_external_points - network_height/2)
+            (
+                left_external_points - network_length / 2,
+                right_external_points - network_height / 2,
+            )
         )
 
         # Points in the interior
@@ -298,8 +318,12 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
 
         points_int_x = np.random.uniform(0, network_length, num_internal)
         points_int_y = np.random.uniform(0, network_height, num_internal)
-        points_int = np.column_stack((points_int_x - network_length/2, 
-                                      points_int_y - network_height/2))
+        points_int = np.column_stack(
+            (
+                points_int_x - network_length / 2,
+                points_int_y - network_height / 2,
+            )
+        )
 
     # All non-external points
     points_internal = np.vstack((points_edge, points_int))
@@ -341,10 +365,11 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     return nodes, links
 
 
-def _generate_voronoi_nodes_links(spec: NetworkSpec,
-    ) -> tuple[dict, dict]:
+def _generate_voronoi_nodes_links(
+    spec: NetworkSpec,
+) -> tuple[dict, dict]:
     network_shape = spec.network_shape
-    
+
     if network_shape == "circular":
         nodes, links = _generate_voronoi_nodes_links_circular(spec)
     elif network_shape == "slab":
@@ -353,7 +378,8 @@ def _generate_voronoi_nodes_links(spec: NetworkSpec,
     return nodes, links
 
 
-def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
+def _generate_voronoi_nodes_links_circular(
+    spec: NetworkSpec,
 ) -> tuple[dict, dict]:
     seed_nodes = spec.num_seed_nodes
     network_size = spec.network_size
@@ -362,7 +388,7 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
     nodes: dict[str, Node] = {}
     links: dict[str, Link] = {}
 
-    #random seed
+    # random seed
     random_seed = spec.random_seed
     np.random.seed(spec.random_seed)
 
@@ -383,7 +409,8 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
     # generate random internal points
     t = 2 * np.pi * np.random.random(seed_nodes)
     r = network_size * np.sqrt(
-        np.random.random(seed_nodes))  # square root gives a more uniform distribution of points
+        np.random.random(seed_nodes)
+    )  # square root gives a more uniform distribution of points
     points = np.array([r * np.cos(t), r * np.sin(t)]).T
 
     # do Voronoi meshing
@@ -409,17 +436,27 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
     # remove any ridges that lie wholly outside exit_size
     ridge_inds_to_delete = []
     for number, ridge in enumerate(vor_ridges):
-        sortridge = np.sort(ridge)  # will mean -1 is always first if it exists, otherwise doesn't matter
+        sortridge = np.sort(
+            ridge
+        )  # will mean -1 is always first if it exists, otherwise doesn't matter
         if sortridge[0] == -1:
             if np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size:
                 ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
-        elif (np.linalg.norm(vor_vertices[sortridge[0]]) > exit_size) and \
-                (np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size):
+        elif (np.linalg.norm(vor_vertices[sortridge[0]]) > exit_size) and (
+            np.linalg.norm(vor_vertices[sortridge[1]]) > exit_size
+        ):
             ridge_inds_to_delete = np.append(ridge_inds_to_delete, number)
 
-    vor_ridge_points = [vor_ridge_points[num] for num, ridge in enumerate(vor_ridges) if
-                        num not in ridge_inds_to_delete]
-    vor_ridges = [ridge for num, ridge in enumerate(vor_ridges) if num not in ridge_inds_to_delete]
+    vor_ridge_points = [
+        vor_ridge_points[num]
+        for num, ridge in enumerate(vor_ridges)
+        if num not in ridge_inds_to_delete
+    ]
+    vor_ridges = [
+        ridge
+        for num, ridge in enumerate(vor_ridges)
+        if num not in ridge_inds_to_delete
+    ]
 
     # loop over ridges and mark ridges with one vertex outsize network as being infinite
     for number, ridge in enumerate(vor_ridges):
@@ -433,7 +470,9 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
             ridge.remove(-1)
             id0 = ridge[0]
             vertex = vor_vertices[id0]
-            if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:  # lies within network size
+            if (
+                np.linalg.norm([vertex[0], vertex[1]]) < exit_size
+            ):  # lies within network size
                 _exit_nodes += 1
                 id1 = len(vor_vertices) + _exit_nodes
                 # calculate position of exit node
@@ -446,18 +485,21 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
                 midy = mid[1]
                 grad = (pos[1] - midy) / (pos[0] - midx)
 
-                sqrtfac = np.sqrt((1 + grad ** 2) * exit_size ** 2 - (-grad * mid[0] + mid[1]) ** 2)
-                denom = (1 + grad ** 2)
+                sqrtfac = np.sqrt(
+                    (1 + grad**2) * exit_size**2
+                    - (-grad * mid[0] + mid[1]) ** 2
+                )
+                denom = 1 + grad**2
 
                 # one solution of y - y1 = m (x - x1) and x^2 + y^2 = r^2
-                x1 = (grad ** 2 * midx - grad * midy + sqrtfac) / denom
-                x2 = (grad ** 2 * midx - grad * midy - sqrtfac) / denom
+                x1 = (grad**2 * midx - grad * midy + sqrtfac) / denom
+                x2 = (grad**2 * midx - grad * midy - sqrtfac) / denom
 
                 y1 = (grad * sqrtfac - grad * midx + midy) / denom
                 y2 = (-grad * sqrtfac - grad * midx + midy) / denom
 
-                d1 = np.linalg.norm([x1-pos[0], y1-pos[1]])
-                d2 = np.linalg.norm([x2-pos[0], y2-pos[1]])
+                d1 = np.linalg.norm([x1 - pos[0], y1 - pos[1]])
+                d2 = np.linalg.norm([x2 - pos[0], y2 - pos[1]])
                 if d1 < d2:
                     x = x1
                     y = y1
@@ -467,16 +509,20 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
 
                 nodes[str(id1)] = Node(id1, "external", (x, y))
 
-                links[str(_link_count)] = Link(_link_count, "external", (id0, id1))
+                links[str(_link_count)] = Link(
+                    _link_count, "external", (id0, id1)
+                )
                 _link_count = _link_count + 1
-        elif any([r in vertices_outside for r in ridge]):  # one of vertices is outside
+        elif any(
+            [r in vertices_outside for r in ridge]
+        ):  # one of vertices is outside
             pass
         else:  # finite ridge in network
             id0 = ridge[0]
             id1 = ridge[1]
             links[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
             _link_count = _link_count + 1
-            
+
     # # Generate random points in the interior
     # theta_int = 2 * np.pi * np.random.random(num_seed_nodes)
     # r_int = network_size * np.sqrt(np.random.random(num_seed_nodes))
@@ -570,14 +616,14 @@ def _generate_voronoi_nodes_links_circular(spec: NetworkSpec,
 
 
 def _generate_voronoi_nodes_links_slab(
-        spec: NetworkSpec,
+    spec: NetworkSpec,
 ) -> tuple[dict, dict]:
     seed_nodes = spec.num_seed_nodes
     exit_nodes = spec.num_external_nodes
     network_size = spec.network_size
     # Unpack variables specific to the slab shaped networks
     network_length, network_width = network_size
-    #random seed
+    # random seed
     random_seed = spec.random_seed
     np.random.seed(spec.random_seed)
 
@@ -585,7 +631,7 @@ def _generate_voronoi_nodes_links_slab(
 
     nodes: dict[str, Node] = {}
     links: dict[str, Link] = {}
-    
+
     # Check type of network_size
     if not isinstance(network_size, tuple) or len(network_size) != 2:
         raise ValueError(
@@ -597,12 +643,12 @@ def _generate_voronoi_nodes_links_slab(
         raise ValueError(
             "external_size must be a float for a circular delaunay network"
         )
-    
+
     # Check if irrelevant external size parameter has been used
     if spec.external_size is not None:
         raise ValueError(
             "External size is not valid for slab networks. Use external offset only instead."
-            )
+        )
 
     if isinstance(exit_nodes, int):
         num_left_external_nodes, num_right_external_nodes = (
@@ -610,9 +656,7 @@ def _generate_voronoi_nodes_links_slab(
             exit_nodes,
         )
     else:
-        num_left_external_nodes, num_right_external_nodes = (
-            exit_nodes
-        )
+        num_left_external_nodes, num_right_external_nodes = exit_nodes
 
     lhs_exits = num_left_external_nodes
     rhs_exits = num_right_external_nodes
@@ -636,7 +680,7 @@ def _generate_voronoi_nodes_links_slab(
         y = np.concatenate((ys, youtL, youtR, youtinf))
         points = np.array([x, y]).T
         if exit_size <= network_length:
-            raise ValueError('exit_size must be larger than network_size[0]')
+            raise ValueError("exit_size must be larger than network_size[0]")
 
         # do Voronoi meshing
         vor = scipy.spatial.Voronoi(points)
@@ -661,23 +705,29 @@ def _generate_voronoi_nodes_links_slab(
                 # check to see if it is desired output nodes
                 ridge.remove(-1)
                 id0 = ridge[0]
-                
+
                 vertex = vor_vertices[id0]
-                if np.abs(vertex[1]) < network_width / 2:  # lies within network size
+                if (
+                    np.abs(vertex[1]) < network_width / 2
+                ):  # lies within network size
                     _exit_nodes += 1
                     id1 = len(vor_vertices) + _exit_nodes + 1
 
                     # calculate position of exit node
                     x = np.sign(vertex[0]) * exit_size / 2
                     y = vertex[1]
-                    nodes[(str(id1))] = Node(id1, "external", (x,y))
-                    links[str(_link_count)] = Link(_link_count, "external", (id0, id1))
+                    nodes[(str(id1))] = Node(id1, "external", (x, y))
+                    links[str(_link_count)] = Link(
+                        _link_count, "external", (id0, id1)
+                    )
                     _link_count = _link_count + 1
                 pass
             else:  # finite ridge in network
                 id0 = ridge[0]
                 id1 = ridge[1]
-                links[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
+                links[str(_link_count)] = Link(
+                    _link_count, "internal", (id0, id1)
+                )
                 _link_count = _link_count + 1
 
         # now trim everything outside vertical width of network
@@ -710,35 +760,50 @@ def _generate_voronoi_nodes_links_slab(
             int_ptU = _intersection(lineupper, lineridge)
             int_ptL = _intersection(linelower, lineridge)
 
-            if (int_ptU is not None) and \
-                    (int_ptL is not None):  # intersect with upper and lower boundary
+            if (int_ptU is not None) and (
+                int_ptL is not None
+            ):  # intersect with upper and lower boundary
                 # upper node
-                intersect_node_idU = max([int(key) for key in nodes.keys()]) + 1  # generate unique id
+                intersect_node_idU = (
+                    max([int(key) for key in nodes.keys()]) + 1
+                )  # generate unique id
                 edge_node_ids_upper.append(intersect_node_idU)
-                nodes[(str(intersect_node_idU))] = Node(intersect_node_idU, "internal", int_ptU)
+                nodes[(str(intersect_node_idU))] = Node(
+                    intersect_node_idU, "internal", int_ptU
+                )
                 _internal_nodes += 1
 
                 # lower node
-                intersect_node_idL = max([int(key) for key in nodes.keys()]) + 1
+                intersect_node_idL = (
+                    max([int(key) for key in nodes.keys()]) + 1
+                )
                 edge_node_ids_lower.append(intersect_node_idL)
-                nodes[(str(intersect_node_idL))] = Node(intersect_node_idL, "internal", int_ptL)
+                nodes[(str(intersect_node_idL))] = Node(
+                    intersect_node_idL, "internal", int_ptL
+                )
                 _internal_nodes += 1
 
                 # connection within network
-                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_idU, intersect_node_idL))
+                links[str(_link_count)] = Link(
+                    _link_count,
+                    "internal",
+                    (intersect_node_idU, intersect_node_idL),
+                )
                 _link_count = _link_count + 1
 
-                intersectionsU[intersect_node_idU] = {'ridge': link_key,
-                                                        'position': int_ptU,
-                                                        'node1': intersect_node_idU,
-                                                        'node2': intersect_node_idL,
-                                                        }
+                intersectionsU[intersect_node_idU] = {
+                    "ridge": link_key,
+                    "position": int_ptU,
+                    "node1": intersect_node_idU,
+                    "node2": intersect_node_idL,
+                }
 
-                intersectionsL[intersect_node_idL] = {'ridge': link_key,
-                                                        'position': int_ptL,
-                                                        'node1': intersect_node_idL,
-                                                        'node2': intersect_node_idU,
-                                                        }
+                intersectionsL[intersect_node_idL] = {
+                    "ridge": link_key,
+                    "position": int_ptL,
+                    "node1": intersect_node_idL,
+                    "node2": intersect_node_idU,
+                }
             elif int_ptU is not None:  # intersect with upper boundary
                 # get id for node within bounding rectangle
                 if (abs(Ax) <= xb) and (abs(Ay) <= yb):
@@ -748,17 +813,22 @@ def _generate_voronoi_nodes_links_slab(
 
                 intersect_node_id = max([int(key) for key in nodes.keys()]) + 1
                 edge_node_ids_upper.append(intersect_node_id)
-                nodes[(str(intersect_node_id))] = Node(intersect_node_id, "internal", int_ptU)
+                nodes[(str(intersect_node_id))] = Node(
+                    intersect_node_id, "internal", int_ptU
+                )
                 _internal_nodes += 1
 
-                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_id, initnode))
+                links[str(_link_count)] = Link(
+                    _link_count, "internal", (intersect_node_id, initnode)
+                )
                 _link_count = _link_count + 1
 
-                intersectionsU[intersect_node_id] = {'ridge': link_key,
-                                                        'position': int_ptU,
-                                                        'node1': intersect_node_id,
-                                                        'node2': initnode,
-                                                        }
+                intersectionsU[intersect_node_id] = {
+                    "ridge": link_key,
+                    "position": int_ptU,
+                    "node1": intersect_node_id,
+                    "node2": initnode,
+                }
             elif int_ptL is not None:  # intersect with lower boundary
                 # get id for node within bounding rectangle
                 if (abs(Ax) <= xb) and (abs(Ay) <= yb):
@@ -768,17 +838,22 @@ def _generate_voronoi_nodes_links_slab(
 
                 intersect_node_id = max([int(key) for key in nodes.keys()]) + 1
                 edge_node_ids_lower.append(intersect_node_id)
-                nodes[(str(intersect_node_id))] = Node(intersect_node_id, "internal", int_ptL)
+                nodes[(str(intersect_node_id))] = Node(
+                    intersect_node_id, "internal", int_ptL
+                )
                 _internal_nodes += 1
 
-                links[str(_link_count)] = Link(_link_count, "internal", (intersect_node_id, initnode))
+                links[str(_link_count)] = Link(
+                    _link_count, "internal", (intersect_node_id, initnode)
+                )
                 _link_count = _link_count + 1
 
-                intersectionsL[intersect_node_id] = {'ridge': link_key,
-                                                        'position': int_ptL,
-                                                        'node1': intersect_node_id,
-                                                        'node2': initnode,
-                                                        }
+                intersectionsL[intersect_node_id] = {
+                    "ridge": link_key,
+                    "position": int_ptL,
+                    "node1": intersect_node_id,
+                    "node2": initnode,
+                }
 
         # remove all exterior nodes (will automatically remove associated connections)
         nodes_to_remove = []
@@ -802,16 +877,28 @@ def _generate_voronoi_nodes_links_slab(
 
         # remove any nodes that are left floating i.e. without any connections
         remaining_node_keys = [key for key in nodes.keys()]
-        connected_nodes = np.unique(np.ndarray.flatten(np.array([link.node_indices for link in links.values()])))
-        nodes_to_remove = [key for key in remaining_node_keys if int(key) not in connected_nodes]
+        connected_nodes = np.unique(
+            np.ndarray.flatten(
+                np.array([link.node_indices for link in links.values()])
+            )
+        )
+        nodes_to_remove = [
+            key
+            for key in remaining_node_keys
+            if int(key) not in connected_nodes
+        ]
         for nid in nodes_to_remove:
             nodes.pop(str(nid))
 
         # get ids of nodes on upper boundary
-        uppernode_ids = [interx['node1'] for interx in intersectionsU.values()]
-        lowernode_ids = [interx['node1'] for interx in intersectionsL.values()]
-        uppernode_xpos = np.array([intersectionsU[nid]['position'][0] for nid in uppernode_ids])
-        lowernode_xpos = np.array([intersectionsL[nid]['position'][0] for nid in lowernode_ids])
+        uppernode_ids = [interx["node1"] for interx in intersectionsU.values()]
+        lowernode_ids = [interx["node1"] for interx in intersectionsL.values()]
+        uppernode_xpos = np.array(
+            [intersectionsU[nid]["position"][0] for nid in uppernode_ids]
+        )
+        lowernode_xpos = np.array(
+            [intersectionsL[nid]["position"][0] for nid in lowernode_ids]
+        )
         sort_indexu = np.argsort(uppernode_xpos)
         sort_indexl = np.argsort(lowernode_xpos)
         sorted_ids_upper = [uppernode_ids[ii] for ii in sort_indexu]
@@ -831,14 +918,30 @@ def _generate_voronoi_nodes_links_slab(
             _link_count = _link_count + 1
 
         # check number of exit nodes
-        exit_nodesids = [node.index for node in nodes.values() if node.node_type == 'external'] 
-        nodes_l = sum([1 if nodes[str(nodeid)].position[0] < 0 else 0 for nodeid in exit_nodesids])
-        nodes_r = sum([1 if nodes[str(nodeid)].position[0] > 0 else 0 for nodeid in exit_nodesids])
+        exit_nodesids = [
+            node.index
+            for node in nodes.values()
+            if node.node_type == "external"
+        ]
+        nodes_l = sum(
+            [
+                1 if nodes[str(nodeid)].position[0] < 0 else 0
+                for nodeid in exit_nodesids
+            ]
+        )
+        nodes_r = sum(
+            [
+                1 if nodes[str(nodeid)].position[0] > 0 else 0
+                for nodeid in exit_nodesids
+            ]
+        )
 
-        if (nodes_l == lhs_exits) and (nodes_r == rhs_exits) :
+        if (nodes_l == lhs_exits) and (nodes_r == rhs_exits):
             correct_exits = True
         else:  # unsuitable network so we reinitialise and try again
-            UserWarning("Incorrect number of exit nodes generated - retrying network generation")
+            UserWarning(
+                "Incorrect number of exit nodes generated - retrying network generation"
+            )
             nodes = {}
             links = {}
 
@@ -846,7 +949,9 @@ def _generate_voronoi_nodes_links_slab(
             _exit_nodes = 0
             _generation_attempts += 1
             if _generation_attempts > 20:
-                raise ValueError("Failed to generate network with correct number of exit nodes. Likely your selected parameters are incompatible.")
+                raise ValueError(
+                    "Failed to generate network with correct number of exit nodes. Likely your selected parameters are incompatible."
+                )
 
     # points_int_x = np.random.uniform(0, network_length, num_seed_nodes)
     # points_int_y = np.random.uniform(0, network_height, num_seed_nodes)
@@ -889,7 +994,7 @@ def _generate_voronoi_nodes_links_slab(
     #     ):
     #         links[str(i)] = Link(i, "internal", tuple(ridge_vertices))
 
-    # remaining logic needed : 
+    # remaining logic needed :
     # get list of remaining ridges for which link not made yet
     # check for intersections with bounding rectangle.
     # find intersection points and add nodes
@@ -919,7 +1024,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     external_size = spec.external_size
     network_shape = spec.network_shape
     network_size = spec.network_size
-    
+
     nodes: dict[str, Node] = {}
     links: dict[str, Link] = {}
 
@@ -929,7 +1034,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             "num_external_nodes must be an even number for a Buffon network"
         )
     total_lines = int(external_link_number / 2)
-    
+
     if network_shape == "circular":
         # Check type of network_size
         if not isinstance(network_size, float):
@@ -959,7 +1064,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     _link_index = 0
     _fiber_index = 0
     fibers: dict[str, Link] = {}  # collection of full edge to edge links
-    #random seed
+    # random seed
     random_seed = spec.random_seed
     np.random.seed(spec.random_seed)
 
@@ -967,7 +1072,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
         # determine missing number of external nodes
         missing_nodes = external_link_number - _external_nodes
         number_of_lines = int(missing_nodes / 2)
-        _node_indices = [int(key) for key in nodes.keys()]  
+        _node_indices = [int(key) for key in nodes.keys()]
         available_node_ids = [
             i for i in range(0, total_lines) if i not in _node_indices
         ]
@@ -984,11 +1089,17 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             points = np.array([xn, yn]).T
 
             nodeid = available_node_ids[nn]
-            nodes[str(nodeid)] = Node(nodeid, "external", (points[0, 0], points[0, 1]))
-            nodes[str(total_lines + nodeid)] = Node(total_lines + nodeid, "external", (points[1, 0], points[1, 1]))
+            nodes[str(nodeid)] = Node(
+                nodeid, "external", (points[0, 0], points[0, 1])
+            )
+            nodes[str(total_lines + nodeid)] = Node(
+                total_lines + nodeid, "external", (points[1, 0], points[1, 1])
+            )
             _external_nodes += 2
 
-            fibers[str(_fiber_index)] = Link(_fiber_index, "external", (nodeid, total_lines + nodeid))
+            fibers[str(_fiber_index)] = Link(
+                _fiber_index, "external", (nodeid, total_lines + nodeid)
+            )
             _fiber_index += 1
 
         # construct array of all intersections and track which links these points correspond to
@@ -1008,11 +1119,17 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
                 int_pt = _intersection(line1, line2)
                 if int_pt is not None:  # lines intersect
                     intersect_node_id = len(nodes)
-                    nodes[str(intersect_node_id)] = Node(intersect_node_id, "internal", int_pt)
+                    nodes[str(intersect_node_id)] = Node(
+                        intersect_node_id, "internal", int_pt
+                    )
                     _internal_nodes += 1
 
-                    intersections[intersect_node_id] = {'line1': ii, 'line2': jj, 'position': int_pt}
-        
+                    intersections[intersect_node_id] = {
+                        "line1": ii,
+                        "line2": jj,
+                        "position": int_pt,
+                    }
+
         # construct connections
         for ii, link in fibers.items():  # range(0, len(fibres)):
             endpos = nodes[str(link.node_indices[0])].position
@@ -1027,7 +1144,9 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             ]
             # order them in ascending distance from one end
             distances = [
-                np.linalg.norm(np.array(endpos) - np.array(intersections[jj]["position"]))
+                np.linalg.norm(
+                    np.array(endpos) - np.array(intersections[jj]["position"])
+                )
                 for jj in fibernodes
             ]
             orderednodes = [x for _, x in sorted(zip(distances, fibernodes))]
@@ -1035,7 +1154,11 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             orderednodes.append(link.node_indices[1])
             # form connections
             for jj in range(0, len(orderednodes) - 1):
-                links[str(_link_index)] = Link(_link_index, "internal", (orderednodes[jj], orderednodes[jj+1]))
+                links[str(_link_index)] = Link(
+                    _link_index,
+                    "internal",
+                    (orderednodes[jj], orderednodes[jj + 1]),
+                )
                 _link_index += 1
 
         # loop through the connections and reset those that are connected to external nodes
@@ -1078,28 +1201,34 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             links_to_remove_flat = []
             for index, link in fibers.items():
                 for nid in nodes_to_remove_flat:
-                    if link.node_indices[0] == nid or link.node_indices[1] == nid:
+                    if (
+                        link.node_indices[0] == nid
+                        or link.node_indices[1] == nid
+                    ):
                         if index not in links_to_remove_flat:
                             links_to_remove_flat.append(index)
 
             # remove links and nodes
             # NB we maintain fibres list incase we have to do another iteration. This is cleaner and faster
             fibers = {
-                index: link for index, link in fibers.items()
+                index: link
+                for index, link in fibers.items()
                 if index not in links_to_remove_flat
             }
             newnodes = {
-                index: node for index, node in nodes.items()
+                index: node
+                for index, node in nodes.items()
                 if node.index not in nodes_to_remove_flat
             }
-            
+
             links = {}  # these will be regenerated
             nodes = newnodes
-            _external_nodes = len(nodes) 
+            _external_nodes = len(nodes)
             _internal_nodes = 0
             _link_index = 0
 
     return nodes, links
+
 
 # def _generate_linear_network(network_spec: NetworkSpec):
 #     """Generates a linear network with all nodes on a straight line
@@ -1430,8 +1559,11 @@ def _intersection(line1, line2):
         else:
             return None
 
+
 @staticmethod
-def connected_component_nodes(nodes: dict[str, Node], links: dict[str, Link]) -> tuple:
+def connected_component_nodes(
+    nodes: dict[str, Node], links: dict[str, Link]
+) -> tuple:
     """
     Returns
     -------
@@ -1459,7 +1591,9 @@ def connected_component_nodes(nodes: dict[str, Node], links: dict[str, Link]) ->
     return len(components), components
 
 
-def breadth_first_search(nodes: dict[str, Node], links: dict[str, Link], initial: int):
+def breadth_first_search(
+    nodes: dict[str, Node], links: dict[str, Link], initial: int
+):
     """
     Does a breadth first search of network and returns node ids within
     the network component containing 'initial' node id
@@ -1489,9 +1623,13 @@ def breadth_first_search(nodes: dict[str, Node], links: dict[str, Link], initial
             neighbours = []
             for link in links.values():
                 if node in link.node_indices:
-                    neighbour = link.node_indices[0] if link.node_indices[1] == node else link.node_indices[1]
+                    neighbour = (
+                        link.node_indices[0]
+                        if link.node_indices[1] == node
+                        else link.node_indices[1]
+                    )
                     neighbours.append(neighbour)
-            
+
             # For each connected node
             for neighbour in neighbours:
                 # Add it to the end of the queue
