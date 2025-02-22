@@ -60,6 +60,16 @@ class Link(Component):
         self.nature = value
 
     @property
+    def isinternal(self) -> bool:
+        """Return True if link is internal."""
+        return self.nature == "internal"
+    
+    @property
+    def isexternal(self) -> bool:
+        """Return True if link is internal."""
+        return self.nature == "external"
+
+    @property
     def power_diff(self) -> float:
         """Difference in power flowing in both directions."""
         return np.abs(

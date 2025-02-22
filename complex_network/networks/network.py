@@ -250,6 +250,22 @@ class Network:
             if sorted(link.node_indices) == sorted(node_indices):
                 return link
         raise ValueError("Link not found.")
+    
+    def get_connecting_nodes(self, node_index: int | str) -> list[Node]:
+        """Returns a list of nodes that are connected to the node with the specified index"""
+        nodes = []
+        for link in self.link_dict.values():
+            if node_index in link.node_indices:
+                neighbor_index = (
+                    link.node_indices[0]
+                    if link.node_indices[1] == node_index
+                    else link.node_indices[1]
+                )
+
+                node = self.node_dict.get(str(neighbor_index), None)
+                nodes.append(node)
+
+        return nodes
 
     def reset_dict_indices(self) -> None:
         """Go through the node and link dictionaries and generate a new
@@ -2358,3 +2374,127 @@ class Network:
 
         if save_dir is not None:
             plt.savefig(save_dir, format="svg", bbox_inches="tight")
+
+    # -------------------------------------------------------------------------
+    #  Network properties and analysis methods
+    # -------------------------------------------------------------------------
+    @property
+    def laplacian_matrix(self, ):
+        """
+        Returns Laplacian matrix for network
+        https://en.wikipedia.org/wiki/Laplacian_matrix
+
+        """
+        A = self.adjacency_matrix
+        D = self.degree_matrix
+        return D - A
+
+    @property
+    def degree_matrix(self, ):
+        """
+        Returns degree matrix for network
+        https://en.wikipedia.org/wiki/Degree_matrix
+
+        Matrix is ordered according to increasing node index
+
+        """
+        deg = np.zeros((self.num_nodes, self.num_nodes))
+
+        # sort nodes
+        sorted_nodes = sorted(self.node_dict.keys())
+
+        # construct adjacency matrix
+        for index, n_id in enumerate(sorted_nodes):
+            node = self.get_node(n_id)
+            deg[index, index] = node.degree
+
+        return deg
+
+    @property
+    def adjacency_matrix(self, ):
+        """
+        Returns adjacency matrix for network
+        https://en.wikipedia.org/wiki/Adjacency_matrix
+
+        Matrix is ordered according to increasing node index
+
+        """
+        adj = np.zeros((self.num_nodes, self.num_nodes))
+
+        # sort nodes
+        sorted_nodes = sorted([int(key) for key in self.node_dict.keys()])
+
+        # construct adjacency matrix
+        for index, node_index in enumerate(sorted_nodes):
+            connected_indices = [node.index for node in self.get_connecting_nodes(int(node_index))]
+            for connected_index in connected_indices:
+                adj[index, sorted_nodes.index(connected_index)] = 1
+
+        return adj
+
+    @property
+    def fiedler(self, ):
+        """
+        Returns Fiedler value or algebraic connectivity for network
+        https://en.wikipedia.org/wiki/Algebraic_connectivity
+        """
+
+        L = self.laplacian_matrix
+        eigensystem = np.linalg.eig(L)
+        eigenvalues = eigensystem[0]
+        eigenvectors = eigensystem[1]
+        sorted_eigenvalues = sorted(eigenvalues)
+
+        f = sorted_eigenvalues[1]
+        fv = eigenvectors[list(eigenvalues).index(f)]
+        return f, fv
+
+    def breadth_first_search_simple_paths(self, start_node, end_node, max_path_length=np.inf):
+        """
+        Finds all paths between start_node and end_node using BFS, avoiding cycles.
+
+        Args:
+            start_node (int): The starting node ID.
+            end_node (int): The ending node ID.
+            max_path_length (int): The maximum number of segmenets in the path.
+
+        Returns:
+            list: A list of lists, where each inner list represents a path.
+        """
+
+        all_paths = []
+        queue = [(start_node, [start_node])]
+
+        while queue:
+            current_node, current_path = queue.pop(0)
+
+            if current_node == end_node:
+                all_paths.append(np.array(current_path))
+                continue  # Important: Continue to find other paths
+
+            if len(current_path) > max_path_length:
+                continue  # Skip if path length exceeds limit
+
+            for link in self.link_dict.values():
+                if current_node in link.node_indices:
+                    neighbor = (
+                        link.node_indices[0]
+                        if link.node_indices[1] == current_node
+                        else link.node_indices[1]
+                    )
+
+                    if neighbor not in current_path:
+                        new_path = current_path + [neighbor]
+                        queue.append((neighbor, new_path))
+
+        return all_paths
+
+    def get_lengths_along_path(self, path_indices):
+        lengths = []
+        for jj, index1 in enumerate(path_indices[:-1]):
+            index2 = path_indices[jj+1]
+
+            link = self.get_link_by_node_indices((index1, index2))
+            lengths.append(link.length)
+
+        return np.array(lengths)

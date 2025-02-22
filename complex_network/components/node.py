@@ -61,11 +61,21 @@ class Node(Component):
     def node_type(self) -> str:
         """Alias for nature."""
         return self.nature
-
+    
     @node_type.setter
     def node_type(self, value) -> None:
         self.nature = value
 
+    @property
+    def isinternal(self) -> bool:
+        """Return True if node is internal."""
+        return self.nature == "internal"
+    
+    @property
+    def isexternal(self) -> bool:
+        """Return True if node is internal."""
+        return self.nature == "external"
+    
     @property
     def scat_loss(self) -> float:
         """Return the scattering loss at the node."""
