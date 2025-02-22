@@ -12,3 +12,4 @@ dependencies:
   - ipykernel
   - ipympl
   - tqdm
+  - quadpy
