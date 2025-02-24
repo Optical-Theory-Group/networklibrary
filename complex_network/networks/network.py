@@ -29,16 +29,16 @@ class Network:
 
     def __init__(
         self,
-        nodes: dict[int, Node],
-        links: dict[int, Link],
+        node_dict: dict[int, Node],
+        link_dict: dict[int, Link],
         data: dict[str, Any] | None = None,
     ) -> None:
         """Nodes and links are primarily stored in dictionaries whose keys
         are the indices. Don't make a network directly from here; use
         network_factory.py."""
         self._reset_values(data)
-        self.node_dict = nodes
-        self.link_dict = links
+        self.node_dict = node_dict
+        self.link_dict = link_dict
         self._reset_fields()
         self._set_matrix_calc_utils()
 
