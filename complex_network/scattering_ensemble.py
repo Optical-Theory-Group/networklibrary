@@ -19,7 +19,7 @@ def init_worker():
     os.environ["NUMBA_NUM_THREADS"] = "1"
     os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
-def compute_scattering_matrix(args: Tuple[int, float, str, NetworkSpec]) -> Tuple[int, np.ndarray]:
+def compute_scattering_matrix(args: Tuple[int, complex, str, NetworkSpec]) -> Tuple[int, np.ndarray]:
     """Worker function that computes the scattering matrix for a given seed value
     Parameters:
         args: Tuple containing the following elements:
@@ -77,7 +77,7 @@ def generate_scattering_ensemble(
     with h5py.File(hdf5_filename, 'a') as h5file:
         # create the metadata of the ensemble that defines the network properties 
         # using the _set_attributes helper function
-        _set_attributes(h5file,network_config)
+        _set_attributes(h5file,network_config,k0)
 
         # Create or get group for scattering matrices
         scattering_group = h5file.require_group(f'S_{matrix_type}')
@@ -126,7 +126,7 @@ def generate_scattering_ensemble(
     logging.info("Ensemble generation complete.")
 
 # define a helper function that sets the metadata to the hdf5 file
-def _set_attributes(h5file,network_config):
+def _set_attributes(h5file,network_config,k0):
     """saves the network configuation attribuets to the hdf5 file"""
     all_vars = network_config.__dict__.copy()
     # Pop the material object from the network_config as it is not json serializable
@@ -143,5 +143,7 @@ def _set_attributes(h5file,network_config):
 
     for key, value in all_vars.items():
         h5file.attrs[key] = json.dumps(value)
+          
+    h5file.attrs['k0'] = k0
 
     return None

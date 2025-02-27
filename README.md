@@ -25,7 +25,7 @@ complex_network/
 │   ├── link_matrix.py               # Methods for link scattering matrices
 │   └── node_matrix.py               # Methods for node scattering matrices
 ├── ensemble.py                      
-├── hdf5ensemble.py                  
+├── Scattering_ensemble.py           # Generating ensemble of scattering matrices stored in HDF5 format                
 └── utils.py                         
 ```
 
