@@ -43,3 +43,7 @@ Each group contains the following datasets:
    - Data type: NumPy array containing complex values.
    - Compression: Gzip with compression level 1.
    - Purpose: Stores the computed scattering matrices for each network configuration.
+4. @TO DO:
+      add nodes and link information
+      Eigen vectors and values?
+      
