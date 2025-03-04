@@ -2083,6 +2083,7 @@ class Network:
         ax=None,
         show_indices: bool = False,
         show_external_indices: bool = False,
+        show_internal_indices: bool = False,
         equal_aspect: bool = False,
         highlight_nodes: list[int] | None = None,
         highlight_links: list[int] | None = None,
@@ -2154,7 +2155,7 @@ class Network:
                 and node.index in highlight_nodes
                 else None
             )
-            node.draw(ax, show_indices, show_external_indices, color=color)
+            node.draw(ax, show_indices, show_external_indices, show_internal_indices, color=color)
 
         # Highlight nodes
         # if highlight_nodes is not None:
@@ -2175,6 +2176,7 @@ class Network:
                             ax,
                             show_indices,
                             show_external_indices,
+                            show_internal_indices,
                             color="red",
                             markersize=1 + (6 - 1) * r,
                         )

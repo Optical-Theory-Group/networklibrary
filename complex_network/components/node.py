@@ -145,6 +145,7 @@ class Node(Component):
         ax: plt.Axes,
         show_index: bool = False,
         show_external_index: bool = False,
+        show_internal_index: bool = False,
         color: str | None = None,
         markersize: float = 6.0,
     ) -> None:
@@ -156,6 +157,9 @@ class Node(Component):
             ax.text(self.x, self.y, self.index)
 
         if show_external_index and self.node_type == "external":
+            ax.text(self.x, self.y, self.index)
+
+        if show_internal_index and self.node_type == "internal":
             ax.text(self.x, self.y, self.index)
 
         if color is not None:

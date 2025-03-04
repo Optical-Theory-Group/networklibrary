@@ -26,7 +26,9 @@ The root level of the HDF5 file contains attributes that store metadata about th
 The HDF5 file organizes the scattering matrices within specific groups.
 
 ### Scattering Matrix Groups (`S_<matrix_type>`)
-Each type of scattering matrix (e.g., `S_ee`, `S_ie`) is stored in a dedicated group named `S_<matrix_type>`, where `<matrix_type>` refers to the type of matrix stored. `ee` - scattering from external nodes to external nodes, `ie` - scattering from internal nodes to external nodes.
+Each type of scattering matrix (e.g., `S_ee`, `S_ie`) is stored in a dedicated group named `S_<matrix_type>`, where `<matrix_type>` refers to the type of matrix stored. `ee` - scattering from external nodes to external nodes, `ie` - scattering from internal nodes to external nodes. If matrix_type is set to `full`, both `S_ie` and `S_ee` is calculated and stored in different groups in the same file.
+
+Groups = `S_ee` `S_ie`
 Each group contains the following datasets:
 
 1. **`matrix_shapes` Dataset**
