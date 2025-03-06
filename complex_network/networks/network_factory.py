@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 from scipy.spatial import ConvexHull
 import copy
+from collections import defaultdict
 
 from complex_network.components.link import Link
 from complex_network.components.node import Node
@@ -1004,20 +1005,19 @@ def _generate_voronoi_nodes_links_slab(
     return node_dict, link_dict
 
 
-def _generate_buffon_nodes_links(
-    spec: NetworkSpec,
-    maintain_node_count: bool = False
-) -> Network:
+def _generate_buffon_nodes_links(spec: NetworkSpec, max_iter=10, connectivity_max_iter=10) -> Network:
     """
     Generate a Buffon network using a matrix-based approach.
-
+    
     Parameters:
     -----------
     spec : NetworkSpec
-        Network specification object which defines the network to be generated.
-    maintain_node_count : bool
-        Used with full_connected=True. If True, new nodes are added (with connecting links) 
-        to keep the overall node count the same. If False, disconnected nodes are removed.
+        Network specification object defining the network.
+    max_iter : int
+        Maximum iterations for ensuring each line has at least one intersection.
+    connectivity_max_iter : int
+        Maximum iterations for repositioning lines to achieve full connectivity.
+    
     Returns:
     --------
     Network
@@ -1031,20 +1031,18 @@ def _generate_buffon_nodes_links(
     assert spec.num_external_nodes % 2 == 0, "Number of external nodes must be even."
     if spec.network_shape == 'circular':
         assert isinstance(spec.network_size, float), "For circular networks, network_size must be a float."
-        assert spec.network_size <= spec.external_size, "Network size must be less than or equal to external size."
+        assert spec.network_size <= spec.external_size, "Network size must be <= external size."
     elif spec.network_shape == 'slab':
-        assert isinstance(spec.network_size, tuple) and len(spec.network_size) == 2, "For slab networks, network_size must be a tuple of two floats."
+        assert isinstance(spec.network_size, tuple) and len(spec.network_size) == 2, \
+            "For slab networks, network_size must be a tuple of two floats."
         assert all(isinstance(x, float) for x in spec.network_size), "Both dimensions of network_size must be floats."
-    
-    # -------------------------
-    # Node Points Generation
-    # -------------------------
+
+    # --------------------------------------
+    # Node Points Generation (Line Endpoints)
+    # --------------------------------------
     np.random.seed(spec.random_seed)
     num_lines = int(spec.num_external_nodes / 2)
     network_size = spec.network_size
-    # full_connected : bool
-    # If True, enforces full connectivity by either removing disconnected nodes/edges 
-    # or by removing and then reinserting new nodes to maintain the original node count.
     fully_connected = spec.fully_connected
 
     if spec.network_shape == 'circular':
@@ -1061,38 +1059,161 @@ def _generate_buffon_nodes_links(
         y1 = np.random.uniform(-network_width / 2, network_width / 2, num_lines)
         x2 = np.full(num_lines, network_length / 2)
         y2 = np.random.uniform(-network_width / 2, network_width / 2, num_lines)
-    
-    # -------------------------
-    # Intersection Calculation
-    # -------------------------
-    """ For two lines defined by: a1*x + b1*y + c1 = 0 and a2*x + b2*y + c2 = 0,
-        the intersection is: x = (b1*c2 - b2*c1) / (a1*b2 - a2*b1), y = (a2*c1 - a1*c2) / (a1*b2 - a2*b1)"""
+
+    # -------------------------------------------------
+    # Remove Lines with No Intersections & Replace Them
+    # -------------------------------------------------
+    for _ in range(max_iter):
+        "Compute line coefficients a,b,c such that the line equation is given by a*x + b*y + c = 0."
+        a = y2 - y1
+        b = x1 - x2
+        c = y1 * x2 - x1 * y2
+
+        # Get all unique pairs (i, j) of lines (i < j).
+        i_index, j_index = np.triu_indices(num_lines, 1)
+        a1, b1, c1 = a[i_index], b[i_index], c[i_index]
+        a2, b2, c2 = a[j_index], b[j_index], c[j_index]
+        denominator = a1 * b2 - a2 * b1
+
+        # Compute intersections for all pairs;
+        # use np.divide to avoid division by zero (which yields NaN)
+        x_i = np.divide(b1 * c2 - b2 * c1, denominator, 
+                        out=np.full(denominator.shape, np.nan), where=denominator != 0)
+        y_i = np.divide(a2 * c1 - a1 * c2, denominator, 
+                        out=np.full(denominator.shape, np.nan), where=denominator != 0)
+
+        # Filter intersections by network shape and remove NaNs.
+        if spec.network_shape == 'circular':
+            # Only keep intersections inside the circle and remove infinite intersections.
+            inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & ((x_i ** 2 + y_i ** 2) <= network_internal_radius ** 2)
+        elif spec.network_shape == 'slab':
+            # Only keep intersections inside the slab and remove infinite intersections..
+            inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & (
+                (x_i >= -network_length / 2) & (x_i <= network_length / 2) &
+                (y_i >= -network_width / 2) & (y_i <= network_width / 2)
+            )
+        else:
+            raise ValueError("Invalid network shape")
+        
+        # Vectorized count of intersections per line.
+        intersection_counts = np.zeros(num_lines, dtype=int)
+        # Use all pairs; if an intersection is out-of-bound (or NaN) it won't satisfy inside_mask.
+        np.add.at(intersection_counts, i_index[inside_mask], 1)
+        np.add.at(intersection_counts, j_index[inside_mask], 1)
+
+        # Lines with no intersections.
+        no_int_lines = np.where(intersection_counts == 0)[0]
+
+        # If all lines have at least one intersection, break.
+        if len(no_int_lines) == 0:
+            break
+        # Vectorized re-sampling for lines with no intersections.
+        if spec.network_shape == 'circular':
+            theta1_new = np.random.uniform(0, 2 * np.pi, size=no_int_lines.shape)
+            theta2_new = np.random.uniform(0, 2 * np.pi, size=no_int_lines.shape)
+            x1[no_int_lines] = network_internal_radius * np.cos(theta1_new)
+            y1[no_int_lines] = network_internal_radius * np.sin(theta1_new)
+            x2[no_int_lines] = network_internal_radius * np.cos(theta2_new)
+            y2[no_int_lines] = network_internal_radius * np.sin(theta2_new)
+        elif spec.network_shape == 'slab':
+            x1[no_int_lines] = -network_length / 2
+            y1[no_int_lines] = np.random.uniform(-network_width / 2, network_width / 2, size=no_int_lines.shape)
+            x2[no_int_lines] = network_length / 2
+            y2[no_int_lines] = np.random.uniform(-network_width / 2, network_width / 2, size=no_int_lines.shape)
+    else:
+        raise ValueError(f"Some lines do not intersect for seed={spec.random_seed} after max_iter iterations; try increasing max_iter.")
+
+    # -------------------------------------------------------
+    # We have to check whether the network is fully connected.
+    # -------------------------------------------------------
+    if fully_connected:
+        for _ in range(connectivity_max_iter):
+            # UnionFind class is defined as a helper class in the bottom
+            uf_lines = UnionFind(num_lines)
+            a = y2 - y1
+            b = x1 - x2
+            c = y1 * x2 - x1 * y2
+            i_index, j_index = np.triu_indices(num_lines, 1)
+            a1, b1, c1 = a[i_index], b[i_index], c[i_index]
+            a2, b2, c2 = a[j_index], b[j_index], c[j_index]
+            denominator = a1 * b2 - a2 * b1
+            x_i = np.divide(b1 * c2 - b2 * c1, denominator, 
+                            out=np.full(denominator.shape, np.nan), where=denominator != 0)
+            y_i = np.divide(a2 * c1 - a1 * c2, denominator, 
+                            out=np.full(denominator.shape, np.nan), where=denominator != 0)
+            if spec.network_shape == 'circular':
+                inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & ((x_i ** 2 + y_i ** 2) <= network_internal_radius ** 2)
+            elif spec.network_shape == 'slab':
+                inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & (
+                    (x_i >= -network_length / 2) & (x_i <= network_length / 2) &
+                    (y_i >= -network_width / 2) & (y_i <= network_width / 2)
+                )
+            # Union all pairs that intersect inside.
+            for idx in range(len(x_i)):
+                if inside_mask[idx]:
+                    uf_lines.union(i_index[idx], j_index[idx])
+            # Gather components (each is a list of line indices).
+            components = {}
+            for i in range(num_lines):
+                comp = uf_lines.find(i)
+                components.setdefault(comp, []).append(i)
+            if len(components) == 1:
+                break  # All lines are connected.
+            # Identify the largest component.
+            largest_component = max(components.values(), key=len)
+            # Compute the centroid of the endpoints for lines in the largest component.
+            pts = []
+            for line in largest_component:
+                pts.append([x1[line], y1[line]])
+                pts.append([x2[line], y2[line]])
+            pts = np.array(pts)
+            centroid = pts.mean(axis=0)
+            # Reposition each line not in the largest component.
+            for comp_id, lines in components.items():
+                if lines is largest_component:
+                    continue
+                for line in lines:
+                    if spec.network_shape == 'circular':
+                        # Shift each endpoint's angle toward the centroid.
+                        alpha = 0.5  # fraction of adjustment
+                        current_angle1 = np.arctan2(y1[line], x1[line])
+                        desired_angle = np.arctan2(centroid[1], centroid[0])
+                        new_angle1 = current_angle1 + alpha * (desired_angle - current_angle1)
+                        x1[line] = network_internal_radius * np.cos(new_angle1)
+                        y1[line] = network_internal_radius * np.sin(new_angle1)
+                        current_angle2 = np.arctan2(y2[line], x2[line])
+                        new_angle2 = current_angle2 + alpha * (desired_angle - current_angle2)
+                        x2[line] = network_internal_radius * np.cos(new_angle2)
+                        y2[line] = network_internal_radius * np.sin(new_angle2)
+                    elif spec.network_shape == 'slab':
+                        # Adjust the y-coordinate toward the centroid.
+                        alpha = 0.5
+                        y1[line] = y1[line] + alpha * (centroid[1] - y1[line])
+                        y2[line] = y2[line] + alpha * (centroid[1] - y2[line])
+        else:
+            raise ValueError(f"Network is not fully connected for seed={spec.random_seed} after connectivity_max_iter iterations.")
+        # (If connectivity is still not achieved after connectivity_max_iter iterations, raise an error.)
+    # ---------------------------------------------------------------
+    # Recompute Intersections Using the Updated Lines (same as before)
+    # ---------------------------------------------------------------
     a = y2 - y1
     b = x1 - x2
     c = y1 * x2 - x1 * y2
-
     i_index, j_index = np.triu_indices(num_lines, 1)
     a1, b1, c1 = a[i_index], b[i_index], c[i_index]
     a2, b2, c2 = a[j_index], b[j_index], c[j_index]
     denominator = a1 * b2 - a2 * b1
-
-    # Remove lines that are parallel
-    valid = denominator != 0
-    i_index = i_index[valid]
-    j_index = j_index[valid]
-    a1, b1, c1 = a1[valid], b1[valid], c1[valid]
-    a2, b2, c2 = a2[valid], b2[valid], c2[valid]
-    denominator = denominator[valid]
-
-    x_i = (b1 * c2 - b2 * c1) / denominator
-    y_i = (a2 * c1 - a1 * c2) / denominator
-
-    # Filter intersection points based on network shape
+    x_i = np.divide(b1 * c2 - b2 * c1, denominator,
+                    out=np.full(denominator.shape, np.nan), where=denominator != 0)
+    y_i = np.divide(a2 * c1 - a1 * c2, denominator,
+                    out=np.full(denominator.shape, np.nan), where=denominator != 0)
     if spec.network_shape == 'circular':
-        inside_mask = (x_i**2 + y_i**2) <= network_internal_radius**2
+        inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & ((x_i ** 2 + y_i ** 2) <= network_internal_radius ** 2)
     elif spec.network_shape == 'slab':
-        inside_mask = (x_i >= -network_length/2) & (x_i <= network_length/2) & \
-                      (y_i >= -network_width/2) & (y_i <= network_width/2)
+        inside_mask = np.isfinite(x_i) & np.isfinite(y_i) & (
+            (x_i >= -network_length / 2) & (x_i <= network_length / 2) &
+            (y_i >= -network_width / 2) & (y_i <= network_width / 2)
+        )
     else:
         raise ValueError("Invalid network shape")
     
@@ -1101,13 +1222,10 @@ def _generate_buffon_nodes_links(
     i_index = i_index[inside_mask]
     j_index = j_index[inside_mask]
 
-    # -------------------------
-    # Combine Endpoints and Intersections
-    # We are rearranging the datapoints as x_endpoints = [x11, x12, x_i1, x_i2, ...] i is the line and 1,2 are the endpoints
-    # We rearrage similarly for y_endpoints
-    # -------------------------
-    """ t is the parameter for the line equation x = x1 + t(x2-x1), y = y1 + t(y2-y1) where t=0 is x11, t=1 is x12 and we have 2*num_line such points
-        t for intersection points is calculated using the formula t = ((x_i - x1)dx + (y_i - y1)dy) / (dx^2 + dy^2)"""
+    # -----------------------------------------------
+    # Combine Endpoints and Intersections into Nodes
+    # ----------------------------------------------
+    # Endpoints (from lines) come first.
     line_ids_endpoints = np.repeat(np.arange(num_lines), 2)
     t_endpoints = np.tile([0.0, 1.0], num_lines)
     x_endpoints = np.empty(2 * num_lines)
@@ -1117,24 +1235,21 @@ def _generate_buffon_nodes_links(
     y_endpoints[0::2] = y1
     y_endpoints[1::2] = y2
 
-    # For intersections along the lines, duplicate intersection points for both lines involved
+    # For intersections along lines, duplicate for both lines involved.
     line_ids_int = np.concatenate([i_index, j_index])
     x_int_dup = np.concatenate([x_i, x_i])
     y_int_dup = np.concatenate([y_i, y_i])
     dx_int = x2[line_ids_int] - x1[line_ids_int]
     dy_int = y2[line_ids_int] - y1[line_ids_int]
-    denom_int = dx_int**2 + dy_int**2
-
-    # Finding t for intersection points
+    denom_int = dx_int ** 2 + dy_int ** 2
     t_int = ((x_int_dup - x1[line_ids_int]) * dx_int + (y_int_dup - y1[line_ids_int]) * dy_int) / denom_int
 
-    # Joining all points together (endpoints and intersections)
+    # Join endpoints and intersections.
     line_ids_all = np.concatenate([line_ids_endpoints, line_ids_int])
     t_all = np.concatenate([t_endpoints, t_int])
     x_all = np.concatenate([x_endpoints, x_int_dup])
     y_all = np.concatenate([y_endpoints, y_int_dup])
 
-    # Adding a tolerance to the coordinates and rounding them to remove floating point errors
     tol = 1e-16
     x_round = np.round(x_all / tol) * tol
     y_round = np.round(y_all / tol) * tol
@@ -1144,12 +1259,12 @@ def _generate_buffon_nodes_links(
 
     # Mark nodes as "external" if they originated from endpoints.
     num_endpoints = 2 * num_lines
-
-    # Initializing the is_external array with False and marking the first num_endpoints as True
     is_external = np.zeros(len(unique_nodes), dtype=bool)
     is_external[np.unique(node_ids_all[:num_endpoints])] = True
 
-    # The following edges (derived from ordering) are used for connectivity:
+    # ------------------------------------------------
+    # Derive Edges for Connectivity from the Ordering.
+    # ------------------------------------------------
     order = np.lexsort((t_all, line_ids_all))
     sorted_line_ids = line_ids_all[order]
     sorted_node_ids = node_ids_all[order]
@@ -1158,27 +1273,20 @@ def _generate_buffon_nodes_links(
     edges_from = sorted_node_ids[:-1][same_line]
     edges_to = sorted_node_ids[1:][same_line]
     edges = np.vstack([edges_from, edges_to]).T
-    edges_sorted = np.sort(edges, axis=1)
-    unique_edges = np.unique(edges_sorted, axis=0)
+    unique_edges = np.unique(np.sort(edges, axis=1), axis=0)
 
-    # ---------------
-    # Reorder Nodes so that all internal nodes come first, then external nodes.
-    # ---------------
+    # --------------------------------------------------
+    # Reorder Nodes: internal nodes first, then external.
+    # --------------------------------------------------
     new_order = np.argsort(is_external)
-    # Build a mapping from old index (in unique_nodes) to new index.
     old_to_new = {old: new for new, old in enumerate(new_order)}
-    
-    # Update the unique_nodes and is_external arrays with the new order
     unique_nodes = unique_nodes[new_order]
     is_external = is_external[new_order]
-    
-    # Update the unique_edges: remap each node index according to old_to_new.
     unique_edges = np.array([[old_to_new[edge[0]], old_to_new[edge[1]]] for edge in unique_edges])
     
-    # ---------------
-    # Build Node and Link Dictionaries using the new ordering.
-    # The keys will be the new indices.
-    # ---------------
+    # --------------------------------
+    # Build Node and Link Dictionaries
+    # --------------------------------
     node_dict = {}
     for new_idx, (coord, ext) in enumerate(zip(unique_nodes, is_external)):
         node_type = "external" if ext else "internal"
@@ -1188,51 +1296,12 @@ def _generate_buffon_nodes_links(
     for link_idx, (n1, n2) in enumerate(unique_edges):
         n1_type = node_dict[str(n1)].node_type
         n2_type = node_dict[str(n2)].node_type
-        # Ensure that for links between internal and external, the external node is second.
+        # For links between internal and external, ensure the external node is second.
         if n1_type == "external" and n2_type == "internal":
             n1, n2 = n2, n1
         link_type = "external" if (n1_type == "external" or n2_type == "external") else "internal"
         link_dict[str(link_idx)] = Link(link_idx, link_type, (n1, n2))
     
-    # ---------------
-    # Enforce Full Connectivity (using updated indices)
-    # ---------------
-    if fully_connected:
-        num_nodes = len(node_dict)
-        if num_nodes > 0:
-            uf = UnionFind(num_nodes)
-            # Use updated link node indices
-            for link in link_dict.values():
-                n1, n2 = link.node_indices
-                uf.union(n1, n2)
-            
-            from collections import defaultdict
-            components = defaultdict(list)
-            for node_id in range(num_nodes):
-                components[uf.find(node_id)].append(node_id)
-            
-            if len(components) > 1:
-                largest_component = max(components.values(), key=len)
-                # Remove nodes not in the largest component.
-                nodes_to_remove = {str(node_id) for node_id in range(num_nodes) if node_id not in largest_component}
-                for node_id in nodes_to_remove:
-                    node_dict.pop(node_id, None)
-                # Remove links referencing removed nodes.
-                links_to_remove = []
-                for link_id, link in link_dict.items():
-                    n1, n2 = link.node_indices
-                    if str(n1) in nodes_to_remove or str(n2) in nodes_to_remove:
-                        links_to_remove.append(link_id)
-                for link_id in links_to_remove:
-                    link_dict.pop(link_id, None)
-    
-    # @TODO: Add option to maintain node count by adding new nodes that will connect to the existing network.
-    if maintain_node_count:
-        raise NotImplementedError("Maintaining node count is not yet implemented.")
-    # -------------------------
-    # Final Initialization and Return
-    # -------------------------
-
     return node_dict, link_dict
 
 
