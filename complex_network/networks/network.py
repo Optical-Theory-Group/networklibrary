@@ -69,8 +69,8 @@ class Network:
 
         # Set up keys
         for node in self.external_nodes:
-            self.inwave[str(node.index)] = 0 + 0j
-            self.outwave[str(node.index)] = 0 + 0j
+            self.inwave[node.index] = 0 + 0j
+            self.outwave[node.index] = 0 + 0j
 
         # Set up np arrays
         self.inwave_np = np.zeros(len(self.inwave.keys()), dtype=np.complex128)
@@ -98,7 +98,7 @@ class Network:
 
     def _get_network_matrix_maps(
         self,
-    ) -> tuple[dict[str, int], dict[str, slice], dict[str, int]]:
+    ) -> tuple[dict[tuple[int,int], int], dict[int, slice], dict[int, int]]:
         internal_scattering_slices = {}
         internal_scattering_map = {}
         external_scattering_map = {}
@@ -110,14 +110,14 @@ class Network:
             start = i
             node_index = node.index
             for new_index in node.sorted_connected_nodes:
-                internal_scattering_map[f"{node_index},{new_index}"] = i
+                internal_scattering_map[node_index,new_index] = i
                 i += 1
             end = i
-            internal_scattering_slices[f"{node_index}"] = slice(start, end)
+            internal_scattering_slices[node_index] = slice(start, end)
 
         i = 0
         for node in self.external_nodes:
-            external_scattering_map[f"{node.index}"] = i
+            external_scattering_map[node.index] = i
             i += 1
 
         return (
@@ -225,14 +225,14 @@ class Network:
 
     def get_node(self, index: int | str) -> Node:
         """Returns the node with the specified index"""
-        node = self.node_dict.get(str(index), None)
+        node = self.node_dict.get(index, None)
         if node is None:
             raise ValueError(f"Node {index} does not exist.")
         return node
 
     def get_link(self, index: int | str) -> Link:
         """Returns the link with the specified index"""
-        link = self.link_dict.get(str(index), None)
+        link = self.link_dict.get(index, None)
         if link is None:
             raise ValueError(f"Link {index} does not exist.")
         return link
@@ -262,7 +262,7 @@ class Network:
                     else link.node_indices[1]
                 )
 
-                node = self.node_dict.get(str(neighbor_index), None)
+                node = self.node_dict.get(neighbor_index, None)
                 nodes.append(node)
 
         return nodes
@@ -316,14 +316,14 @@ class Network:
                 [old_to_new_links[j] for j in node.sorted_connected_links]
             )
             node.inwave = {
-                str(old_to_new_nodes[int(key)]): value
+                old_to_new_nodes[key]: value
                 for key, value in node.inwave.items()
             }
             node.outwave = {
-                str(old_to_new_nodes[int(key)]): value
+                old_to_new_nodes[key]: value
                 for key, value in node.outwave.items()
             }
-            new_node_dict[str(node.index)] = node
+            new_node_dict[node.index] = node
 
         # Update all the links
         for link in self.links:
@@ -337,14 +337,14 @@ class Network:
             ]
 
             link.inwave = {
-                str(old_to_new_nodes[int(key)]): value
+                old_to_new_nodes[key]: value
                 for key, value in link.inwave.items()
             }
             link.outwave = {
-                str(old_to_new_nodes[int(key)]): value
+                old_to_new_nodes[key]: value
                 for key, value in link.outwave.items()
             }
-            new_link_dict[str(link.index)] = link
+            new_link_dict[link.index] = link
 
         self.node_dict = new_node_dict
         self.link_dict = new_link_dict
@@ -450,10 +450,10 @@ class Network:
             node.sorted_connected_links.remove(old_link.index)
             node.sorted_connected_links.append(new_link.index)
             node.sorted_connected_links = sorted(node.sorted_connected_links)
-            del node.inwave[str(other_node.index)]
-            node.inwave[str(new_node.index)] = 0 + 0j
-            del node.outwave[str(other_node.index)]
-            node.outwave[str(new_node.index)] = 0 + 0j
+            del node.inwave[other_node.index]
+            node.inwave[new_node.index] = 0 + 0j
+            del node.outwave[other_node.index]
+            node.outwave[new_node.index] = 0 + 0j
 
         # Set up indices and other properties of the new node
         new_node.sorted_connected_nodes = sorted(
@@ -463,12 +463,12 @@ class Network:
             [new_link_one.index, new_link_two.index]
         )
         new_node.inwave = {
-            str(node_one.index): 0 + 0j,
-            str(node_two.index): 0 + 0j,
+            node_one.index: 0 + 0j,
+            node_two.index: 0 + 0j,
         }
         new_node.outwave = {
-            str(node_one.index): 0 + 0j,
-            str(node_two.index): 0 + 0j,
+            node_one.index: 0 + 0j,
+            node_two.index: 0 + 0j,
         }
         new_node.inwave_np = np.array([0 + 0j, 0 + 0j])
         new_node.outwave_np = np.array([0 + 0j, 0 + 0j])
@@ -481,12 +481,12 @@ class Network:
             link.length = np.linalg.norm(node.position - new_node.position)
             link.sorted_connected_nodes = sorted(link.node_indices)
             link.inwave = {
-                str(node.index): 0 + 0j,
-                str(new_node.index): 0 + 0j,
+                node.index: 0 + 0j,
+                new_node.index: 0 + 0j,
             }
             link.outwave = {
-                str(node.index): 0 + 0j,
-                str(new_node.index): 0 + 0j,
+                node.index: 0 + 0j,
+                new_node.index: 0 + 0j,
             }
             link.material = old_link.material
             link.n = old_link.n
@@ -500,12 +500,12 @@ class Network:
             )
 
         # Add new node and link to network dict
-        self.node_dict[str(new_node.index)] = new_node
-        self.link_dict[str(new_link_one.index)] = new_link_one
-        self.link_dict[str(new_link_two.index)] = new_link_two
+        self.node_dict[new_node.index] = new_node
+        self.link_dict[new_link_one.index] = new_link_one
+        self.link_dict[new_link_two.index] = new_link_two
 
         # Delete the old link from the dict
-        del self.link_dict[str(link_index)]
+        del self.link_dict[link_index]
 
         # Update matrix maps and so on
         self.reset_dict_indices()
@@ -760,10 +760,10 @@ class Network:
 
             node.outwave["-1"] = value
             node.outwave_np[0] = value
-            node.inwave[str(node.sorted_connected_nodes[1])] = value
+            node.inwave[node.sorted_connected_nodes[1]] = value
             node.inwave_np[1] = value
 
-            connected_link.outwave[str(node_index)] = value
+            connected_link.outwave[node_index] = value
             connected_link.outwave_np[1] = value
 
             # Set incoming external values
@@ -772,12 +772,12 @@ class Network:
             connected_link_index = node.sorted_connected_links[0]
             connected_link = self.get_link(connected_link_index)
 
-            node.inwave["-1"] = value
+            node.inwave[-1] = value
             node.inwave_np[0] = value
-            node.outwave[str(node.sorted_connected_nodes[1])] = value
+            node.outwave[node.sorted_connected_nodes[1]] = value
             node.outwave_np[1] = value
 
-            connected_link.inwave[str(node_index)] = value
+            connected_link.inwave[node_index] = value
             connected_link.inwave_np[1] = value
 
             count += 1
@@ -787,11 +787,11 @@ class Network:
         for node in self.internal_nodes:
             for i, connected_index in enumerate(node.sorted_connected_nodes):
                 incoming_value = incoming_internal[count]
-                node.inwave[str(connected_index)] = incoming_value
+                node.inwave[connected_index] = incoming_value
                 node.inwave_np[i] = incoming_value
 
                 outgoing_value = outgoing_internal[count]
-                node.outwave[str(connected_index)] = outgoing_value
+                node.outwave[connected_index] = outgoing_value
                 node.outwave_np[i] = outgoing_value
 
                 count += 1
@@ -803,24 +803,24 @@ class Network:
             node_two = self.get_node(node_two_index)
 
             # Set link fields
-            link.inwave[str(node_one_index)] = node_one.outwave[
-                str(node_two_index)
+            link.inwave[node_one_index] = node_one.outwave[
+                node_two_index
             ]
-            link.inwave_np[0] = node_one.outwave[str(node_two_index)]
-            link.inwave[str(node_two_index)] = node_two.outwave[
-                str(node_one_index)
+            link.inwave_np[0] = node_one.outwave[node_two_index]
+            link.inwave[node_two_index] = node_two.outwave[
+                node_one_index
             ]
-            link.inwave_np[1] = node_two.outwave[str(node_one_index)]
+            link.inwave_np[1] = node_two.outwave[node_one_index]
 
             # Outwaves
-            link.outwave[str(node_one_index)] = node_one.inwave[
-                str(node_two_index)
+            link.outwave[node_one_index] = node_one.inwave[
+                node_two_index
             ]
-            link.outwave_np[0] = node_one.inwave[str(node_two_index)]
-            link.outwave[str(node_two_index)] = node_two.inwave[
-                str(node_one_index)
+            link.outwave_np[0] = node_one.inwave[node_two_index]
+            link.outwave[node_two_index] = node_two.inwave[
+                node_one_index
             ]
-            link.outwave_np[1] = node_two.inwave[str(node_one_index)]
+            link.outwave_np[1] = node_two.inwave[node_one_index]
 
         # Remaining external links values
         for link in self.external_links:
@@ -828,11 +828,11 @@ class Network:
             node = self.get_node(node_index)
 
             # Set link fields
-            link.inwave[str(node_index)] = node.outwave[str(external_index)]
-            link.inwave_np[1] = node.outwave[str(external_index)]
+            link.inwave[node_index] = node.outwave[external_index]
+            link.inwave_np[1] = node.outwave[external_index]
 
-            link.outwave[str(node_index)] = node.inwave[str(external_index)]
-            link.outwave_np[1] = node.inwave[str(external_index)]
+            link.outwave[node_index] = node.inwave[external_index]
+            link.outwave_np[1] = node.inwave[external_index]
 
         self._update_outgoing_fields()
 
@@ -850,11 +850,11 @@ class Network:
         # Set values to nodes and network dictionaries
         for i, external_node in enumerate(self.external_nodes):
             if direction == "forward":
-                self.inwave[str(external_node.index)] = incident_field[i]
+                self.inwave[external_node.index] = incident_field[i]
                 external_node.inwave["-1"] = incident_field[i]
                 external_node.inwave_np[0] = incident_field[i]
             elif direction == "backward":
-                self.outwave[str(external_node.index)] = incident_field[i]
+                self.outwave[external_node.index] = incident_field[i]
                 external_node.outwave["-1"] = incident_field[i]
                 external_node.outwave_np[0] = incident_field[i]
 
@@ -869,10 +869,10 @@ class Network:
         inwave/outwaves"""
         for i, node in enumerate(self.external_nodes):
             if direction == "forward":
-                self.outwave[str(node.index)] = node.outwave["-1"]
+                self.outwave[node.index] = node.outwave["-1"]
                 self.outwave_np[i] = node.outwave["-1"]
             if direction == "backward":
-                self.inwave[str(node.index)] = node.inwave["-1"]
+                self.inwave[node.index] = node.inwave["-1"]
                 self.inwave_np[i] = node.inwave["-1"]
 
     def get_network_matrix(
@@ -949,7 +949,7 @@ class Network:
         for node in self.internal_nodes:
             node_index = node.index
             node_S = node.get_S(k0)
-            new_slice = self.internal_scattering_slices[str(node_index)]
+            new_slice = self.internal_scattering_slices[node_index]
             internal_S[new_slice, new_slice] = node_S
 
         # Get internal P
@@ -963,11 +963,9 @@ class Network:
             phase_factor = link_S[0, 1]
 
             # Wave that is going into node_one
-            row = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
-            ]
+            row = self.internal_scattering_map[(node_one_index,node_two_index) ]
             col = self.internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
+                (node_two_index,node_one_index)
             ]
             internal_P[row, col] = phase_factor
             # Wave propagating the other way
@@ -982,9 +980,9 @@ class Network:
             node_one_index, node_two_index = link.node_indices
             link_S = link.get_S(k0)
             phase_factor = link_S[0, 1]
-            row = self.external_scattering_map[f"{str(node_two_index)}"]
+            row = self.external_scattering_map[node_two_index]
             col = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             external_P[row, col] = phase_factor
 
@@ -1113,7 +1111,7 @@ class Network:
         for node in self.internal_nodes:
             node_index = node.index
             node_S = node.get_S(k0)
-            new_slice = self.internal_scattering_slices[str(node_index)]
+            new_slice = self.internal_scattering_slices[node_index]
             internal_S[new_slice, new_slice] = node_S
         return internal_S
 
@@ -1136,10 +1134,10 @@ class Network:
 
             # Wave that is going into node_one
             row = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             col = self.internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
+                (node_two_index,node_one_index)
             ]
             internal_P[row, col] = phase_factor
             internal_P[col, row] = phase_factor
@@ -1159,10 +1157,10 @@ class Network:
 
             # Wave that is going into node_one
             row = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             col = self.internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
+                (node_two_index,node_one_index)
             ]
             internal_P[row, col] = phase_factor
             # Wave propagating the other way
@@ -1179,9 +1177,9 @@ class Network:
             node_one_index, node_two_index = link.node_indices
             link_S = link.get_S(k0)
             phase_factor = link_S[0, 1]
-            row = self.external_scattering_map[f"{str(node_two_index)}"]
+            row = self.external_scattering_map[node_two_index]
             col = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             external_P[row, col] = phase_factor
         return external_P
@@ -1196,9 +1194,9 @@ class Network:
             node_one_index, node_two_index = link.node_indices
             link_S_inv = link.get_S_inv(k0)
             phase_factor = link_S_inv[0, 1]
-            row = self.external_scattering_map[f"{str(node_two_index)}"]
+            row = self.external_scattering_map[node_two_index]
             col = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             external_P[row, col] = phase_factor
         return external_P
@@ -1377,7 +1375,7 @@ class Network:
         for node in self.internal_nodes:
             node_index = node.index
             node_dS = node.get_dS(k0, variable)
-            new_slice = self.internal_scattering_slices[str(node_index)]
+            new_slice = self.internal_scattering_slices[node_index]
             dS_ii[new_slice, new_slice] = node_dS
         return dS_ii
 
@@ -1422,10 +1420,10 @@ class Network:
 
             # Wave that is going into node_one
             row = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             col = self.internal_scattering_map[
-                f"{str(node_two_index)},{str(node_one_index)}"
+                (node_two_index,node_one_index)
             ]
 
             dP_ii[row, col] = phase_factor
@@ -1457,9 +1455,9 @@ class Network:
             node_one_index, node_two_index = link.node_indices
             link_dS = link.get_dS(k0, variable)
             phase_factor = link_dS[0, 1]
-            row = self.external_scattering_map[f"{str(node_two_index)}"]
+            row = self.external_scattering_map[node_two_index]
             col = self.internal_scattering_map[
-                f"{str(node_one_index)},{str(node_two_index)}"
+                (node_one_index,node_two_index)
             ]
             dP_ei[row, col] = phase_factor
         return dP_ei
@@ -1496,8 +1494,8 @@ class Network:
 
             # Internal fields
             outgoing_vector = S_ie @ incident_field
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
 
@@ -1554,8 +1552,8 @@ class Network:
 
             # Internal fields
             outgoing_vector = S_ie @ incident_field
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
 
@@ -1613,8 +1611,8 @@ class Network:
 
             # Internal fields
             outgoing_vector = S_ie @ incident_field
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
 
@@ -1727,10 +1725,10 @@ class Network:
             outgoing_vector = S_ie @ incident_field
             doutgoing_vector = dS_ie @ incident_field
 
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
-            new_dO = doutgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_dI = doutgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
+            new_dO = doutgoing_vector[: len(outgoing_vector) // 2]
+            new_dI = doutgoing_vector[len(outgoing_vector) // 2 :]
 
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
@@ -1826,8 +1824,8 @@ class Network:
 
             # Full length interior field vector
             outgoing_vector = S_ie @ incident_field
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
 
@@ -1914,8 +1912,8 @@ class Network:
 
             # Full length interior field vector
             outgoing_vector = S_ie @ incident_field
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
 
@@ -2014,10 +2012,10 @@ class Network:
             outgoing_vector = S_ie @ incident_field
             doutgoing_vector = dS_ie @ incident_field
 
-            new_O = outgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_I = outgoing_vector[int(len(outgoing_vector) / 2) :]
-            new_dO = doutgoing_vector[: int(len(outgoing_vector) / 2)]
-            new_dI = doutgoing_vector[int(len(outgoing_vector) / 2) :]
+            new_O = outgoing_vector[: len(outgoing_vector) // 2]
+            new_I = outgoing_vector[len(outgoing_vector) // 2 :]
+            new_dO = doutgoing_vector[: len(outgoing_vector) // 2]
+            new_dI = doutgoing_vector[len(outgoing_vector) // 2 :]
 
             O_int_vectors.append(new_O)
             I_int_vectors.append(new_I)
@@ -2309,8 +2307,8 @@ class Network:
         maxes = []
         for link in self.links:
             node_index, _ = link.node_indices
-            inwave = link.inwave[str(node_index)]
-            outwave = link.outwave[str(node_index)]
+            inwave = link.inwave[node_index]
+            outwave = link.outwave[node_index]
             z = np.linspace(0, link.length, 10**4)
             field = inwave * np.exp(
                 1j * k0 * (link.n(k0) + link.Dn) * z
@@ -2422,11 +2420,11 @@ class Network:
         adj = np.zeros((self.num_nodes, self.num_nodes))
 
         # sort nodes
-        sorted_nodes = sorted([int(key) for key in self.node_dict.keys()])
+        sorted_nodes = sorted([key for key in self.node_dict.keys()])
 
         # construct adjacency matrix
         for index, node_index in enumerate(sorted_nodes):
-            connected_indices = [node.index for node in self.get_connecting_nodes(int(node_index))]
+            connected_indices = [node.index for node in self.get_connecting_nodes(node_index)]
             for connected_index in connected_indices:
                 adj[index, sorted_nodes.index(connected_index)] = 1
 

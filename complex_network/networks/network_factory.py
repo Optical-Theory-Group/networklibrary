@@ -26,10 +26,10 @@ def generate_network(spec: NetworkSpec) -> Network:
             node_dict, link_dict = _generate_delaunay_nodes_links(spec)
         case "voronoi":
             node_dict, link_dict = _generate_voronoi_nodes_links(spec)
-            node_dict, link_dict = _relabel_nodes_links(node_dict, link_dict)
         case "buffon":
             node_dict, link_dict = _generate_buffon_nodes_links(spec)
-            node_dict, link_dict = _relabel_nodes_links(node_dict, link_dict)
+        case "custom":
+            node_dict, link_dict = spec.node_dict, spec.link_dict
         # case "linear":
         #     nodes, links = _generate_linear_network(spec)
         # case "archimedean":
@@ -40,7 +40,12 @@ def generate_network(spec: NetworkSpec) -> Network:
                 f"Please choose one from {VALID_NETWORK_TYPES}."
             )
 
-    _fix_labeling(node_dict, link_dict)
+    # Check for errors in network generation
+    _check_node_index_matching(node_dict)
+    _check_index_consistency(node_dict, link_dict)
+    if not _is_consecutive_indexing(node_dict, link_dict):
+        node_dict, link_dict = _relabel_nodes_links(node_dict, link_dict)
+
     # By this point we have nodes that all have an index, but don't know what
     # links or other nodes they are connected to. The links are also all
     # numbered and know what two nodes they connect. These two methods finish
@@ -50,16 +55,98 @@ def generate_network(spec: NetworkSpec) -> Network:
     return Network(node_dict, link_dict)
 
 
-def _fix_labeling(node_dict: dict[str, Node], link_dict: dict[str, Link]) -> None:
-    """Ensure that nodes are labeled in order with no missing ids and that
-    links attach nodes correctly"""
-    new_index = 0
-    for _, node in node_dict.items():
-        node.index = new_index
-        new_index += 1
+def _check_node_index_matching(node_dict: dict[int, Node]) -> None:
+    """Check that the node index dictionary keys match the node object indices"""
+    is_error = False
+    for key, node in node_dict.items():
+        if key != node.index:
+            is_error = True
+            break
+
+    if is_error:
+        raise ValueError(
+            f"Error in network generation! "
+            f"Node with index {node.index} has dictionary key {key} in "
+            f"node_dict. These numbers should be equal. This is an error with "
+            f"the factory algorithm, which should be checked by a developer."
+        )
+
+
+def _check_index_consistency(
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
+) -> None:
+    """Check that each link is connected to exactly two existing nodes"""
+    node_indices = {node.index for _, node in node_dict.items()}
+    is_error = False
+    for _, link in link_dict.items():
+        one, two = link.node_indices
+        if one not in node_indices:
+            faulty_node = one
+            is_error = True
+            break
+        if two not in node_indices:
+            faulty_node = two
+            is_error = True
+            break
+
+    if is_error:
+        raise ValueError(
+            f"Error in network generation! "
+            f"Link {link.index} is purportedly connected to node "
+            f"{faulty_node}, but node {faulty_node} does not exist. This is "
+            f"an error with the factory algorithm, which should be checked by "
+            f"a developer."
+        )
+
+
+def _is_consecutive_indexing(
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
+) -> None:
+    """Check whether or not the node indices are a set of consecutive integers"""
+    node_indices = {node.index for _, node in node_dict.items()}
+    consecutive = set(range(len(node_indices)))
+    return node_indices == consecutive
+
+
+def _relabel_nodes_links(
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
+) -> tuple[dict[int, Node], dict[int, Link]]:
+    """Given node and link dictionaries where the keys are not consecutive
+    integers (because, for example, some nodes and links were deleted along
+    the way when they were generated), relabel them so that the keys are
+    consecutive integers. Cleans up indexing."""
+    # Create key maps
+    node_keys = list(node_dict.keys())
+    node_key_map = {value: index for index, value in enumerate(node_keys)}
+    link_keys = list(link_dict.keys())
+    link_key_map = {value: index for index, value in enumerate(link_keys)}
+
+    new_nodes = {}
+    new_links = {}
+
+    # Relabel nodes
+    for old_node_index, node in node_dict.items():
+        new_node_index = node_key_map[old_node_index]
+        new_nodes[new_node_index] = node
+        node.index = new_node_index
+
+    # Relabel links
+    for old_link_index, link in link_dict.items():
+        # We must change the node indices property of the link
+        old_node_index_one, old_node_index_two = link.node_indices
+        new_node_index_one = node_key_map[old_node_index_one]
+        new_node_index_two = node_key_map[old_node_index_two]
+        link.node_indices = (new_node_index_one, new_node_index_two)
+
+        # Get the new link index
+        new_link_index = link_key_map[old_link_index]
+        new_links[new_link_index] = link
+
+    return new_nodes, new_links
+
 
 def _initialise_nodes(
-    node_dict: dict[str, Node], link_dict: dict[str, Link], spec: NetworkSpec
+    node_dict: dict[int, Node], link_dict: dict[int, Link], spec: NetworkSpec
 ) -> None:
     """Set initial values for nodes in the network."""
     # First, tell the nodes which links and nodes are connected to them
@@ -67,16 +154,12 @@ def _initialise_nodes(
         node_index_one, node_index_two = link.node_indices
 
         # Both links are connected to the node
-        node_dict[str(node_index_one)].sorted_connected_links.append(link.index)
-        node_dict[str(node_index_two)].sorted_connected_links.append(link.index)
+        node_dict[node_index_one].sorted_connected_links.append(link.index)
+        node_dict[node_index_two].sorted_connected_links.append(link.index)
 
         # Both nodes are also connected to each other
-        node_dict[str(node_index_one)].sorted_connected_nodes.append(
-            node_index_two
-        )
-        node_dict[str(node_index_two)].sorted_connected_nodes.append(
-            node_index_one
-        )
+        node_dict[node_index_one].sorted_connected_nodes.append(node_index_two)
+        node_dict[node_index_two].sorted_connected_nodes.append(node_index_one)
 
     for node in node_dict.values():
         # Add "ghost" external channel for external nodes
@@ -92,8 +175,8 @@ def _initialise_nodes(
 
         # Set up in and out waves
         for second_node in node.sorted_connected_nodes:
-            node.inwave[str(second_node)] = 0 + 0j
-            node.outwave[str(second_node)] = 0 + 0j
+            node.inwave[second_node] = 0 + 0j
+            node.outwave[second_node] = 0 + 0j
 
         node.inwave_np = np.zeros(size, dtype=np.complex128)
         node.outwave_np = np.zeros(size, dtype=np.complex128)
@@ -121,28 +204,32 @@ def _initialise_nodes(
 
 
 def _initialise_links(
-    node_dict: dict[str, Node], link_dict: dict[str, Link], spec: NetworkSpec
+    node_dict: dict[int, Node], link_dict: dict[int, Link], spec: NetworkSpec
 ) -> None:
     """Set initial values for links in the network."""
     for link in link_dict.values():
         # Get nodes
         node_index_one, node_index_two = link.node_indices
-        node_one = node_dict[str(node_index_one)]
-        node_two = node_dict[str(node_index_two)]
+        node_one = node_dict[node_index_one]
+        node_two = node_dict[node_index_two]
 
         # Determine the link length
         length = np.linalg.norm(node_two.position - node_one.position)
         link.length = length
 
         link.sorted_connected_nodes = sorted(link.node_indices)
-
+        link.node_indices = (
+            link.sorted_connected_nodes[0],
+            link.sorted_connected_nodes[1],
+        )
+        
         link.inwave = {
-            str(node_index_one): 0 + 0j,
-            str(node_index_two): 0 + 0j,
+            node_index_one: 0 + 0j,
+            node_index_two: 0 + 0j,
         }
         link.outwave = {
-            str(node_index_one): 0 + 0j,
-            str(node_index_two): 0 + 0j,
+            node_index_one: 0 + 0j,
+            node_index_two: 0 + 0j,
         }
 
         # Set link material properties
@@ -328,7 +415,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
     # All non-external points
     points_internal = np.vstack((points_edge, points_int))
     for i, point in enumerate(points_internal):
-        node_dict[str(i)] = Node(i, "internal", point)
+        node_dict[i] = Node(i, "internal", point)
 
     # Triangulate nodes
     delaunay = scipy.spatial.Delaunay(points_internal)
@@ -344,9 +431,7 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
 
             # Add new node and link to list
             if node_pair not in created_links:
-                link_dict[str(link_index)] = Link(
-                    link_index, "internal", node_pair
-                )
+                link_dict[link_index] = Link(link_index, "internal", node_pair)
                 link_index += 1
                 created_links.add(node_pair)
 
@@ -359,8 +444,8 @@ def _generate_delaunay_nodes_links(spec: NetworkSpec) -> tuple[dict, dict]:
         # Note that node i is the i'th edge mode, which lines up with the
         # i'th external ndoe
         node_pair = tuple(sorted((node_index, i)))
-        node_dict[str(node_index)] = Node(node_index, "external", point_external)
-        link_dict[str(link_index)] = Link(link_index, "external", node_pair)
+        node_dict[node_index] = Node(node_index, "external", point_external)
+        link_dict[link_index] = Link(link_index, "external", node_pair)
 
     return node_dict, link_dict
 
@@ -385,8 +470,8 @@ def _generate_voronoi_nodes_links_circular(
     network_size = spec.network_size
     exit_size = spec.external_size
 
-    node_dict: dict[str, Node] = {}
-    link_dict: dict[str, Link] = {}
+    node_dict: dict[int, Node] = {}
+    link_dict: dict[int, Link] = {}
 
     # random seed
     random_seed = spec.random_seed
@@ -427,7 +512,7 @@ def _generate_voronoi_nodes_links_circular(
     for number, vertex in enumerate(vor_vertices):
         # only add points lying within specified network size
         if np.linalg.norm([vertex[0], vertex[1]]) < exit_size:
-            node_dict[str(number)] = Node(number, "internal", vertex)
+            node_dict[number] = Node(number, "internal", vertex)
             _internal_nodes += 1
         else:
             # find vertices outside exit_size
@@ -477,7 +562,7 @@ def _generate_voronoi_nodes_links_circular(
                 id1 = len(vor_vertices) + _exit_nodes
                 # calculate position of exit node
                 perpids = vor_ridge_points[number]
-                pos = node_dict[str(id0)].position
+                pos = node_dict[id0].position
                 pid0_pos = points[perpids[0]]
                 pid1_pos = points[perpids[1]]
                 mid = 0.5 * (np.array(pid0_pos) + np.array(pid1_pos))
@@ -507,9 +592,9 @@ def _generate_voronoi_nodes_links_circular(
                     x = x2
                     y = y2
 
-                node_dict[str(id1)] = Node(id1, "external", (x, y))
+                node_dict[id1] = Node(id1, "external", (x, y))
 
-                link_dict[str(_link_count)] = Link(
+                link_dict[_link_count] = Link(
                     _link_count, "external", (id0, id1)
                 )
                 _link_count = _link_count + 1
@@ -520,7 +605,7 @@ def _generate_voronoi_nodes_links_circular(
         else:  # finite ridge in network
             id0 = ridge[0]
             id1 = ridge[1]
-            link_dict[str(_link_count)] = Link(_link_count, "internal", (id0, id1))
+            link_dict[_link_count] = Link(_link_count, "internal", (id0, id1))
             _link_count = _link_count + 1
 
     # # Generate random points in the interior
@@ -629,8 +714,8 @@ def _generate_voronoi_nodes_links_slab(
 
     exit_size = network_length + spec.external_offset
 
-    node_dict: dict[str, Node] = {}
-    link_dict: dict[str, Link] = {}
+    node_dict: dict[int, Node] = {}
+    link_dict: dict[int, Link] = {}
 
     # Check type of network_size
     if not isinstance(network_size, tuple) or len(network_size) != 2:
@@ -697,7 +782,7 @@ def _generate_voronoi_nodes_links_slab(
         _exit_nodes = 0
         _link_count = 0
         for number, vertex in enumerate(vor_vertices):
-            node_dict[(str(number))] = Node(number, "internal", vertex)
+            node_dict[number] = Node(number, "internal", vertex)
             _internal_nodes += 1
 
         for number, ridge in enumerate(vor_ridges):
@@ -716,8 +801,8 @@ def _generate_voronoi_nodes_links_slab(
                     # calculate position of exit node
                     x = np.sign(vertex[0]) * exit_size / 2
                     y = vertex[1]
-                    node_dict[(str(id1))] = Node(id1, "external", (x, y))
-                    link_dict[str(_link_count)] = Link(
+                    node_dict[id1] = Node(id1, "external", (x, y))
+                    link_dict[_link_count] = Link(
                         _link_count, "external", (id0, id1)
                     )
                     _link_count = _link_count + 1
@@ -725,7 +810,7 @@ def _generate_voronoi_nodes_links_slab(
             else:  # finite ridge in network
                 id0 = ridge[0]
                 id1 = ridge[1]
-                link_dict[str(_link_count)] = Link(
+                link_dict[_link_count] = Link(
                     _link_count, "internal", (id0, id1)
                 )
                 _link_count = _link_count + 1
@@ -741,8 +826,8 @@ def _generate_voronoi_nodes_links_slab(
         current_keys = [key for key in link_dict.keys()]
         for link_key in current_keys:
             connection1 = link_dict[link_key]
-            A = node_dict[str(connection1.node_indices[0])].position
-            B = node_dict[str(connection1.node_indices[1])].position
+            A = node_dict[connection1.node_indices[0]].position
+            B = node_dict[connection1.node_indices[1]].position
             Ax, Ay = A
             xb, yb = (exit_size / 2, network_width / 2)
 
@@ -765,26 +850,24 @@ def _generate_voronoi_nodes_links_slab(
             ):  # intersect with upper and lower boundary
                 # upper node
                 intersect_node_idU = (
-                    max([int(key) for key in node_dict.keys()]) + 1
+                    max([key for key in node_dict.keys()]) + 1
                 )  # generate unique id
                 edge_node_ids_upper.append(intersect_node_idU)
-                node_dict[(str(intersect_node_idU))] = Node(
+                node_dict[intersect_node_idU] = Node(
                     intersect_node_idU, "internal", int_ptU
                 )
                 _internal_nodes += 1
 
                 # lower node
-                intersect_node_idL = (
-                    max([int(key) for key in node_dict.keys()]) + 1
-                )
+                intersect_node_idL = max([key for key in node_dict.keys()]) + 1
                 edge_node_ids_lower.append(intersect_node_idL)
-                node_dict[(str(intersect_node_idL))] = Node(
+                node_dict[intersect_node_idL] = Node(
                     intersect_node_idL, "internal", int_ptL
                 )
                 _internal_nodes += 1
 
                 # connection within network
-                link_dict[str(_link_count)] = Link(
+                link_dict[_link_count] = Link(
                     _link_count,
                     "internal",
                     (intersect_node_idU, intersect_node_idL),
@@ -811,14 +894,14 @@ def _generate_voronoi_nodes_links_slab(
                 else:
                     initnode = connection1.node_indices[1]
 
-                intersect_node_id = max([int(key) for key in node_dict.keys()]) + 1
+                intersect_node_id = max([key for key in node_dict.keys()]) + 1
                 edge_node_ids_upper.append(intersect_node_id)
-                node_dict[(str(intersect_node_id))] = Node(
+                node_dict[intersect_node_id] = Node(
                     intersect_node_id, "internal", int_ptU
                 )
                 _internal_nodes += 1
 
-                link_dict[str(_link_count)] = Link(
+                link_dict[_link_count] = Link(
                     _link_count, "internal", (intersect_node_id, initnode)
                 )
                 _link_count = _link_count + 1
@@ -836,14 +919,14 @@ def _generate_voronoi_nodes_links_slab(
                 else:
                     initnode = connection1.node_indices[1]
 
-                intersect_node_id = max([int(key) for key in node_dict.keys()]) + 1
+                intersect_node_id = max([key for key in node_dict.keys()]) + 1
                 edge_node_ids_lower.append(intersect_node_id)
-                node_dict[(str(intersect_node_id))] = Node(
+                node_dict[intersect_node_id] = Node(
                     intersect_node_id, "internal", int_ptL
                 )
                 _internal_nodes += 1
 
-                link_dict[str(_link_count)] = Link(
+                link_dict[_link_count] = Link(
                     _link_count, "internal", (intersect_node_id, initnode)
                 )
                 _link_count = _link_count + 1
@@ -883,12 +966,10 @@ def _generate_voronoi_nodes_links_slab(
             )
         )
         nodes_to_remove = [
-            key
-            for key in remaining_node_keys
-            if int(key) not in connected_nodes
+            key for key in remaining_node_keys if key not in connected_nodes
         ]
         for nid in nodes_to_remove:
-            node_dict.pop(str(nid))
+            node_dict.pop(nid)
 
         # get ids of nodes on upper boundary
         uppernode_ids = [interx["node1"] for interx in intersectionsU.values()]
@@ -908,13 +989,13 @@ def _generate_voronoi_nodes_links_slab(
         for jj in range(0, len(sorted_ids_upper) - 1):
             id1 = sorted_ids_upper[jj]
             id2 = sorted_ids_upper[jj + 1]
-            link_dict[str(_link_count)] = Link(_link_count, "internal", (id1, id2))
+            link_dict[_link_count] = Link(_link_count, "internal", (id1, id2))
             _link_count = _link_count + 1
 
         for jj in range(0, len(sorted_ids_lower) - 1):
             id1 = sorted_ids_lower[jj]
             id2 = sorted_ids_lower[jj + 1]
-            link_dict[str(_link_count)] = Link(_link_count, "internal", (id1, id2))
+            link_dict[_link_count] = Link(_link_count, "internal", (id1, id2))
             _link_count = _link_count + 1
 
         # check number of exit nodes
@@ -925,13 +1006,13 @@ def _generate_voronoi_nodes_links_slab(
         ]
         nodes_l = sum(
             [
-                1 if node_dict[str(nodeid)].position[0] < 0 else 0
+                1 if node_dict[nodeid].position[0] < 0 else 0
                 for nodeid in exit_nodesids
             ]
         )
         nodes_r = sum(
             [
-                1 if node_dict[str(nodeid)].position[0] > 0 else 0
+                1 if node_dict[nodeid].position[0] > 0 else 0
                 for nodeid in exit_nodesids
             ]
         )
@@ -1025,15 +1106,15 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     network_shape = spec.network_shape
     network_size = spec.network_size
 
-    node_dict: dict[str, Node] = {}
-    link_dict: dict[str, Link] = {}
+    node_dict: dict[int, Node] = {}
+    link_dict: dict[int, Link] = {}
 
     # Check type of network_size
     if external_link_number % 2 != 0:
         raise ValueError(
             "num_external_nodes must be an even number for a Buffon network"
         )
-    total_lines = int(external_link_number / 2)
+    total_lines = external_link_number // 2
 
     if network_shape == "circular":
         # Check type of network_size
@@ -1063,7 +1144,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     _internal_nodes = 0
     _link_index = 0
     _fiber_index = 0
-    fibers: dict[str, Link] = {}  # collection of full edge to edge links
+    fibers: dict[int, Link] = {}  # collection of full edge to edge links
     # random seed
     random_seed = spec.random_seed
     np.random.seed(spec.random_seed)
@@ -1071,8 +1152,8 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
     while _external_nodes != external_link_number:
         # determine missing number of external nodes
         missing_nodes = external_link_number - _external_nodes
-        number_of_lines = int(missing_nodes / 2)
-        _node_indices = [int(key) for key in node_dict.keys()]
+        number_of_lines = missing_nodes // 2
+        _node_indices = [key for key in node_dict.keys()]
         available_node_ids = [
             i for i in range(0, total_lines) if i not in _node_indices
         ]
@@ -1089,37 +1170,37 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             points = np.array([xn, yn]).T
 
             nodeid = available_node_ids[nn]
-            node_dict[str(nodeid)] = Node(
+            node_dict[nodeid] = Node(
                 nodeid, "external", (points[0, 0], points[0, 1])
             )
-            node_dict[str(total_lines + nodeid)] = Node(
+            node_dict[total_lines + nodeid] = Node(
                 total_lines + nodeid, "external", (points[1, 0], points[1, 1])
             )
             _external_nodes += 2
 
-            fibers[str(_fiber_index)] = Link(
+            fibers[_fiber_index] = Link(
                 _fiber_index, "external", (nodeid, total_lines + nodeid)
             )
             _fiber_index += 1
 
         # construct array of all intersections and track which links these points correspond to
         for ii, connection1 in fibers.items():
-            A = node_dict[str(connection1.node_indices[0])].position
-            B = node_dict[str(connection1.node_indices[1])].position
+            A = node_dict[connection1.node_indices[0]].position
+            B = node_dict[connection1.node_indices[1]].position
             # for jj in range(ii + 1, len(fibres)):
             for jj, connection2 in fibers.items():
                 if jj <= ii:
                     continue
 
-                C = node_dict[str(connection2.node_indices[0])].position
-                D = node_dict[str(connection2.node_indices[1])].position
+                C = node_dict[connection2.node_indices[0]].position
+                D = node_dict[connection2.node_indices[1]].position
 
                 line1 = [A, B]
                 line2 = [C, D]
                 int_pt = _intersection(line1, line2)
                 if int_pt is not None:  # lines intersect
                     intersect_node_id = len(node_dict)
-                    node_dict[str(intersect_node_id)] = Node(
+                    node_dict[intersect_node_id] = Node(
                         intersect_node_id, "internal", int_pt
                     )
                     _internal_nodes += 1
@@ -1132,7 +1213,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
 
         # construct connections
         for ii, link in fibers.items():  # range(0, len(fibres)):
-            endpos = node_dict[str(link.node_indices[0])].position
+            endpos = node_dict[link.node_indices[0]].position
             # find nodes which lie along this fibre
             fibernodes = [
                 inter
@@ -1154,7 +1235,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             orderednodes.append(link.node_indices[1])
             # form connections
             for jj in range(0, len(orderednodes) - 1):
-                link_dict[str(_link_index)] = Link(
+                link_dict[_link_index] = Link(
                     _link_index,
                     "internal",
                     (orderednodes[jj], orderednodes[jj + 1]),
@@ -1163,8 +1244,8 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
 
         # loop through the connections and reset those that are connected to external nodes
         for link in link_dict.values():
-            node1_type = node_dict[str(link.node_indices[0])].node_type
-            node2_type = node_dict[str(link.node_indices[1])].node_type
+            node1_type = node_dict[link.node_indices[0]].node_type
+            node2_type = node_dict[link.node_indices[1]].node_type
 
             if (node1_type == "external") or (node2_type == "external"):
                 link.link_type = "external"
@@ -1360,45 +1441,9 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
 # -----------------------------------------------------------------------------
 
 
-def _relabel_nodes_links(
-    node_dict: dict[str, Node], link_dict: dict[str, Link]
-) -> tuple[dict[str, Node], dict[str, Link]]:
-    """Given node and link dictionaries where the keys are not consecutive
-    integers (because, for example, some nodes and links were deleted along
-    the way when they were generated), relabel them so that the keys are
-    consecutive integers. Cleans up indexing."""
-    # Create key maps
-    node_keys = list(node_dict.keys())
-    node_key_map = {value: str(index) for index, value in enumerate(node_keys)}
-    link_keys = list(link_dict.keys())
-    link_key_map = {value: str(index) for index, value in enumerate(link_keys)}
-
-    new_nodes = {}
-    new_links = {}
-
-    # Relabel nodes
-    for old_node_index, node in node_dict.items():
-        new_node_index = node_key_map[old_node_index]
-        new_nodes[new_node_index] = node
-
-    # Relabel links
-    for old_link_index, link in link_dict.items():
-        # We must change the node indices property of the link
-        old_node_index_one, old_node_index_two = link.node_indices
-        new_node_index_one = node_key_map[str(old_node_index_one)]
-        new_node_index_two = node_key_map[str(old_node_index_two)]
-        link.node_indices = (int(new_node_index_one), int(new_node_index_two))
-
-        # Get the new link index
-        new_link_index = link_key_map[old_link_index]
-        new_links[new_link_index] = link
-
-    return new_nodes, new_links
-
-
 def deep_prune_edge_chains(
-    node_dict: dict[str, Node], link_dict: dict[str, Link]
-) -> tuple[dict[str, Node], dict[str, Link], list[int | str] | None]:
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
+) -> tuple[dict[int, Node], dict[int, Link], list[int | str] | None]:
     """Execute prune_edge_chains repeatedly until no more linear chains remain
     in the network"""
 
@@ -1436,8 +1481,8 @@ def deep_prune_edge_chains(
 
 
 def prune_edge_chains(
-    node_dict: dict[str, Node], link_dict: dict[str, Link]
-) -> tuple[dict[str, Node], dict[str, Link], list[str | int] | None]:
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
+) -> tuple[dict[int, Node], dict[int, Link], list[str | int] | None]:
     """Removes linear chains of links and nodes that emanate linearly
     from the edge of a network.
 
@@ -1451,8 +1496,8 @@ def prune_edge_chains(
 
     for link in link_dict.values():
         node_one, node_two = link.node_indices
-        num_connections[str(node_one)] += 1
-        num_connections[str(node_two)] += 1
+        num_connections[node_one] += 1
+        num_connections[node_two] += 1
 
     # Get indices of nodes that need to be removed
     remove_list = [key for key, value in num_connections.items() if value == 1]
@@ -1473,8 +1518,8 @@ def prune_edge_chains(
             new_nodes[node_index] = node
 
     for link_index, link in link_dict.items():
-        node_index_one = str(link.node_indices[0])
-        node_index_two = str(link.node_indices[1])
+        node_index_one = link.node_indices[0]
+        node_index_two = link.node_indices[1]
 
         if node_index_one in remove_list:
             new_edge_node_indices.append(node_index_two)
@@ -1562,7 +1607,7 @@ def _intersection(line1, line2):
 
 @staticmethod
 def connected_component_nodes(
-    node_dict: dict[str, Node], link_dict: dict[str, Link]
+    node_dict: dict[int, Node], link_dict: dict[int, Link]
 ) -> tuple:
     """
     Returns
@@ -1574,7 +1619,7 @@ def connected_component_nodes(
 
     """
     components = []
-    node_ids = [int(key) for key in node_dict.keys()]
+    node_ids = [key for key in node_dict.keys()]
 
     while node_ids:
         startnode = node_ids.pop(0)
@@ -1592,7 +1637,7 @@ def connected_component_nodes(
 
 
 def breadth_first_search(
-    node_dict: dict[str, Node], link_dict: dict[str, Link], initial: int
+    node_dict: dict[int, Node], link_dict: dict[int, Link], initial: int
 ):
     """
     Does a breadth first search of network and returns node ids within
