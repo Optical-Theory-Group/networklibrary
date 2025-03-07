@@ -1,3 +1,12 @@
+"""It is noted that this code running on linux systems may not ensure the conditions passed in the init_worker function.
+   This can cause the code to run slower than expected due to processing overhead. You can manually set the threads using the following commands:
+   export OMP_NUM_THREADS=1
+   export MKL_NUM_THREADS=1
+   export OPENBLAS_NUM_THREADS=1
+   export NUMBA_NUM_THREADS=1
+   export VECLIB_MAXIMUM_THREADS=1"""
+
+
 import multiprocessing as mp
 import h5py
 import numpy as np
@@ -8,6 +17,7 @@ from complex_network.networks.network_factory import generate_network
 from tqdm import tqdm
 import os
 import json
+# import h5py_blosc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
 
@@ -19,7 +29,7 @@ def init_worker():
     os.environ["NUMBA_NUM_THREADS"] = "1"
     os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
-def compute_scattering_matrix(args: Tuple[int, float, str, NetworkSpec]) -> Tuple[int, np.ndarray]:
+def compute_scattering_matrix(args: Tuple[int, complex, str, NetworkSpec]) -> Tuple[int, np.ndarray]:
     """Worker function that computes the scattering matrix for a given seed value
     Parameters:
         args: Tuple containing the following elements:
@@ -41,7 +51,6 @@ def compute_scattering_matrix(args: Tuple[int, float, str, NetworkSpec]) -> Tupl
         matrix_funcs = {
             'ee': network.get_S_ee,
             'ie': network.get_S_ie,
-            'full': network.get_network_matrix
         }
         
         if matrix_type not in matrix_funcs:
@@ -53,31 +62,32 @@ def compute_scattering_matrix(args: Tuple[int, float, str, NetworkSpec]) -> Tupl
         logging.error(f"Error in task {idx}: {e}", exc_info=True)
         return idx, None
 
-def generate_scattering_ensemble(
+def multiproc_worker(
     hdf5_filename: str, 
     total_tasks: int,
     k0: complex,
     matrix_type: str,
     network_config: NetworkSpec,
-    num_workers: int = None
+    num_workers: int = None,
+    compression_opts: int = 4
 ) -> None:
     """Generate ensemble of scattering matrices using multiprocessing.
     Parameters:
         hdf5_filename: Path to the HDF5 file where the ensemble will be stored
         total_tasks: Number of scattering matrices to generate
         k0: Complex wavenumber
-        matrix_type: Type of matrix to compute ('ee', 'ie', or 'full')
+        matrix_type: Type of matrix to compute ('ee', 'ie')
         network_config: NetworkSpec object containing network parameters
         num_workers: Number of worker processes to use (default: half of available CPUs or 1 if only 1 CPU)
         
         returns: None (results are stored in the HDF5 file)"""
-    num_workers = num_workers or max(1, mp.cpu_count() // 2)
+    num_workers = num_workers or max(1, mp.cpu_count()-2)
 
     # Initialize or open HDF5 file
     with h5py.File(hdf5_filename, 'a') as h5file:
         # create the metadata of the ensemble that defines the network properties 
         # using the _set_attributes helper function
-        _set_attributes(h5file,network_config)
+        _set_attributes(h5file,network_config,k0)
 
         # Create or get group for scattering matrices
         scattering_group = h5file.require_group(f'S_{matrix_type}')
@@ -95,7 +105,11 @@ def generate_scattering_ensemble(
         existing_indices = np.where(completed[:])[0]
         tasks = [(i, k0, matrix_type, network_config) for i in range(total_tasks) if i not in existing_indices]
         
-        logging.info(f"Generating {len(tasks)} matrices. {len(existing_indices)} already exist.")
+        logging.info(
+    f"Generating {len(tasks)} matrices. {len(existing_indices)} already exist. \n"
+    f"ne:{network_config.num_external_nodes} ni:{network_config.num_internal_nodes} "
+    f"network_type:{network_config.network_type} network_shape:{network_config.network_shape} "
+    f"matrix_type:{matrix_type}")
         
         # Process tasks
         with mp.Pool(num_workers, initializer=init_worker) as pool:
@@ -116,7 +130,7 @@ def generate_scattering_ensemble(
                             matrix_name,
                             data=matrix,
                             compression='gzip',
-                            compression_opts=1
+                            compression_opts=compression_opts
                         )
                         
                         # Mark as completed
@@ -125,8 +139,36 @@ def generate_scattering_ensemble(
 
     logging.info("Ensemble generation complete.")
 
-# define a helper function that sets the metadata to the hdf5 file
-def _set_attributes(h5file,network_config):
+# Function to generate the ensemble of scattering matrices
+def generate_scattering_ensemble(
+    hdf5_filename: str,
+    total_tasks: int,
+    k0: complex,
+    matrix_type: str,
+    network_config: NetworkSpec,
+    num_workers: int = None,
+    compression_opts: int = 4
+    ) -> None:
+    """Generate ensemble of scattering matrices using multiprocessing."""
+    if matrix_type not in ('ee', 'ie', 'full'):
+        raise ValueError(f"Invalid matrix type: {matrix_type}")
+    # define a helper function that sets the metadata to the hdf5 file
+    if matrix_type == 'full':
+        multiproc_worker(hdf5_filename, total_tasks, k0, 'ee', network_config, num_workers,compression_opts)
+        multiproc_worker(hdf5_filename, total_tasks, k0, 'ie', network_config, num_workers,compression_opts)
+    elif matrix_type in ('ee', 'ie'):
+        multiproc_worker(hdf5_filename, total_tasks, k0, matrix_type, network_config, num_workers,compression_opts)
+    else:
+        raise ValueError(f"Invalid matrix type: {matrix_type}")
+    
+    return None
+
+
+
+
+
+#___________________Helper Function_______________________
+def _set_attributes(h5file,network_config,k0):
     """saves the network configuation attribuets to the hdf5 file"""
     all_vars = network_config.__dict__.copy()
     # Pop the material object from the network_config as it is not json serializable
@@ -143,5 +185,7 @@ def _set_attributes(h5file,network_config):
 
     for key, value in all_vars.items():
         h5file.attrs[key] = json.dumps(value)
+          
+    h5file.attrs['k0'] = k0
 
     return None

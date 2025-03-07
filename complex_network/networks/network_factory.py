@@ -7,6 +7,7 @@ import numpy as np
 import scipy
 from scipy.spatial import ConvexHull
 import copy
+from collections import defaultdict
 
 from complex_network.components.link import Link
 from complex_network.components.node import Node
@@ -1085,25 +1086,43 @@ def _generate_voronoi_nodes_links_slab(
     return node_dict, link_dict
 
 
-def _generate_buffon_nodes_links(spec: NetworkSpec):
+def _generate_buffon_nodes_links(spec: NetworkSpec, max_iter=10, connectivity_max_iter=10) -> Network:
     """
-    Generates a Buffon type network formed from intersecting line segments
-
-    Parameters
-    ----------
-    spec : Dictionary specifying properties of network:
-        Keys:
-            'num_external_nodes': 30, # must be even
-            'shape': 'circular' or 'slab'
-            'network_size':
-                for 'circular': radius of network
-                for 'slab': tuple defining (length,width) of rectangular network
-            'fully_connected': True,
-
+    Generate a Buffon network using a matrix-based approach.
+    
+    Parameters:
+    -----------
+    spec : NetworkSpec
+        Network specification object defining the network.
+    max_iter : int
+        Maximum iterations for ensuring each line has at least one intersection.
+    connectivity_max_iter : int
+        Maximum iterations for repositioning lines to achieve full connectivity.
+    
+    Returns:
+    --------
+    Network
+        A Network object constructed from nodes and links.
     """
-    external_link_number = spec.num_external_nodes
-    external_size = spec.external_size
-    network_shape = spec.network_shape
+    # -------------------------
+    # Sanity Checks
+    # -------------------------
+    assert spec.network_type == "buffon", "Network type must be 'buffon'."
+    assert spec.network_shape in ('circular', 'slab'), "Network shape must be 'circular' or 'slab'."
+    assert spec.num_external_nodes % 2 == 0, "Number of external nodes must be even."
+    if spec.network_shape == 'circular':
+        assert isinstance(spec.network_size, float), "For circular networks, network_size must be a float."
+        assert spec.network_size <= spec.external_size, "Network size must be <= external size."
+    elif spec.network_shape == 'slab':
+        assert isinstance(spec.network_size, tuple) and len(spec.network_size) == 2, \
+            "For slab networks, network_size must be a tuple of two floats."
+        assert all(isinstance(x, float) for x in spec.network_size), "Both dimensions of network_size must be floats."
+
+    # --------------------------------------
+    # Node Points Generation (Line Endpoints)
+    # --------------------------------------
+    np.random.seed(spec.random_seed)
+    num_lines = int(spec.num_external_nodes / 2)
     network_size = spec.network_size
 
     node_dict: dict[int, Node] = {}
@@ -1309,6 +1328,8 @@ def _generate_buffon_nodes_links(spec: NetworkSpec):
             _link_index = 0
 
     return node_dict, link_dict
+
+
 
 
 # def _generate_linear_network(network_spec: NetworkSpec):
@@ -1682,3 +1703,26 @@ def breadth_first_search(
 
     # Return the list of visited nodes
     return visited
+
+class UnionFind:
+    def __init__(self, size):
+        self.parent = list(range(size))
+        self.rank = [0] * size
+    
+    def find(self, x):
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])  # Path compression
+        return self.parent[x]
+    
+    def union(self, x, y):
+        x_root = self.find(x)
+        y_root = self.find(y)
+        if x_root == y_root:
+            return
+        # Union by rank
+        if self.rank[x_root] < self.rank[y_root]:
+            self.parent[x_root] = y_root
+        else:
+            self.parent[y_root] = x_root
+            if self.rank[x_root] == self.rank[y_root]:
+                self.rank[x_root] += 1

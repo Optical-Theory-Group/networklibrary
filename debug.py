@@ -9,7 +9,7 @@ for i in range(100):
     # fig, ax = plt.subplots()
     spec = NetworkSpec(
         network_type="voronoi",
-        network_shape="circular",
+        network_shape="slab",
     )
     network = network_factory.generate_network(spec)
     # network.draw(
