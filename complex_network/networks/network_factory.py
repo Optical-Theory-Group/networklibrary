@@ -17,6 +17,7 @@ from complex_network.networks.network_spec import (
     VALID_NETWORK_TYPES,
 )
 from complex_network.scattering_matrices import link_matrix, node_matrix
+from typing import Any, Tuple, Union
 
 
 def generate_network(spec: NetworkSpec) -> Network:
@@ -709,9 +710,6 @@ def _generate_voronoi_nodes_links_slab(
     network_size = spec.network_size
     # Unpack variables specific to the slab shaped networks
     network_length, network_width = network_size
-    # random seed
-    random_seed = spec.random_seed
-    np.random.seed(spec.random_seed)
 
     exit_size = network_length + spec.external_offset
 
@@ -751,6 +749,8 @@ def _generate_voronoi_nodes_links_slab(
     # switch to ensure correct number of exit nodes get generated
     _generation_attempts = 0
     while not correct_exits:
+        random_seed = spec.random_seed
+        np.random.seed(random_seed+_generation_attempts)
         # generate exit seed node positions
         xoutL = -np.array([exit_size / 2] * (lhs_exits))
         xoutR = np.array([exit_size / 2] * (rhs_exits))
@@ -1086,7 +1086,7 @@ def _generate_voronoi_nodes_links_slab(
     return node_dict, link_dict
 
 
-def _generate_buffon_nodes_links(spec: NetworkSpec,max_iter=100) -> Network:
+def _generate_buffon_nodes_links(spec: NetworkSpec) -> Tuple[dict, dict]:
     """
     Generate a Buffon network using a matrix-based approach.
     
@@ -1094,15 +1094,12 @@ def _generate_buffon_nodes_links(spec: NetworkSpec,max_iter=100) -> Network:
     -----------
     spec : NetworkSpec
         Network specification object defining the network.
-    max_iter : int
-        Maximum iterations for ensuring the network is fully connected.
-    connectivity_max_iter : int
-        Maximum iterations for replacing disconnected components to achieve full connectivity.
     
-    Returns:
-    --------
-    Network
-        A Network object constructed from nodes and links.
+    -----------------------------------
+    Returns: Tuple[dict, dict]
+        A tuple containing two dictionaries. The first dictionary contains the nodes of the network
+        and the second dictionary contains the links of the network.
+    --------------------------------
     """
     # -------------------------
     # Sanity Checks
@@ -1145,7 +1142,7 @@ def _generate_buffon_nodes_links(spec: NetworkSpec,max_iter=100) -> Network:
     # We have to check whether the network is fully connected.
     # -------------------------------------------------------
     if fully_connected:
-        for _ in range(max_iter):
+        while True:
             # UnionFind class is defined as a helper class in the bottom
             uf_lines = UnionFind(num_lines)
             

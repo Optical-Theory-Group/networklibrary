@@ -5,11 +5,12 @@ from complex_network.networks import network_factory
 from complex_network.networks.network_spec import NetworkSpec
 
 for i in range(100):
-    np.random.seed(i)
+    # np.random.seed(i)
     # fig, ax = plt.subplots()
     spec = NetworkSpec(
         network_type="voronoi",
         network_shape="slab",
+        random_seed=i,
     )
     network = network_factory.generate_network(spec)
     # network.draw(

@@ -4,7 +4,9 @@
    export MKL_NUM_THREADS=1
    export OPENBLAS_NUM_THREADS=1
    export NUMBA_NUM_THREADS=1
-   export VECLIB_MAXIMUM_THREADS=1"""
+   export VECLIB_MAXIMUM_THREADS=1
+   
+   or run the set_threads.sh script in the terminal to set the threads to 1."""
 
 
 import multiprocessing as mp
@@ -17,6 +19,7 @@ from complex_network.networks.network_factory import generate_network
 from tqdm import tqdm
 import os
 import json
+from typing import Callable, Tuple, Union
 # import h5py_blosc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -51,6 +54,7 @@ def compute_scattering_matrix(args: Tuple[int, complex, str, NetworkSpec]) -> Tu
         matrix_funcs = {
             'ee': network.get_S_ee,
             'ie': network.get_S_ie,
+	        'rt': network.get_RT_matrix
         }
         
         if matrix_type not in matrix_funcs:
@@ -150,21 +154,148 @@ def generate_scattering_ensemble(
     compression_opts: int = 4
     ) -> None:
     """Generate ensemble of scattering matrices using multiprocessing."""
-    if matrix_type not in ('ee', 'ie', 'full'):
+    if matrix_type not in ('ee', 'ie','rt' ,'full'):
         raise ValueError(f"Invalid matrix type: {matrix_type}")
     # define a helper function that sets the metadata to the hdf5 file
     if matrix_type == 'full':
         multiproc_worker(hdf5_filename, total_tasks, k0, 'ee', network_config, num_workers,compression_opts)
         multiproc_worker(hdf5_filename, total_tasks, k0, 'ie', network_config, num_workers,compression_opts)
-    elif matrix_type in ('ee', 'ie'):
+    elif matrix_type in ('ee', 'ie','rt'):
         multiproc_worker(hdf5_filename, total_tasks, k0, matrix_type, network_config, num_workers,compression_opts)
     else:
         raise ValueError(f"Invalid matrix type: {matrix_type}")
     
     return None
 
+#_______________________________________________________________________________________________________________________
+# We will write function that computes some value from the scattering matrices and stores the results in the HDF5 file
 
+def compute_value_worker(args: Tuple[int, complex, str, NetworkSpec]):
+    """Worker function to compute values from scattering matrices."""
+    idx, k0, quantity_name, network_config = args
+    try:
+        # Re-seed the network configuration
+        network_config.random_seed = idx
+        
+        # Generate the network and compute matrix
+        network = generate_network(spec=network_config)
 
+        network_shape = network_config.network_shape
+        if network_shape == 'slab':
+            matrix = network.get_RT_matrix(k0)
+        elif network_shape == 'circular':
+            matrix = network.get_S_ee(k0)
+        else:
+            raise ValueError(f"Invalid network shape: {network_shape}")
+
+        """Compute the Inverse Participation Ratio (IPR) of the scattering matrix."""
+        n = matrix.shape[0]
+
+        if network_shape == 'slab':
+            if quantity_name == 'transmission_IPR':
+                t = matrix[np.ix_(range(n//2,n), range(n//2))]
+                prob = np.conj(t).T@t
+            elif quantity_name == 'reflection_IPR':
+                r = matrix[np.ix_(range(n//2), range(n//2))]
+                prob = np.conj(r).T@ r
+            elif quantity_name == 'full_IPR':
+                prob = np.conj(matrix).T@matrix 
+            else:
+                raise ValueError(f"Invalid quantity name: {quantity_name}")
+            
+        elif network_shape == 'circular':
+            quantity_name = 'full_IPR'
+            prob = np.conj(matrix).T@matrix
+
+        eigenvalues, eigenvectors = np.linalg.eig(prob)
+        ipr = np.sum(np.abs(eigenvectors) ** 4, axis=0)/np.sum(np.abs(eigenvectors) ** 2, axis=0)
+
+        
+        return idx, eigenvalues,ipr
+    except Exception as e:
+        logging.error(f"Error computing value for seed {idx}: {e}", exc_info=True)
+        return idx, None, None
+
+#@TODO: Make it so that whenever it finds an error and stops, it will not stop the whole process but continue with the next task
+def compute_ipr_ensemble(
+    hdf5_filename: str,
+    total_tasks: int,
+    k0: complex,
+    network_config: NetworkSpec,
+    quantity_name: str,
+    compression_opts: int = 4,
+    num_workers: int = None
+) -> None:
+    """Optimized version with multiprocessing improvements."""
+    
+    with h5py.File(hdf5_filename, 'a') as h5file:
+        _set_attributes(h5file, network_config, k0)
+        ipr_group = h5file.require_group(f'{quantity_name}')
+        eigenvalues_group = h5file.require_group(f'eigenvalues')
+        
+        # Initialize tracking datasets
+        if 'completed' not in ipr_group:
+            ipr_group.create_dataset(
+                'completed', 
+                (total_tasks,), 
+                dtype=bool, 
+                data=np.zeros(total_tasks, dtype=bool)
+            )
+        completed = ipr_group['completed']
+        
+        # Identify remaining tasks
+        existing_indices = np.where(completed[:])[0]
+        tasks = [(i, k0, quantity_name, network_config) 
+                for i in range(total_tasks) if i not in existing_indices]
+        
+        logging.info(f"Computing {len(tasks)}/{total_tasks} {quantity_name} values")
+
+        # Configure parallel processing
+        num_workers = num_workers or max(1, mp.cpu_count()-2)
+        chunksize = max(1, len(tasks) // (num_workers * 5))
+        
+        with mp.Pool(num_workers, initializer=init_worker) as pool:
+            with tqdm(total=len(tasks), desc=f"Processing {quantity_name}") as pbar:
+                for idx, ipr, eigenvalues in pool.imap_unordered(
+                    compute_value_worker, tasks, chunksize=chunksize
+                ):
+                    if ipr is not None:
+                        # Store results
+                        dataset_name = f'value_{idx}'
+                        if dataset_name in ipr_group:
+                            del ipr_group[dataset_name]
+                            
+                        if np.isscalar(ipr):
+                            ipr_group.create_dataset(dataset_name, data=ipr)
+                        else:
+                            ipr_group.create_dataset(
+                                dataset_name,
+                                data=ipr,
+                                compression='gzip',
+                                compression_opts=compression_opts
+                            )
+                        # Update completion status
+                        completed[idx] = True
+
+                    if eigenvalues is not None:
+                        dataset_name = f'eigenvalues_{idx}'
+                        if dataset_name in eigenvalues_group:
+                            del eigenvalues_group[dataset_name]
+                            
+                        if np.isscalar(eigenvalues):
+                            eigenvalues_group.create_dataset(dataset_name, data=eigenvalues)
+                        else:
+                            eigenvalues_group.create_dataset(
+                                dataset_name,
+                                data=eigenvalues,
+                                compression='gzip',
+                                compression_opts=compression_opts
+                            )
+                        # Update completion status
+                        completed[idx] = True
+                    pbar.update(1)
+
+    logging.info(f"Stored {quantity_name} results in {hdf5_filename}")
 
 
 #___________________Helper Function_______________________

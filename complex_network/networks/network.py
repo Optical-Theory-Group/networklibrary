@@ -1232,6 +1232,48 @@ class Network:
 
         This will be zero at a pole"""
         return np.linalg.det(self.get_S_ee_inv(k0))
+    
+    def get_RT_matrix(self,k0: float | complex) -> np.ndarray:
+        """Calculate the reflection and transmission matrix of the scattering matrix which is valid for slab geometries
+            Convert the scattering matrix to the slab scattering matrix.
+            The slab scattering matrix is defined as the scattering matrix of a slab of material
+            but the terms are organized as [[r,t']
+                                            [t,r']]
+            First column: Response to an incoming wave from the left r (reflection from the left) t (transmission from left to right).
+            Second column: Response to an incoming wave from the right r (reflection from the right) t (transmission from right to left).
+
+            The left nodes have +ve coordinates and the right nodes have -ve coordinates."""
+
+        
+        external_scattering_map = self.external_scattering_map
+        port_to_node = {v: k for k, v in external_scattering_map.items()}
+        
+        left_ports = []
+        right_ports = []
+
+        # Sort the ports into left and right
+        for port in port_to_node:
+            node = self.get_node(port_to_node[port])
+            if node.position[0] > 0:
+                left_ports.append(port)
+            else:
+                right_ports.append(port)
+
+        left = np.array(left_ports)
+        right = np.array(right_ports)
+
+        S = self.get_S_ee(k0)
+
+        # Extract submatrices using ix_ to handle index arrays correctly
+        r = S[np.ix_(left, left)] if left.size else np.empty((0, 0))
+        t_prime = S[np.ix_(left, right)] if left.size and right.size else np.empty((left.size, right.size))
+        t = S[np.ix_(right, left)] if right.size and left.size else np.empty((right.size, left.size))
+        r_prime = S[np.ix_(right, right)] if right.size else np.empty((0, 0))
+        
+        # Construct the block matrix using numpy's block function
+        block_matrix = np.block([[r, t_prime], [t, r_prime]])
+        
+        return block_matrix
 
     # -------------------------------------------------------------------------
     # Methods for getting derivatives and Wigner-Smith operators
