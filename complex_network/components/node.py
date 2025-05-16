@@ -45,7 +45,9 @@ class Node(Component):
     S_inv:
         numpy array specifying inverse scattering matrix
     dS:
-        derivative of S with respect to k0"""
+        derivative of S with respect to k0
+    is_perturbed:
+        boolean indicating if node is perturbed"""
 
     def __init__(
         self,

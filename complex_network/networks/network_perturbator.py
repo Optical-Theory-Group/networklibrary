@@ -65,6 +65,67 @@ class NetworkPerturbator:
     # Perturbation methods
     # -------------------------------------------------------------------------
 
+    def perturb_link_n(self,link_index:int, value:complex) -> None:
+        """Change the refractive index of a link so that it becomes
+        base_n + value. This updates only the link scattering matrix, In reality,
+        the scattering matrices are also affected by this change. (Will update later)
+        
+        Parameters
+        ----------
+        link_index : int
+            The index of the link to be perturbed
+        value : complex
+            The value to be added to the refractive index of the link, can be real or complex"""
+        
+        link = self.perturbed_network.get_link(link_index)
+        # Update refractive index
+        # Copy to avoid recursion error
+        Dn = link.Dn
+        new_Dn = Dn + value
+        link.Dn = new_Dn
+        self.perturbed_network.update_link_matrices(link)
+
+        return self.perturbed_network
+    
+    def add_perturb_segment_n(self, link_index:int,
+                                size: tuple[float, float],
+                                value:complex,
+                                node_S_matrix_type: str = "fresnel") -> None:
+        
+        """Add a segment of size (l,h), where the segment starts from l*L_i and ends at h*L_i.
+         L_i is the length of the link.  Update the refractive index of the
+        segment so that it becomes base_n + value. Update its neighbouring node
+        scattering matrices according to the fresnel coefficients
+        
+        Parameters
+        ----------
+        link_index : int
+            The index of the link to be perturbed
+        size : tuple[float, float]
+            The size of the segment (l,h)start and end of the segment in terms of ratio of the link length
+        value : complex
+            The value to be added to the refractive index of the segment, can be real or complex.
+        node_S_matrix_type : str
+            The type of scattering matrix to be used for the nodes. Default is "fresnel".
+        """
+
+        # Now, we need to update the unperturbed network, so that the network is same
+        # The perturbation is that the segment added has a different refractive index
+        self.unperturbed_network.add_segment_to_link(link_index=link_index,fractional_positions=size)
+        middle_link_index = self.perturbed_network.add_segment_to_link(link_index=link_index,fractional_positions=size)
+        
+        # Update the refractive index of the segment
+        middle_link = self.perturbed_network.get_link(middle_link_index)
+        Dn = middle_link.Dn
+        new_Dn = Dn + value
+        middle_link.Dn = new_Dn
+
+        # Update the perturbation status
+        middle_link.is_perturbed = True
+        self.perturbed_network.update_segment_matrices(middle_link)
+        self.perturbed_network.update_link_matrices(middle_link)
+             
+
     def perturb_segment_n(self, link_index: int, value: complex) -> None:
         """Change the refractive index of a segment link so that it becomes
         base_n + value. Update its neighbouring node scattering matrices

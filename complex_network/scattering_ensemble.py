@@ -19,7 +19,7 @@ from complex_network.networks.network_factory import generate_network
 from tqdm import tqdm
 import os
 import json
-from typing import Callable, Tuple, Union
+from typing import Callable, Tuple, Union, Any, Dict
 # import h5py_blosc
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
@@ -99,8 +99,28 @@ def multiproc_worker(
         # Create datasets for matrix shapes and completion tracking
         if 'matrix_shapes' not in scattering_group:
             shape_dtype = np.dtype([('idx', 'i4'), ('rows', 'i4'), ('cols', 'i4')])
-            scattering_group.create_dataset('matrix_shapes', (total_tasks,), dtype=shape_dtype)
-            scattering_group.create_dataset('completed', (total_tasks,), dtype=bool, data=np.zeros(total_tasks, dtype=bool))
+            matrix_shapes = scattering_group.create_dataset(
+                'matrix_shapes',
+                shape=(total_tasks,),
+                maxshape=(None,),
+                chunks=True,
+                dtype=shape_dtype
+            )
+            scattering_group.create_dataset(
+                'completed',
+                shape=(total_tasks,),
+                maxshape=(None,),
+                chunks=True,
+                dtype=bool,
+                data=np.zeros(total_tasks, dtype=bool)
+            )
+        else:
+            matrix_shapes = scattering_group['matrix_shapes']
+            completed = scattering_group['completed']
+            # Optionally resize if total_tasks is increased.
+            if matrix_shapes.shape[0] < total_tasks:
+                matrix_shapes.resize((total_tasks,))
+                completed.resize((total_tasks,))
         
         completed = scattering_group['completed']
         matrix_shapes = scattering_group['matrix_shapes']
@@ -170,51 +190,79 @@ def generate_scattering_ensemble(
 #_______________________________________________________________________________________________________________________
 # We will write function that computes some value from the scattering matrices and stores the results in the HDF5 file
 
-def compute_value_worker(args: Tuple[int, complex, str, NetworkSpec]):
-    """Worker function to compute values from scattering matrices."""
-    idx, k0, quantity_name, network_config = args
+def compute_ipr_worker(args: Tuple[int, complex, NetworkSpec]) -> Tuple[int, Dict[str, Tuple[Any, Any]]]:
+    """
+    Worker function that computes eigenvalues and IPR for all required quantities.
+    
+    For slab networks:
+      - Computes the scattering matrix only once via network.get_RT_matrix(k0)
+      - From that matrix, computes:
+          • 'full': the full scattering matrix,
+          • 'reflection': extracted from the top-left block,
+          • 'transmission': extracted from the bottom-left block.
+      - (Optionally, you can compute an RT matrix using the helper convert_to_RT function.)
+    
+    For circular networks:
+      - Only the full scattering matrix is computed via network.get_S_ee(k0).
+    
+    Returns a tuple of the seed index and a dictionary mapping each quantity name to a tuple (eigenvalues, IPR).
+    """
+    idx, k0, network_config = args
     try:
-        # Re-seed the network configuration
         network_config.random_seed = idx
-        
-        # Generate the network and compute matrix
         network = generate_network(spec=network_config)
-
         network_shape = network_config.network_shape
-        if network_shape == 'slab':
-            matrix = network.get_RT_matrix(k0)
-        elif network_shape == 'circular':
-            matrix = network.get_S_ee(k0)
-        else:
-            raise ValueError(f"Invalid network shape: {network_shape}")
+        results = {}
 
-        """Compute the Inverse Participation Ratio (IPR) of the scattering matrix."""
-        n = matrix.shape[0]
-
+        # Get the scattering matrix
+        matrix = network.get_S_ee(k0)
+        
         if network_shape == 'slab':
-            if quantity_name == 'transmission_IPR':
-                t = matrix[np.ix_(range(n//2,n), range(n//2))]
-                prob = np.conj(t).T@t
-            elif quantity_name == 'reflection_IPR':
-                r = matrix[np.ix_(range(n//2), range(n//2))]
-                prob = np.conj(r).T@ r
-            elif quantity_name == 'full_IPR':
-                prob = np.conj(matrix).T@matrix 
-            else:
-                raise ValueError(f"Invalid quantity name: {quantity_name}")
+            # Convert the scattering matrix to an RT matrix
+            matrix = convert_to_RT(matrix, network)
+            n = matrix.shape[0]
+            
+            # Full quantity
+            full_prob = matrix
+            eigvals_full, eigvecs_full = np.linalg.eig(full_prob)
+            ipr_full = np.sum(np.abs(eigvecs_full) ** 4, axis=0) / (np.sum(np.abs(eigvecs_full) ** 2, axis=0) ** 2)
+            results['full'] = (eigvals_full, ipr_full)
+            
+            # Reflection quantity: use top-left block
+            r = matrix[np.ix_(range(n//2), range(n//2))]
+            prob_r = np.conj(r).T @ r
+            eigvals_r, eigvecs_r = np.linalg.eig(prob_r)
+            ipr_r = np.sum(np.abs(eigvecs_r) ** 4, axis=0) / (np.sum(np.abs(eigvecs_r) ** 2, axis=0) ** 2)
+            results['reflection_intensity'] = (eigvals_r, ipr_r)
+
+            r = matrix[np.ix_(range(n//2), range(n//2))]
+            eigvals_r, eigvecs_r = np.linalg.eig(r)
+            ipr_r = np.sum(np.abs(eigvecs_r) ** 4, axis=0) / (np.sum(np.abs(eigvecs_r) ** 2, axis=0) ** 2)
+            results['reflection_amplitude'] = (eigvals_r, ipr_r)
+            
+            # Transmission quantity: use bottom-left block
+            t = matrix[np.ix_(range(n//2, n), range(n//2))]
+            prob_t = np.conj(t).T @ t
+            eigvals_t, eigvecs_t = np.linalg.eig(prob_t)
+            ipr_t = np.sum(np.abs(eigvecs_t) ** 4, axis=0) / (np.sum(np.abs(eigvecs_t) ** 2, axis=0) ** 2)
+            results['transmission_intensity'] = (eigvals_t, ipr_t)
+
+            t = matrix[np.ix_(range(n//2, n), range(n//2))]
+            eigvals_t, eigvecs_t = np.linalg.eig(t)
+            ipr_t = np.sum(np.abs(eigvecs_t) ** 4, axis=0) / (np.sum(np.abs(eigvecs_t) ** 2, axis=0) ** 2)
+            results['transmission_amplitude'] = (eigvals_t, ipr_t)
             
         elif network_shape == 'circular':
-            quantity_name = 'full_IPR'
-            prob = np.conj(matrix).T@matrix
-
-        eigenvalues, eigenvectors = np.linalg.eig(prob)
-        ipr = np.sum(np.abs(eigenvectors) ** 4, axis=0)/np.sum(np.abs(eigenvectors) ** 2, axis=0)
-
+            eigvals, eigvecs = np.linalg.eig(matrix)
+            ipr = np.sum(np.abs(eigvecs) ** 4, axis=0) / (np.sum(np.abs(eigvecs) ** 2, axis=0) ** 2)
+            results['full'] = (eigvals, ipr)
+        else:
+            raise ValueError(f"Invalid network shape: {network_shape}")
         
-        return idx, eigenvalues,ipr
+        return idx, results
     except Exception as e:
         logging.error(f"Error computing value for seed {idx}: {e}", exc_info=True)
-        return idx, None, None
+        return idx, {}
 
 #@TODO: Make it so that whenever it finds an error and stops, it will not stop the whole process but continue with the next task
 def compute_ipr_ensemble(
@@ -222,82 +270,224 @@ def compute_ipr_ensemble(
     total_tasks: int,
     k0: complex,
     network_config: NetworkSpec,
-    quantity_name: str,
     compression_opts: int = 4,
     num_workers: int = None
 ) -> None:
-    """Optimized version with multiprocessing improvements."""
+    """
+    Compute and store eigenvalues and IPR for all seeds in a single pass.
     
+    For slab networks, the following quantities are computed:
+      • 'full'
+      • 'reflection_intensity'
+      • 'reflection_amplitude'
+      • 'transmission_intensity'
+      • 'transmission_amplitude'
+    
+    For circular networks, only 'full' is computed.
+    
+    Each computed quantity is stored in its own HDF5 group (one for eigenvalues and one for IPR).
+    """
     with h5py.File(hdf5_filename, 'a') as h5file:
         _set_attributes(h5file, network_config, k0)
-        ipr_group = h5file.require_group(f'{quantity_name}')
-        eigenvalues_group = h5file.require_group(f'eigenvalues')
+        network_shape = network_config.network_shape
         
-        # Initialize tracking datasets
-        if 'completed' not in ipr_group:
-            ipr_group.create_dataset(
-                'completed', 
-                (total_tasks,), 
-                dtype=bool, 
+        # Determine which quantities to compute.
+        if network_shape == 'slab':
+            quantity_names = ['full', 'reflection_intensity','reflection_amplitude', 'transmission_intensity','transmission_amplitude']
+        elif network_shape == 'circular':
+            quantity_names = ['full']
+        else:
+            raise ValueError(f"Invalid network shape: {network_shape}")
+        
+        # Prepare groups for each computed quantity.
+        groups = {}
+        for q in quantity_names:
+            groups[q] = {
+                'IPR': h5file.require_group(f'{q}_IPR'),
+                'eigenvalues': h5file.require_group(f'{q}_eigenvalues')
+            }
+        
+        # Create (or open) a completion dataset to track computed seeds.
+        if 'completed' not in h5file:
+            completed_ds = h5file.create_dataset(
+                'completed',
+                shape=(total_tasks,),
+                maxshape=(None,),
+                dtype=bool,
+                chunks=True,  # Enable chunking
                 data=np.zeros(total_tasks, dtype=bool)
             )
-        completed = ipr_group['completed']
-        
-        # Identify remaining tasks
-        existing_indices = np.where(completed[:])[0]
-        tasks = [(i, k0, quantity_name, network_config) 
-                for i in range(total_tasks) if i not in existing_indices]
-        
-        logging.info(f"Computing {len(tasks)}/{total_tasks} {quantity_name} values")
+        else:
+            completed_ds = h5file['completed']
+            # Resize if necessary:
+            if completed_ds.shape[0] < total_tasks:
+                completed_ds.resize((total_tasks,))
 
-        # Configure parallel processing
+        
+        # Identify remaining tasks.
+        completed_indices = np.where(completed_ds[:])[0]
+        tasks = [(i, k0, network_config) for i in range(total_tasks) if i not in completed_indices]
+        
+        logging.info(f"Computing {len(tasks)}/{total_tasks} tasks")
+        
         num_workers = num_workers or max(1, mp.cpu_count()-2)
-        chunksize = max(1, len(tasks) // (num_workers * 5))
+        chunksize = max(1, len(tasks) // (num_workers * 50))
         
         with mp.Pool(num_workers, initializer=init_worker) as pool:
-            with tqdm(total=len(tasks), desc=f"Processing {quantity_name}") as pbar:
-                for idx, ipr, eigenvalues in pool.imap_unordered(
-                    compute_value_worker, tasks, chunksize=chunksize
-                ):
-                    if ipr is not None:
-                        # Store results
-                        dataset_name = f'value_{idx}'
-                        if dataset_name in ipr_group:
-                            del ipr_group[dataset_name]
+            with tqdm(total=len(tasks), desc="Processing tasks") as pbar:
+                for idx, results in pool.imap_unordered(compute_ipr_worker, tasks, chunksize=chunksize):
+                    if results:
+                        for q, (eigvals, ipr) in results.items():
+                            ds_ipr = groups[q]['IPR']
+                            ds_eig = groups[q]['eigenvalues']
+                            ds_name_ipr = f'value_{idx}'
+                            ds_name_eig = f'eigenvalues_{idx}'
                             
-                        if np.isscalar(ipr):
-                            ipr_group.create_dataset(dataset_name, data=ipr)
-                        else:
-                            ipr_group.create_dataset(
-                                dataset_name,
-                                data=ipr,
-                                compression='gzip',
-                                compression_opts=compression_opts
-                            )
-                        # Update completion status
-                        completed[idx] = True
-
-                    if eigenvalues is not None:
-                        dataset_name = f'eigenvalues_{idx}'
-                        if dataset_name in eigenvalues_group:
-                            del eigenvalues_group[dataset_name]
+                            # If the dataset already exists for this seed, remove it.
+                            if ds_name_ipr in ds_ipr:
+                                del ds_ipr[ds_name_ipr]
+                            if ds_name_eig in ds_eig:
+                                del ds_eig[ds_name_eig]
                             
-                        if np.isscalar(eigenvalues):
-                            eigenvalues_group.create_dataset(dataset_name, data=eigenvalues)
-                        else:
-                            eigenvalues_group.create_dataset(
-                                dataset_name,
-                                data=eigenvalues,
-                                compression='gzip',
-                                compression_opts=compression_opts
-                            )
-                        # Update completion status
-                        completed[idx] = True
+                            # Store the IPR and eigenvalues with optional compression.
+                            if np.isscalar(ipr):
+                                ds_ipr.create_dataset(ds_name_ipr, data=ipr)
+                            else:
+                                ds_ipr.create_dataset(ds_name_ipr, data=ipr,
+                                                      compression='gzip', compression_opts=compression_opts)
+                            if np.isscalar(eigvals):
+                                ds_eig.create_dataset(ds_name_eig, data=eigvals)
+                            else:
+                                ds_eig.create_dataset(ds_name_eig, data=eigvals,
+                                                      compression='gzip', compression_opts=compression_opts)
+                        completed_ds[idx] = True
                     pbar.update(1)
+    logging.info(f"Stored results in {hdf5_filename}")
 
-    logging.info(f"Stored {quantity_name} results in {hdf5_filename}")
+def internal_intensity_ipr_worker(args: Tuple[int, complex, NetworkSpec]) -> Tuple[int, Dict[str, Tuple[Any]]]:
+    """
+    Worker function that computes IPR for internal field distributions of eigen modes.
+    Distribution of energy in the internal links of the network.
+    Returns a tuple of the seed index and a dictionary mapping the quantity name to the IPR.
+    """
+    idx, k0, network_config = args
+    try:
+        network_config.random_seed = idx
+        network = generate_network(spec=network_config)
+
+        # Get the scattering matrix
+        matrix = network.get_S_ee(k0)
+
+        # Compute the eigenmodes
+        _, vec = np.linalg.eig(matrix)
+        
+        Intensity_IPR = np.zeros(vec.shape[1])
+        for i in range(vec.shape[1]):
+            vector = vec[:, i]
+            energy_denisty = network.get_all_link_energy_densities(k0,vector)
+
+            # Compute the IPR of the internal field distribution
+            ipr = np.sum(np.abs(energy_denisty) ** 4) / (np.sum(np.abs(energy_denisty) ** 2) ** 2)
+            Intensity_IPR[i] = ipr
+
+        # Select quantity name based on network shape
+        if network_config.network_shape == 'slab':
+            quantity = 'slab_full'
+        elif network_config.network_shape == 'circular':
+            quantity = 'circ_full'
+        else:
+            raise ValueError(f"Invalid network shape: {network_config.network_shape}")
+
+        # Return in a dictionary to match the multiproc loop expectation.
+        return idx, {quantity: (Intensity_IPR,)}
+            
+    except Exception as e:
+        logging.error(f"Error computing value for seed {idx}: {e}", exc_info=True)
+        return idx, None
 
 
+def internal_intensity_ipr(
+    hdf5_filename: str,
+    total_tasks: int,
+    k0: complex,
+    network_config: NetworkSpec,
+    compression_opts: int = 4,
+    num_workers: int = None
+) -> None:
+    """
+    Compute and store eigenvalues and IPR for all seeds in a single pass.
+    
+    For slab networks, the following quantities are computed:
+      • 'slab_full'
+    
+    For circular networks, only 'circ_full' is computed.
+    
+    Each computed quantity is stored in its own HDF5 group (one for eigenvalues and one for IPR).
+    """
+    with h5py.File(hdf5_filename, 'a') as h5file:
+        _set_attributes(h5file, network_config, k0)
+        network_shape = network_config.network_shape
+        
+        # Determine which quantities to compute.
+        if network_shape == 'slab':
+            quantity_names = ['slab_full']
+        elif network_shape == 'circular':
+            quantity_names = ['circ_full']
+        else:
+            raise ValueError(f"Invalid network shape: {network_shape}")
+        
+        # Prepare groups for each computed quantity.
+        groups = {}
+        for q in quantity_names:
+            groups[q] = {'IPR': h5file.require_group(f'{q}_internal_IPR')}
+        
+        # Create (or open) a completion dataset to track computed seeds.
+        if 'completed' not in h5file:
+            completed_ds = h5file.create_dataset(
+                'completed',
+                shape=(total_tasks,),
+                maxshape=(None,),
+                dtype=bool,
+                chunks=True,  # Enable chunking
+                data=np.zeros(total_tasks, dtype=bool)
+            )
+        else:
+            completed_ds = h5file['completed']
+            # Resize if necessary:
+            if completed_ds.shape[0] < total_tasks:
+                completed_ds.resize((total_tasks,))
+        
+        # Identify remaining tasks.
+        completed_indices = np.where(completed_ds[:])[0]
+        tasks = [(i, k0, network_config) for i in range(total_tasks) if i not in completed_indices]
+        
+        logging.info(f"Computing {len(tasks)}/{total_tasks} tasks")
+        
+        num_workers = num_workers or max(1, mp.cpu_count() - 2)
+        chunksize = max(1, len(tasks) // (num_workers * 50))
+        
+        with mp.Pool(num_workers, initializer=init_worker) as pool:
+            with tqdm(total=len(tasks), desc="Processing tasks") as pbar:
+                for idx, results in pool.imap_unordered(internal_intensity_ipr_worker, tasks, chunksize=chunksize):
+                    if results:
+                        # Iterate through the returned dictionary.
+                        for q, (ipr,) in results.items():
+                            ds_ipr = groups[q]['IPR']
+                            ds_name_ipr = f'value_{idx}'
+                            
+                            # If the dataset already exists for this seed, remove it.
+                            if ds_name_ipr in ds_ipr:
+                                del ds_ipr[ds_name_ipr]
+                            
+                            # Store the IPR with optional compression.
+                            if np.isscalar(ipr):
+                                ds_ipr.create_dataset(ds_name_ipr, data=ipr)
+                            else:
+                                ds_ipr.create_dataset(ds_name_ipr, data=ipr,
+                                                      compression='gzip', compression_opts=compression_opts)
+                        completed_ds[idx] = True
+                    pbar.update(1)
+    logging.info(f"Stored results in {hdf5_filename}")
 #___________________Helper Function_______________________
 def _set_attributes(h5file,network_config,k0):
     """saves the network configuation attribuets to the hdf5 file"""
@@ -320,3 +510,68 @@ def _set_attributes(h5file,network_config,k0):
     h5file.attrs['k0'] = k0
 
     return None
+
+def convert_to_RT(matrix,network):
+    """Calculate the reflection and transmission matrix of the scattering matrix which is valid for slab geometries
+            Convert the scattering matrix to the slab scattering matrix.
+            The slab scattering matrix is defined as the scattering matrix of a slab of material
+            but the terms are organized as [[r,t']
+                                            [t,r']]
+            First column: Response to an incoming wave from the left r (reflection from the left) t (transmission from left to right).
+            Second column: Response to an incoming wave from the right r (reflection from the right) t (transmission from right to left).
+
+            The left nodes have +ve coordinates and the right nodes have -ve coordinates."""
+
+    external_scattering_map = network.external_scattering_map
+    port_to_node = {v: k for k, v in external_scattering_map.items()}
+    
+    left_ports = []
+    right_ports = []
+
+    # Sort the ports into left and right
+    for port in port_to_node:
+        node = network.get_node(port_to_node[port])
+        if node.position[0] > 0:
+            left_ports.append(port)
+        else:
+            right_ports.append(port)
+
+    left = np.array(left_ports)
+    right = np.array(right_ports)
+
+    # Extract submatrices using ix_ to handle index arrays correctly
+    r = matrix[np.ix_(left, left)] if left.size else np.empty((0, 0))
+    t_prime = matrix[np.ix_(left, right)] if left.size and right.size else np.empty((left.size, right.size))
+    t = matrix[np.ix_(right, left)] if right.size and left.size else np.empty((right.size, left.size))
+    r_prime = matrix[np.ix_(right, right)] if right.size else np.empty((0, 0))
+    
+    # Construct the block matrix using numpy's block function
+    block_matrix = np.block([[r, t_prime], [t, r_prime]])
+    
+    return block_matrix
+
+# --- Function to calculate energy density stored in a fiber ---
+def calculate_fiber_energy_density(inwave, outwave, length, k):
+    """
+    Calculate energy stored in fiber using:
+    Energy = (r1^2 + r2^2) * l_i + 2*r1*r2/k * cos(k*length + theta1-theta2) * sin(k*l_i)
+    
+    where:
+    - r1, theta1: amplitude and phase of inwave
+    - r2, theta2: amplitude and phase of outwave
+    - l_i: fiber length
+    - k: wavenumber
+    """
+    # Extract amplitude and phase
+    r1 = np.abs(inwave)
+    r2 = np.abs(outwave)
+    theta1 = np.angle(inwave)
+    theta2 = np.angle(outwave)
+    
+    # Calculate energy components
+    amplitude_term = (r1**2 + r2**2)
+    interference_term = 2 * r1 * r2 * np.cos(k*length + theta1 - theta2) * np.sin(k * length)/k
+    
+    # Total energy
+    energy_density = amplitude_term + interference_term/length
+    return energy_density

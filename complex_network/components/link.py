@@ -1,10 +1,8 @@
 """Class module for network links."""
 
 from typing import Any
-
 import matplotlib.pyplot as plt
 import numpy as np
-
 from complex_network.components.component import Component
 
 
@@ -38,7 +36,10 @@ class Link(Component):
     get_S_inv:
         function that returns the inverse propagation matrix
     get_dS:
-        function that returns the derivative of the propagation matrix"""
+        function that returns the derivative of the propagation matrix
+    is_perturbed:
+        boolean indicating if link is perturbed
+    """
 
     def __init__(
         self,
@@ -104,6 +105,7 @@ class Link(Component):
             "get_S": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
             "get_S_inv": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
             "get_dS": lambda k0: np.array([[0, 0], [0, 0]]),
+            "is_perturbed": False,
         }
         return default_values
 

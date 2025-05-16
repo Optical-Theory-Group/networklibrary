@@ -58,6 +58,8 @@ def get_constant_node_S_closure(
             reroutes all energy to connected node of lowest index
         'custom' :
             Set a custom scattering matrix. Requires kwarg 'S_mat' to be set
+        'neumann':
+            Follows the Neumann Kirchhoff bounday conditions often used in quantumn graphs.
     """
 
     if S_mat_params is None:
@@ -72,6 +74,7 @@ def get_constant_node_S_closure(
         "permute_identity",
         "custom",
         "unitary_cyclic",
+        "neumann",
     ]
 
     match S_mat_type:
@@ -106,6 +109,8 @@ def get_constant_node_S_closure(
                     f"Given: {S_mat.shape}"
                     f"Expected: {(size, size)}"
                 )
+        case "neumann":
+            S_mat = -np.eye(size, dtype=np.complex128) + (2.0 / size) * np.ones((size, size), dtype=np.complex128)
 
         case "unitary_cyclic":
             delta = S_mat_params.get("delta")

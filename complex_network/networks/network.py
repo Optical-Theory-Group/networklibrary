@@ -95,6 +95,15 @@ class Network:
         self.internal_scattering_map = internal_scattering_map
         self.internal_scattering_slices = internal_scattering_slices
         self.external_scattering_map = external_scattering_map
+        # Precompute indices for internal link fields
+        self.internal_link_indices_A_to_B = np.array([
+            self.internal_scattering_map[link.node_indices[0],link.node_indices[1]]
+            for link in self.internal_links
+        ])
+        self.internal_link_indices_B_to_A = np.array([
+            self.internal_scattering_map[link.node_indices[1],link.node_indices[0]]
+            for link in self.internal_links
+        ])
 
     def _get_network_matrix_maps(
         self,
@@ -517,19 +526,28 @@ class Network:
         link_index: int,
         fractional_positions: tuple[float, float],
         node_S_matrix_type: str = "fresnel",
-    ) -> None:
+    ) -> int:
         """Add a segment to a link.
-
-        Initially the segment will have the same refractive index as the
-        original link. The nodes will be given fresnel scattering matrices.
-
         The segment looks like this
 
-        O       |--------|    O     |-----------|     O     |--------|    O
-        node_one link_one first_node middle_link second_node link_two node_two
+        O       |---------|    O       |---------|     O       |--------|    O
+        node_one link_one insert_node1 middle_link insert_node2 link_two node_two
 
-        Apologies for future developers for naming convention here. Go through
-        it carefully with an example network."""
+        
+        parameters
+        ----------
+        link_index: int
+            The index of the link to which the segment is added.
+        fractional_positions: tuple[float, float]
+            The fractional positions of the new nodes along the link in units of ratio of link length.
+        Node_S_matrix_type: str
+            The type of scattering matrix to be used for the new nodes. refractive index of new link
+            is the same as the old link.
+        
+        Returns
+        -------
+        int
+            The index of the new link added to the network. Also updates the network"""
 
         # Sort for consistency and extract ratios
         fractional_positions = np.sort(fractional_positions)
@@ -544,22 +562,22 @@ class Network:
 
         # Work out the new node positions
         # This is so we can find them after all the index relabeling
-        first_node_position = node_one.position + s1 * (
+        insert_node1_position = node_one.position + s1 * (
             node_two.position - node_one.position
         )
-        second_node_position = node_one.position + s2 * (
+        insert_node2_position = node_one.position + s2 * (
             node_two.position - node_one.position
         )
 
         # Add first node and find its index
         self.add_node_to_link(link_index, s1)
-        first_node_index = self.get_node_by_position(first_node_position).index
+        insert_node1_index = self.get_node_by_position(insert_node1_position).index
 
         # Find the link that connects the new node and node_two
         # Note: node_two_index may have changed!
         node_two_index = self.get_node_by_position(node_two_position).index
         second_link_index = self.get_link_by_node_indices(
-            (first_node_index, node_two_index)
+            (insert_node1_index, node_two_index)
         ).index
 
         # Add second node and find its index
@@ -567,15 +585,16 @@ class Network:
         ratio = (s2 - s1) / (1 - s1)
         self.add_node_to_link(second_link_index, ratio)
 
-        first_node_index = self.get_node_by_position(first_node_position).index
-        second_node_index = self.get_node_by_position(
-            second_node_position
+        insert_node1_index = self.get_node_by_position(insert_node1_position).index
+        insert_node2_index = self.get_node_by_position(
+            insert_node2_position
         ).index
         middle_link = self.get_link_by_node_indices(
-            (first_node_index, second_node_index)
+            (insert_node1_index, insert_node2_index)
         )
 
         self.update_segment_matrices(middle_link)
+        return middle_link.index
 
     def update_link_matrices(self, link: Link) -> None:
         """Update link scattering matrices (normally used after altering Dn)"""
@@ -781,7 +800,6 @@ class Network:
             connected_link.inwave_np[1] = value
 
             count += 1
-
         # Set internal node values
         count = 0
         for node in self.internal_nodes:
@@ -803,23 +821,21 @@ class Network:
             node_two = self.get_node(node_two_index)
 
             # Set link fields
-            link.inwave[node_one_index] = node_one.outwave[
-                node_two_index
-            ]
+            link.inwave[node_one_index] = node_one.outwave[node_two_index]
+
             link.inwave_np[0] = node_one.outwave[node_two_index]
-            link.inwave[node_two_index] = node_two.outwave[
-                node_one_index
-            ]
+
+            link.inwave[node_two_index] = node_two.outwave[node_one_index]
+
             link.inwave_np[1] = node_two.outwave[node_one_index]
 
             # Outwaves
-            link.outwave[node_one_index] = node_one.inwave[
-                node_two_index
-            ]
+            link.outwave[node_one_index] = node_one.inwave[node_two_index]
+
             link.outwave_np[0] = node_one.inwave[node_two_index]
-            link.outwave[node_two_index] = node_two.inwave[
-                node_one_index
-            ]
+
+            link.outwave[node_two_index] = node_two.inwave[node_one_index]
+            
             link.outwave_np[1] = node_two.inwave[node_one_index]
 
         # Remaining external links values
@@ -1274,6 +1290,131 @@ class Network:
         block_matrix = np.block([[r, t_prime], [t, r_prime]])
         
         return block_matrix
+    
+    def get_reflection_matrix(self, k0: float | complex) -> np.ndarray:
+        """Calculate the reflection matrix of the scattering matrix which is valid for slab geometries
+            Convert the scattering matrix to the slab scattering matrix.
+            The slab scattering matrix is defined as the scattering matrix of a slab of material
+            but the terms are organized as [[r,t']
+                                            [t,r']]
+            First column: Response to an incoming wave from the left r (reflection from the left) t (transmission from left to right).
+            Second column: Response to an incoming wave from the right r (reflection from the right) t (transmission from right to left).
+            The left nodes have +ve coordinates and the right nodes have -ve coordinates."""
+    
+        external_scattering_map = self.external_scattering_map
+
+        port_to_node = {v: k for k, v in external_scattering_map.items()}
+        
+        left_ports = []
+        right_ports = []
+
+        # Sort the ports into left and right
+        for port in port_to_node:
+            node = self.get_node(port_to_node[port])
+            if node.position[0] > 0:
+                left_ports.append(port)
+            else:
+                right_ports.append(port)
+
+        left = np.array(left_ports)
+
+        S = self.get_S_ee(k0)
+
+        # Extract submatrices using ix_ to handle index arrays correctly
+        r = S[np.ix_(left, left)] if left.size else np.empty((0, 0))
+
+        return r
+    
+    def get_transmission_matrix(self, k0: float | complex) -> np.ndarray:
+        """Calculate the transmission matrix of the scattering matrix which is valid for slab geometries
+            Convert the scattering matrix to the slab scattering matrix.
+            The slab scattering matrix is defined as the scattering matrix of a slab of material
+            but the terms are organized as [[r,t']
+                                            [t,r']]
+            First column: Response to an incoming wave from the left r (reflection from the left) t (transmission from left to right).
+            Second column: Response to an incoming wave from the right r (reflection from the right) t (transmission from right to left).
+            The left nodes have +ve coordinates and the right nodes have -ve coordinates."""
+        external_scattering_map = self.external_scattering_map
+        port_to_node = {v: k for k, v in external_scattering_map.items()}
+        
+        left_ports = []
+        right_ports = []
+
+        # Sort the ports into left and right
+        for port in port_to_node:
+            node = self.get_node(port_to_node[port])
+            if node.position[0] > 0:
+                left_ports.append(port)
+            else:
+                right_ports.append(port)
+
+        left = np.array(left_ports)
+        right = np.array(right_ports)
+
+        S = self.get_S_ee(k0)
+
+        t = S[np.ix_(right, left)] if right.size and left.size else np.empty((right.size, left.size))
+
+        return t
+
+
+    def get_internal_link_fields(self, k0: float | complex, I_e: np.ndarray) -> np.ndarray:
+        """
+        Compute the fields inside internal links given wavenumber k0 and external input I_e.
+        
+        Args:
+            k0 (float | complex): Wavenumber.
+            I_e (np.ndarray): Incoming external field vector, shape (num_external_nodes,).
+        
+        Returns:
+            np.ndarray: Array of shape (num_internal_links, 2) where each row contains
+                        [field from node A to B, field from node B to A] for an internal link.
+        """
+        S_ie = self.get_S_ie(k0)
+        internal_vector = S_ie @ I_e
+        O_i = internal_vector[:self.internal_vector_length]
+        fields_A_to_B = O_i[self.internal_link_indices_A_to_B]
+        fields_B_to_A = O_i[self.internal_link_indices_B_to_A]
+        internal_fields = np.column_stack((fields_A_to_B, fields_B_to_A))
+        return internal_fields
+
+    def get_all_link_energy_densities(self, k0: float | complex, I_e: np.ndarray) -> np.ndarray:
+        """
+        Compute the average energy density inside all internal links using the provided formula.
+
+        Args:
+            k0 (float | complex): Wavenumber.
+            I_e (np.ndarray): Incoming external field vector, shape (num_external_nodes,).
+
+        Returns:
+            np.ndarray: Array of shape (num_internal_links,) containing the average energy density for each internal link.
+        """
+        # Get precomputed internal fields for all links
+        internal_fields = self.get_internal_link_fields(k0, I_e)  # Shape: (num_internal_links, 2)
+        inwave = internal_fields[:, 0]  # Forward fields (psi_A_to_B), shape: (num_internal_links,)
+        outwave = internal_fields[:, 1]  # Backward fields (psi_B_to_A), shape: (num_internal_links,)
+
+        # Get link lengths
+        lengths = np.array([link.length for link in self.internal_links])  # Shape: (num_internal_links,)
+
+        # Extract amplitudes and phases
+        r1 = np.abs(inwave,dtype=np.float64)  # Shape: (num_internal_links,)
+        r2 = np.abs(outwave,dtype=np.float64)  # Shape: (num_internal_links,)
+        theta1 = np.angle(inwave)  # Shape: (num_internal_links,)
+        theta2 = np.angle(outwave)  # Shape: (num_internal_links,)
+
+        # Compute amplitude term
+        amplitude_term = r1**2 + r2**2  # Shape: (num_internal_links,)
+
+        # Compute interference term
+        interference_term = (
+            2 * r1 * r2 * np.cos(k0 * lengths + theta1 - theta2) * np.sin(k0 * lengths) / k0
+        )  # Shape: (num_internal_links,)
+
+        # Compute energy density
+        energy_density = amplitude_term + interference_term / lengths  # Shape: (num_internal_links,)
+
+        return energy_density
 
     # -------------------------------------------------------------------------
     # Methods for getting derivatives and Wigner-Smith operators
@@ -2127,7 +2268,8 @@ class Network:
         equal_aspect: bool = False,
         highlight_nodes: list[int] | None = None,
         highlight_links: list[int] | None = None,
-        highlight_perturbed: bool = True,
+        highlight_perturbed_nodes: bool = True,
+        highlight_perturbed_links: bool = True,
         hide_axes: bool = False,
         draw_boundary: float | tuple[float, float] | None = None,
         title: str | None = None,
@@ -2204,7 +2346,7 @@ class Network:
         #         node.draw(ax, color="red")
 
         # Custom highlighting for perturbations
-        if highlight_perturbed:
+        if highlight_perturbed_nodes:
             for node in self.nodes:
                 if not node.is_perturbed:
                     continue
@@ -2222,6 +2364,21 @@ class Network:
                         )
                     case _:
                         pass
+            if highlight_perturbed_links:
+                for link in self.links:
+                    if not link.is_perturbed:
+                        continue
+                    node_1_index, node_2_index = link.node_indices
+                    node_1_pos = self.get_node(node_1_index).position
+                    node_2_pos = self.get_node(node_2_index).position
+                    color = "red"
+                    link.draw(ax, node_1_pos, node_2_pos, color=color)
+
+                    # draw the nodes at the ends of the links(because the perturbed red line comes above the nodes and looks bad)
+                    node_1 = self.get_node(node_1_index)
+                    node_2 = self.get_node(node_2_index)
+                    node_1.draw(ax, show_index = False, show_external_index = False, show_internal_index = False, color=None)
+                    node_2.draw(ax, show_index = False, show_external_index = False, show_internal_index = False, color=None)
 
         if hide_axes:
             ax.tick_params(
