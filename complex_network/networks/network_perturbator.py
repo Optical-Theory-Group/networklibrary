@@ -34,7 +34,6 @@ class PerturbationStatus:
         What is the id of the link that was affected by the perturbation?
         (if any)
     """
-
     perturbation_type: str | None = None
     perturbation_value: float | complex = 0.0
     node_id: int | None = None
@@ -48,6 +47,7 @@ class NetworkPerturbator:
         self.perturbed_network = copy.deepcopy(network)
         self.temporary_network = copy.deepcopy(network)
         self.status = PerturbationStatus()
+        self._perturbation_history: list[dict] = []
 
     def reset(self) -> None:
         """Reset the networks back to the original network"""
@@ -55,17 +55,62 @@ class NetworkPerturbator:
         self.unperturbed_network = reset_network
         self.perturbed_network = reset_network
         self.status = PerturbationStatus()
+        self._perturbation_history.clear()
 
     def update(self) -> None:
         """Set the unperturbed network to be the current perturbed network"""
         current_network = copy.deepcopy(self.perturbed_network)
         self.unperturbed_network = copy.deepcopy(current_network)
 
+    def _record_perturbation(
+        self,
+        p_value: float | complex,
+        link_idx: int,
+    ) -> None:
+        """Helper to record the value and endpoints of each link perturbation"""
+        link = self.perturbed_network.get_link(link_idx)
+        nodes = list(link.sorted_connected_nodes)
+        # append history with original endpoint IDs
+        self._perturbation_history.append({
+            'value': p_value,
+            'node_id': nodes,
+        })
+        # update status with up-to-date link index and endpoints
+        self.status = PerturbationStatus(
+            perturbation_value=p_value,
+            link_id=link.index,
+            node_id=nodes,
+        )
+
+    def get_perturbation_history(self) -> list[dict]:
+        """
+        Returns a list of perturbation records, each containing:
+          - value: numeric value applied
+          - link_index: current index of the perturbed link
+          - node_id: two-element list of endpoint node IDs
+        """
+        history = []
+        for entry in self._perturbation_history:
+            nodes = tuple(entry['node_id'])
+            # find matching link in current perturbed network
+            match = next(
+                (l for l in self.perturbed_network.links
+                 if tuple(l.sorted_connected_nodes) == nodes),
+                None
+            )
+            current_idx = match.index if match else None
+            history.append({
+                'value': entry['value'],
+                'link_index': current_idx,
+                'node_ids': list(nodes),
+            })
+        return history
+
     # -------------------------------------------------------------------------
     # Perturbation methods
     # -------------------------------------------------------------------------
 
-    def perturb_link_n(self,link_index:int, value:complex) -> None:
+    def perturb_link_n(self, link_index: int, value: complex) -> Network:
         """Change the refractive index of a link so that it becomes
         base_n + value. This updates only the link scattering matrix, In reality,
         the scattering matrices are also affected by this change. (Will update later)
@@ -76,22 +121,20 @@ class NetworkPerturbator:
             The index of the link to be perturbed
         value : complex
             The value to be added to the refractive index of the link, can be real or complex"""
-        
         link = self.perturbed_network.get_link(link_index)
-        # Update refractive index
-        # Copy to avoid recursion error
-        Dn = link.Dn
-        new_Dn = Dn + value
-        link.Dn = new_Dn
+        link.Dn += value
         self.perturbed_network.update_link_matrices(link)
-
+        # log perturbation covering full link
+        self._record_perturbation(value, link_index)
         return self.perturbed_network
-    
-    def add_perturb_segment_n(self, link_index:int,
-                                size: tuple[float, float],
-                                value:complex,
-                                node_S_matrix_type: str = "fresnel") -> None:
-        
+
+    def add_perturb_segment_n(
+        self,
+        link_index: int,
+        size: tuple[float, float],
+        value: complex,
+        node_S_matrix_type: str = "fresnel",
+    ) -> Network:
         """Add a segment of size (l,h), where the segment starts from l*L_i and ends at h*L_i.
          L_i is the length of the link.  Update the refractive index of the
         segment so that it becomes base_n + value. Update its neighbouring node
@@ -108,52 +151,51 @@ class NetworkPerturbator:
         node_S_matrix_type : str
             The type of scattering matrix to be used for the nodes. Default is "fresnel".
         """
+        # keep base network consistent
+        self.unperturbed_network.add_segment_to_link(
+            link_index=link_index,
+            fractional_positions=size,
+        )
+        # add segment in perturbed network
+        mid_idx = self.perturbed_network.add_segment_to_link(
+            link_index=link_index,
+            fractional_positions=size,
+        )
+        mid = self.perturbed_network.get_link(mid_idx)
+        mid.Dn += value
+        mid.is_perturbed = True
+        self.perturbed_network.update_segment_matrices(mid)
+        self.perturbed_network.update_link_matrices(mid)
+        # record segment perturbation
+        self._record_perturbation(value, mid_idx)
+        return self.perturbed_network
 
-        # Now, we need to update the unperturbed network, so that the network is same
-        # The perturbation is that the segment added has a different refractive index
-        self.unperturbed_network.add_segment_to_link(link_index=link_index,fractional_positions=size)
-        middle_link_index = self.perturbed_network.add_segment_to_link(link_index=link_index,fractional_positions=size)
-        
-        # Update the refractive index of the segment
-        middle_link = self.perturbed_network.get_link(middle_link_index)
-        Dn = middle_link.Dn
-        new_Dn = Dn + value
-        middle_link.Dn = new_Dn
-
-        # Update the perturbation status
-        middle_link.is_perturbed = True
-        self.perturbed_network.update_segment_matrices(middle_link)
-        self.perturbed_network.update_link_matrices(middle_link)
-             
-
-    def perturb_segment_n(self, link_index: int, value: complex) -> None:
+    def perturb_segment_n(self, link_index: int, value: complex) -> Network:
         """Change the refractive index of a segment link so that it becomes
         base_n + value. Update its neighbouring node scattering matrices
         according to the fresnel coefficients"""
         link = self.perturbed_network.get_link(link_index)
-
-        # Update refractive index
-        # Copy to avoid recursion error
-        Dn = link.Dn
-        new_Dn = Dn + value
-        link.Dn = new_Dn
-
+        link.Dn += value
         self.perturbed_network.update_segment_matrices(link)
+        # record this existing segment perturbation
+        self._record_perturbation(value, link_index)
+        return self.perturbed_network
 
+    # Node scattering changes are not logged here
     def change_node_scattering_matrix(
         self,
         node_index: int,
         new_node_S_mat_type: str,
         new_node_S_mat_params: dict,
-    ) -> None:
-        """Perturb the node scattering matrix by adding a value to the
-        diagonal elements"""
-        node = self.perturbed_network.get_node(node_index)
-
+    ) -> Network:
+        """Perturb the node scattering matrix"""
         self.perturbed_network.update_node_scattering_matrix(
-            node_index, new_node_S_mat_type, new_node_S_mat_params
+            node_index,
+            new_node_S_mat_type,
+            new_node_S_mat_params,
         )
-
+        return self.perturbed_network
+    
     # -------------------------------------------------------------------------
     # Pump network with gain
     # -------------------------------------------------------------------------

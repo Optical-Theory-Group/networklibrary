@@ -3,6 +3,10 @@ from abc import ABC, abstractmethod
 from scipy.linalg import hadamard
 from complex_network.networks.network import Network
 from typing import Union
+from scipy.optimize import linprog
+from scipy.sparse.linalg import svds
+from scipy import sparse
+from sklearn.linear_model import Lasso
 
 class ProbeGenerator(ABC):
     @abstractmethod
@@ -124,25 +128,42 @@ class LeastSquaresRecovery(RecoveryMethod):
             # if the rank is too high, we just return the original matrix
             return w_tot
 
-class BasisPursuitRecovery(RecoveryMethod):
-    def __init__(self, rank_multiplier:int = 2):
-        """Initializes the basis pursuit recovery method
-        
-        parameters
-            rank_multiplier: A multiplier to determine the rank of the matrix to be used in the recovery
-                             for each k defect, the rank of the matrix will be k*rank_multiplier
-                             In this system, each defect will change the rank of the matrix by 2"""
+class LassoRecovery:
+    def __init__(self, rank_multiplier: int = 2, alpha: float = 1e-6, max_iter: int = 10000):
+        """
+        alpha: regularization strength (higher => sparser w)
+        max_iter: maximum ISTA/coordinat-descent iterations
+        """
         self.rank_multiplier = rank_multiplier
+        self.alpha = alpha
+        self.max_iter = max_iter
 
-    def recover(self, A:np.ndarray, y:np.ndarray, Ni:int, expected_defects:int)-> np.ndarray:
-        """Recovers the state of the system from the measurements
+    def recover(self, A: np.ndarray, y: np.ndarray, Ni: int, expected_defects: int) -> np.ndarray:
+        # Solve 1/2||Aw - y||^2 + alpha * ||w||_1
+        lasso = Lasso(
+            alpha=self.alpha,
+            fit_intercept=False,
+            max_iter=self.max_iter,
+            tol=1e-6,
+            selection='cyclic'
+        )
+        lasso.fit(A, y)
+        w_hat = lasso.coef_
 
-        parameters
-            A: Matrix of measurements
-            y: Vector of measurements
-            Ni: Number of expected defects"""
-            
-        pass
+        # Reconstruct complex matrix
+        real_blk = w_hat[:Ni**2].reshape((Ni, Ni))
+        imag_blk = w_hat[Ni**2:].reshape((Ni, Ni))
+        W_tot = real_blk + 1j * imag_blk
+
+        # Low‐rank truncation
+        r = int(np.ceil(self.rank_multiplier * expected_defects))
+        if r < min(W_tot.shape):
+            U, S, Vh = np.linalg.svd(W_tot, full_matrices=False)
+            S[r:] = 0
+            W_tot = (U * S) @ Vh
+
+        return W_tot
+
     
 class DefectDetector:
     def __init__(self,
