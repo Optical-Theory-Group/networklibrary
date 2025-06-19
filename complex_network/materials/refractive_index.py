@@ -18,6 +18,9 @@ def n_sellmeier_k0(k0: float, B: np.ndarray, C: np.ndarray) -> float:
         partial += b / (1.0 - c / wavelength**2)
 
     n = np.sqrt(1 + partial)
+
+    # # Edit out after use:
+    n = 1.5
     return n
 
 
