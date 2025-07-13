@@ -31,3 +31,8 @@ complex_network/
 
 ## 🔧 Package versions
 See `environment.yml` for a list of required packages.
+
+## 🔄 Serialization
+Network objects can be pickled using Python's ``pickle`` module. The
+scattering matrix helpers use callable classes so that network instances
+can be safely serialized and used in parallel processes.
