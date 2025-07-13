@@ -11,18 +11,30 @@ from scipy.ndimage.morphology import binary_erosion, generate_binary_structure
 
 
 def get_adjugate(M: np.ndarray) -> np.ndarray:
-    """Find the adjugate of a matrix"""
-    n_row, n_col = np.shape(M)
-    adjugate = np.zeros((n_row, n_col), dtype=np.complex128)
+    """Return the adjugate of ``M``.
 
-    for i in range(n_row):
-        for j in range(n_col):
-            modified = np.copy(M)
-            modified[i, :] = np.zeros(n_col)
-            modified[:, j] = np.zeros(n_row)
-            modified[i, j] = 1.0
-            adjugate[i, j] = np.linalg.det(modified)
-    return adjugate.T
+    If ``M`` is invertible, the adjugate is computed using ``det(M) * inv(M).T``
+    which is significantly faster than constructing each minor individually. If
+    ``M`` is singular the function falls back to explicitly computing the
+    cofactors.
+    """
+
+    try:
+        det = np.linalg.det(M)
+        inv = np.linalg.inv(M)
+        return det * inv.T
+    except np.linalg.LinAlgError:
+        n_row, n_col = M.shape
+        adjugate = np.empty((n_row, n_col), dtype=np.complex128)
+        for i in range(n_row):
+            row_mask = np.ones(n_row, dtype=bool)
+            row_mask[i] = False
+            for j in range(n_col):
+                col_mask = np.ones(n_col, dtype=bool)
+                col_mask[j] = False
+                minor = M[row_mask][:, col_mask]
+                adjugate[j, i] = ((-1) ** (i + j)) * np.linalg.det(minor)
+        return adjugate
 
 
 def plot_colourline(x, y, c, minc=None, maxc=None):

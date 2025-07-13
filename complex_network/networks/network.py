@@ -1,6 +1,7 @@
 """Main network class module."""
 
 from typing import Any, Callable
+from collections import deque
 
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
@@ -166,7 +167,7 @@ class Network:
     @property
     def num_nodes(self) -> int:
         """Number of nodes in the network."""
-        return len(self.nodes)
+        return len(self.node_dict)
 
     @property
     def external_nodes(self) -> list[Node]:
@@ -206,7 +207,7 @@ class Network:
     @property
     def num_links(self) -> int:
         """Number of links in the network."""
-        return len(list(self.links))
+        return len(self.link_dict)
 
     @property
     def external_links(self) -> list[Link]:
@@ -216,7 +217,7 @@ class Network:
     @property
     def num_external_links(self) -> int:
         """Number of external links in the network."""
-        return list(self.external_links)
+        return len(self.external_links)
 
     @property
     def internal_links(self) -> list[Link]:
@@ -226,7 +227,7 @@ class Network:
     @property
     def num_internal_links(self) -> int:
         """Number of internal links in the network."""
-        return len(list(self.internal_links))
+        return len(self.internal_links)
 
     # -------------------------------------------------------------------------
     # Basic utility functions
@@ -261,20 +262,16 @@ class Network:
         raise ValueError("Link not found.")
     
     def get_connecting_nodes(self, node_index: int | str) -> list[Node]:
-        """Returns a list of nodes that are connected to the node with the specified index"""
-        nodes = []
-        for link in self.link_dict.values():
-            if node_index in link.node_indices:
-                neighbor_index = (
-                    link.node_indices[0]
-                    if link.node_indices[1] == node_index
-                    else link.node_indices[1]
-                )
+        """Return nodes that are directly connected to ``node_index``."""
 
-                node = self.node_dict.get(neighbor_index, None)
-                nodes.append(node)
+        node = self.node_dict.get(node_index)
+        if node is None:
+            raise ValueError(f"Node {node_index} does not exist.")
 
-        return nodes
+        connected = [
+            idx for idx in node.sorted_connected_nodes if idx in self.node_dict
+        ]
+        return [self.node_dict[i] for i in connected]
 
     def reset_dict_indices(self) -> None:
         """Go through the node and link dictionaries and generate a new
@@ -2597,17 +2594,9 @@ class Network:
         Matrix is ordered according to increasing node index
 
         """
-        deg = np.zeros((self.num_nodes, self.num_nodes))
-
-        # sort nodes
         sorted_nodes = sorted(self.node_dict.keys())
-
-        # construct adjacency matrix
-        for index, n_id in enumerate(sorted_nodes):
-            node = self.get_node(n_id)
-            deg[index, index] = node.degree
-
-        return deg
+        degrees = [self.node_dict[n_id].degree for n_id in sorted_nodes]
+        return np.diag(degrees)
 
     @property
     def adjacency_matrix(self, ):
@@ -2620,14 +2609,16 @@ class Network:
         """
         adj = np.zeros((self.num_nodes, self.num_nodes))
 
-        # sort nodes
-        sorted_nodes = sorted([key for key in self.node_dict.keys()])
+        sorted_nodes = sorted(self.node_dict.keys())
+        index_map = {node_idx: i for i, node_idx in enumerate(sorted_nodes)}
 
-        # construct adjacency matrix
-        for index, node_index in enumerate(sorted_nodes):
-            connected_indices = [node.index for node in self.get_connecting_nodes(node_index)]
-            for connected_index in connected_indices:
-                adj[index, sorted_nodes.index(connected_index)] = 1
+        for node_idx in sorted_nodes:
+            i = index_map[node_idx]
+            for neighbour in self.get_node(node_idx).sorted_connected_nodes:
+                if neighbour == -1 or neighbour not in index_map:
+                    continue
+                j = index_map[neighbour]
+                adj[i, j] = 1
 
         return adj
 
@@ -2661,11 +2652,12 @@ class Network:
             list: A list of lists, where each inner list represents a path.
         """
 
+
         all_paths = []
-        queue = [(start_node, [start_node])]
+        queue = deque([(start_node, [start_node])])
 
         while queue:
-            current_node, current_path = queue.pop(0)
+            current_node, current_path = queue.popleft()
 
             if current_node == end_node:
                 all_paths.append(np.array(current_path))
@@ -2674,17 +2666,11 @@ class Network:
             if len(current_path) > max_path_length:
                 continue  # Skip if path length exceeds limit
 
-            for link in self.link_dict.values():
-                if current_node in link.node_indices:
-                    neighbor = (
-                        link.node_indices[0]
-                        if link.node_indices[1] == current_node
-                        else link.node_indices[1]
-                    )
-
-                    if neighbor not in current_path:
-                        new_path = current_path + [neighbor]
-                        queue.append((neighbor, new_path))
+            node = self.get_node(current_node)
+            for neighbor in node.sorted_connected_nodes:
+                if neighbor == -1 or neighbor in current_path:
+                    continue
+                queue.append((neighbor, current_path + [neighbor]))
 
         return all_paths
 
