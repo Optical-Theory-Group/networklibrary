@@ -142,3 +142,10 @@ class Link(Component):
         ax.plot(
             [node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol, lw=lw
         )
+    def get_port_index(self, node_index):
+        # Find which end of the link is connected to this node
+        for port_idx, n_idx in enumerate(self.node_indices):
+            if n_idx == node_index:
+                return port_idx
+        raise ValueError("Node not connected to this link")
+

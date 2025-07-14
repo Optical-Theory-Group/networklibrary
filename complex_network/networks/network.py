@@ -6,10 +6,12 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-
+from collections import deque
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.scattering_matrices import link_matrix, node_matrix
+
+from multiprocessing import Pool, cpu_count
 
 
 
@@ -2648,45 +2650,112 @@ class Network:
         fv = eigenvectors[list(eigenvalues).index(f)]
         return f, fv
 
-    def breadth_first_search_simple_paths(self, start_node, end_node, max_path_length=np.inf):
+    """"Write a version if possible that accounts memory usage optimization too
+        the current implementation will fill up memory for large networks. Some 
+        cut off should be implemented to avoid this."""
+    def breadth_first_search_simple_paths(
+            self,
+            start_node: int,
+            end_node:   int,
+            max_path_length: int | float = np.inf,
+            *,
+            use_mult_proc: bool = False,
+            min_tasks_per_core: int = 4,
+            hard_parallel_depth: int | None = None):
         """
-        Finds all paths between start_node and end_node using BFS, avoiding cycles.
+        Enumerate *all* simple paths between `start_node` and `end_node`.
 
-        Args:
-            start_node (int): The starting node ID.
-            end_node (int): The ending node ID.
-            max_path_length (int): The maximum number of segmenets in the path.
-
-        Returns:
-            list: A list of lists, where each inner list represents a path.
+        parameters
+        
+        start_node: int
+            Index of the node to start from.
+        end_node: int
+            Index of the node to end at.
+        max_path_length: int | float
+            Maximum length of the paths to be found. If set to `np.inf`, no limit    
+        use_mult_proc: bool
+            If `True`, use multiprocessing to speed up the search.
+        min_tasks_per_core: int
+            Minimum number of tasks per core to use when multiprocessing.
+        hard_parallel_depth: int | None
+            If set, the search will stop at this depth to avoid excessive parallelization.
         """
+        # trivial case
+        if start_node == end_node:
+            return [np.asarray([start_node], int)]
 
-        all_paths = []
-        queue = [(start_node, [start_node])]
+        # build adjacency
+        adjacency = {n.index: set() for n in self.nodes}
+        for link in self.link_dict.values():
+            a, b = link.node_indices
+            adjacency[a].add(b);  adjacency[b].add(a)
 
-        while queue:
-            current_node, current_path = queue.pop(0)
+        # single-threaded BFS
+        def _bfs_cpu():
+            dq, out = deque([(start_node, [start_node])]), []
+            while dq:
+                node, path = dq.popleft()
+                if node == end_node:
+                    out.append(path);  continue
+                if len(path) > max_path_length:
+                    continue
+                for nbr in adjacency[node]:
+                    if nbr not in path:
+                        dq.append((nbr, path + [nbr]))
+            return [np.asarray(p, int) for p in out]
 
-            if current_node == end_node:
-                all_paths.append(np.array(current_path))
-                continue  # Important: Continue to find other paths
+        if not use_mult_proc:
+            return _bfs_cpu()
 
-            if len(current_path) > max_path_length:
-                continue  # Skip if path length exceeds limit
+        # seed geenrator for parallel BFS
+        def _make_frontier():
+            frontier = [(nbr, [start_node, nbr]) for nbr in adjacency[start_node]]
+            complete = []        # finished paths encountered so far
+            depth    = 1
 
-            for link in self.link_dict.values():
-                if current_node in link.node_indices:
-                    neighbor = (
-                        link.node_indices[0]
-                        if link.node_indices[1] == current_node
-                        else link.node_indices[1]
-                    )
+            target = cpu_count() * min_tasks_per_core
+            while frontier:
+                # stop if we already have “enough” parallel work
+                if hard_parallel_depth is not None and depth >= hard_parallel_depth:
+                    break
+                if len(frontier) >= target:
+                    break
 
-                    if neighbor not in current_path:
-                        new_path = current_path + [neighbor]
-                        queue.append((neighbor, new_path))
+                next_frontier = []
+                for node, path in frontier:
+                    if node == end_node:
+                        complete.append(path);          # save finished path
+                        continue
+                    if len(path) >= max_path_length:
+                        continue
+                    for nbr in adjacency[node]:
+                        if nbr not in path:
+                            next_frontier.append((nbr, path + [nbr]))
+                if not next_frontier:
+                    break
+                frontier = next_frontier
+                depth   += 1
+            return frontier, complete
 
-        return all_paths
+        seeds, finished_in_seeder = _make_frontier()
+        if not seeds:   
+            return [np.asarray(p, int) for p in finished_in_seeder]
+
+        # Randomly shuffle the seeds to balance the load
+        np.random.shuffle(seeds)
+        n_workers  = cpu_count()
+        chunk_goal = n_workers * min_tasks_per_core
+        chunksize  = max(1, len(seeds) // chunk_goal)
+        chunksize  = min(chunksize, 128)
+
+        with Pool(n_workers,
+                initializer=_init_pool,
+                initargs=(adjacency, end_node, max_path_length)) as pool:
+            results = pool.imap_unordered(_bfs_worker, seeds, chunksize)
+            worker_paths = [p for grp in results for p in grp]
+
+        return [np.asarray(p, int) for p in (finished_in_seeder + worker_paths)]
+
 
     def get_lengths_along_path(self, path_indices):
         lengths = []
@@ -2697,3 +2766,25 @@ class Network:
             lengths.append(link.length)
 
         return np.array(lengths)
+
+
+# Helper functions outside the Network class that are used for multiprocessing
+# Global placeholders that every worker process can reach
+_adj = _end_node_glob = _max_len_glob = None
+def _init_pool(adj, end_node, max_len):
+    global _adj, _end_node_glob, _max_len_glob
+    _adj, _end_node_glob, _max_len_glob = adj, end_node, max_len
+
+def _bfs_worker(seed):
+    node, path = seed
+    done, dq = [], deque([(node, path)])
+    while dq:
+        v, cur = dq.popleft()
+        if v == _end_node_glob:
+            done.append(cur);  continue
+        if len(cur) > _max_len_glob:
+            continue
+        for nxt in _adj[v]:
+            if nxt not in cur:
+                dq.append((nxt, cur + [nxt]))
+    return done

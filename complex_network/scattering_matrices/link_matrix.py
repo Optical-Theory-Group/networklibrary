@@ -10,10 +10,14 @@ import numpy as np
 # -----------------------------------------------------------------------------
 
 
-def get_propagation_matrix_closure(link) -> Callable:
-    """Standard propagation matrix for links"""
+class PropagationMatrix:
+    """Callable class representing the link propgation matrix."""
 
-    def get_propagation_matrix(k0: complex) -> np.ndarray:
+    def __init__(self,link) -> None:
+        self.link = link
+
+    def __call__(self, k0: complex) -> np.ndarray:
+        link = self.link
         return np.array(
             [
                 [
@@ -27,37 +31,43 @@ def get_propagation_matrix_closure(link) -> Callable:
             ]
         )
 
-    return get_propagation_matrix
+def get_propagation_matrix_closure(link) -> Callable:
+    """Return a callable object for link propagation matrices."""
+    return PropagationMatrix(link)
 
+class PropagationMatrixInverse:
+    """Callable class representing the link propagation matrix inverse."""
+
+    def __init__(self, link) -> None:
+        self.link = link
+
+    def __call__(self, k0: complex) -> np.ndarray:
+        link = self.link
+        return np.array(
+            [
+                [
+                    0.0,
+                    1.0 / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
+                ],
+                [
+                    1.0 / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
+                    0.0,
+                ],
+            ]
+        )
 
 def get_propagation_matrix_inverse_closure(link) -> Callable:
     """Standard propagation matrix inverse for links"""
+    return PropagationMatrixInverse(link)
 
-    def get_propagation_matrix_inverse(k0: complex) -> np.ndarray:
-        return np.array(
-            [
-                [
-                    0.0,
-                    1.0
-                    / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
-                ],
-                [
-                    1.0
-                    / np.exp(1j * (link.n(k0) + link.Dn) * k0 * link.length),
-                    0.0,
-                ],
-            ]
-        )
+class PropagationMatrixDerivative:
+    """Callable class representing the link propagation matrix derivative."""
 
-    return get_propagation_matrix_inverse
+    def __init__(self, link) -> None:
+        self.link = link
 
-
-def get_propagation_matrix_derivative_closure(link) -> Callable:
-    """Standard propagation matrix derivative for links"""
-
-    def get_propagation_matrix_derivative(
-        k0, variable: str = "k0"
-    ) -> np.ndarray:
+    def __call__(self, k0: complex, variable: str = "k0") -> np.ndarray:
+        link = self.link
         VALID_VARIABLES = ["k0", "Dn"]
 
         matrix_part = np.array(
@@ -90,4 +100,6 @@ def get_propagation_matrix_derivative_closure(link) -> Callable:
 
         return factor * matrix_part
 
-    return get_propagation_matrix_derivative
+def get_propagation_matrix_derivative_closure(link) -> Callable:
+    """Return a callable object for link propagation matrix derivatives."""
+    return PropagationMatrixDerivative(link)

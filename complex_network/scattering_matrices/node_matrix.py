@@ -165,40 +165,49 @@ def get_zero_matrix_closure(size: int) -> Callable:
     return ZeroMatrix(size)
 
 
-def get_permuted_matrix_closure(
-    component: Component, matrix_case: str, sorted_indices: list[int]
-) -> Callable:
-    """Produces closures that permute the indices of scattering matrices
-    returned by a scattering matrix function.
+class PermutedMatrix:
+    """Callable class to permute scattering matrices
+        These are needed properly permute the matrix functions. Permutations
+        are required, for example, if the relabelling of network indices results in
+        a new order in a node's sorted_indices, since the node scattering matrix by
+        definition acts on a vector ordered by these indices.
 
-    These are needed properly permute the matrix functions. Permutations
-    are required, for example, if the relabelling of network indices results in
-    a new order in a node's sorted_indices, since the node scattering matrix by
-    definition acts on a vector ordered by these indices.
+        matrix_case should be either "get_S", "get_S_inv" or "get_dS"."""
 
-    matrix_case should be either "get_S", "get_S_inv" or "get_dS"."""
-    func = getattr(component, matrix_case, None)
-    if func is None:
-        raise ValueError(f"Invalid matrix_case {matrix_case}")
+    def __init__(self, component: Component, matrix_case: str, sorted_indices: list[int]) -> None:
+        func = getattr(component, matrix_case, None)
+        if func is None:
+            raise ValueError(f"Invalid matrix_case {matrix_case}")
+        
+        self.component = component
+        self.matrix_case = matrix_case
+        self.sorted_indices = sorted_indices
 
-    def get_permuted_matrix(k0: complex, *args, **kwargs) -> np.ndarray:
+    def __call__(self, k0: complex, *args, **kwargs) -> np.ndarray:
+        func = getattr(self.component, self.matrix_case)
         matrix = func(k0, *args, **kwargs)
-        return matrix[:, sorted_indices][sorted_indices, :]
+        idx = self.sorted_indices
+        return matrix[:, idx][idx, :]
 
-    return get_permuted_matrix
-
+def get_permuted_matrix_closure(
+    component: Component, matrix_case: str, sorted_indices: list[int]) -> Callable:
+    """Return a callable object for permuted scattering matrices."""
+    return PermutedMatrix(component, matrix_case, sorted_indices)
 
 # -----------------------------------------------------------------------------
 # Fresnel node matrices used primarily for link segments
 # -----------------------------------------------------------------------------
 
+class FresnelMatrix:
+    """Callable class representing the Fresnel scattering matrix."""
 
-def get_S_fresnel_closure(first_link: Link, second_link: Link) -> np.ndarray:
-    """Standard Fresnel scattering matrix"""
+    def __init__(self, first_link: Link, second_link: Link) -> None:
+        self.first_link = first_link
+        self.second_link = second_link
 
-    def get_S_fresnel(k0: complex) -> np.ndarray:
-        n1 = first_link.n(k0) + first_link.Dn
-        n2 = second_link.n(k0) + second_link.Dn
+    def __call__(self, k0: complex) -> np.ndarray:
+        n1 = self.first_link.n(k0) + self.first_link.Dn
+        n2 = self.second_link.n(k0) + self.second_link.Dn
 
         r = (n1 - n2) / (n1 + n2)
         r2 = (n2 - n1) / (n1 + n2)
@@ -208,17 +217,20 @@ def get_S_fresnel_closure(first_link: Link, second_link: Link) -> np.ndarray:
         S = np.array([[r, t2], [t, r2]])
         return S
 
-    return get_S_fresnel
+def get_S_fresnel_closure(first_link: Link, second_link: Link) -> np.ndarray:
+    """Return a callable object for Fresnel scattering matrices."""
+    return FresnelMatrix(first_link, second_link)
 
+class FresnelMatrixInverse:
+    """Callable class representing the Fresnel scattering matrix inverse."""
 
-def get_S_fresnel_inverse_closure(
-    first_link: Link, second_link: Link
-) -> np.ndarray:
-    """Standard Fresnel scattering matrix inverse"""
+    def __init__(self, first_link: Link, second_link: Link) -> None:
+        self.first_link = first_link
+        self.second_link = second_link
 
-    def get_S_fresnel_inverse(k0: complex) -> np.ndarray:
-        n1 = first_link.n(k0) + first_link.Dn
-        n2 = second_link.n(k0) + second_link.Dn
+    def __call__(self, k0: complex) -> np.ndarray:
+        n1 = self.first_link.n(k0) + self.first_link.Dn
+        n2 = self.second_link.n(k0) + self.second_link.Dn
 
         r = (n1 - n2) / (n1 + n2)
         r2 = (n2 - n1) / (n1 + n2)
@@ -228,40 +240,39 @@ def get_S_fresnel_inverse_closure(
         S = np.array([[r, t2], [t, r2]])
         return np.linalg.inv(S)
 
-    return get_S_fresnel_inverse
+def get_S_fresnel_inverse_closure(first_link: Link, second_link: Link) -> np.ndarray:
+    """Return a callable object for Fresnel scattering matrix inverses."""
+    return FresnelMatrixInverse(first_link, second_link)
 
-
-def get_S_fresnel_derivative_closure(
-    first_link: Link, second_link: Link, perturbed_link_number: int = None
-) -> np.ndarray:
-    """Standard Fresnel scattering matrix derivative.
-
-    Note: The Dn derivative is with respect to Dn in the link segment!
+class FresnelMatrixDerivative:
+    """Callable class representing the Fresnel scattering matrix derivative.
+        Note: The Dn derivative is with respect to Dn in the link segment!
 
     Perturbed link number tells which of the links (first or second) is the
     segment. This should be either 1 or 2. 1 means first_link is the perturbed
     one. 2 means second link is."""
 
-    def get_S_fresnel_derivative(
-        k0: complex, variable: str = "k0"
-    ) -> np.ndarray:
+    def __init__(self, first_link: Link, second_link: Link, perturbed_link_number: int | None = None) -> None:
+        self.first_link = first_link
+        self.second_link = second_link
+        self.perturbed_link_number = perturbed_link_number
+    
+    def __call__(self, k0: complex, variable: str = "k0") -> np.ndarray:
         VALID_VARIABLES = ["k0", "Dn"]
-
-        n1 = first_link.n(k0) + first_link.Dn
-        n2 = second_link.n(k0) + second_link.Dn
-
+        n1 = self.first_link.n(k0) + self.first_link.Dn
+        n2 = self.second_link.n(k0) + self.second_link.Dn
         match variable:
             case "k0":
-                dn1 = first_link.dn(k0)
-                dn2 = second_link.dn(k0)
+                dn1 = self.first_link.dn(k0)
+                dn2 = self.second_link.dn(k0)
 
             case "Dn":
-                if perturbed_link_number not in [1, 2]:
+                if self.perturbed_link_number not in [1, 2]:
                     raise ValueError(
                         "perturbed_link_number must be either 1 or 2."
                     )
 
-                if perturbed_link_number == 1:
+                if self.perturbed_link_number == 1:
                     dn1 = 1.0
                     dn2 = 0.0
                 else:
@@ -283,4 +294,8 @@ def get_S_fresnel_derivative_closure(
         dS = np.array([[dr, dt2], [dt, dr2]])
         return dS
 
-    return get_S_fresnel_derivative
+def get_S_fresnel_derivative_closure(
+    first_link: Link, second_link: Link, perturbed_link_number: int | None = None
+) -> np.ndarray:
+    """Return a callable object for Fresnel scattering matrix derivatives."""
+    return FresnelMatrixDerivative(first_link, second_link, perturbed_link_number)
