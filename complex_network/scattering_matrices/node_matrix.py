@@ -20,7 +20,7 @@ class ConstantNodeS:
         return self.S_mat
     
 class ConstantNodeSInv:
-    def __init__(self, S_mat: np.ndarray) -> None:
+    def __init__(self, S_mat: Callable[[complex],np.ndarray]) -> None:
         self.S_mat_inv = np.linalg.inv(S_mat())
     def __call__(self,*args, **kwargs) -> np.ndarray:
         return self.S_mat_inv
@@ -175,19 +175,19 @@ class PermutedMatrix:
         matrix_case should be either "get_S", "get_S_inv" or "get_dS"."""
 
     def __init__(self, component: Component, matrix_case: str, sorted_indices: list[int]) -> None:
-        func = getattr(component, matrix_case, None)
-        if func is None:
+        base_func = getattr(component, matrix_case, None)
+        if base_func is None:
             raise ValueError(f"Invalid matrix_case {matrix_case}")
         
-        self.component = component
+        self._base_func = base_func
         self.matrix_case = matrix_case
         self.sorted_indices = sorted_indices
 
     def __call__(self, k0: complex, *args, **kwargs) -> np.ndarray:
-        func = getattr(self.component, self.matrix_case)
-        matrix = func(k0, *args, **kwargs)
+
+        matrix = self._base_func(k0, *args, **kwargs)
         idx = self.sorted_indices
-        return matrix[:, idx][idx, :]
+        return matrix[np.ix_(idx, idx)]
 
 def get_permuted_matrix_closure(
     component: Component, matrix_case: str, sorted_indices: list[int]) -> Callable:
