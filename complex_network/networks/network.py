@@ -2767,6 +2767,23 @@ class Network:
 
         return np.array(lengths)
 
+    def get_optical_path_length(self, path_indices, k0: float | complex = 1e7):
+        """Calculate the optical path length along a given path in the network."""
+
+        # The default k value is set to 1e7 must be changed when accounting for dispersion
+        optical_path_length = []
+        for jj, index1 in enumerate(path_indices[:-1]):
+            index2 = path_indices[jj + 1]
+
+            link = self.get_link_by_node_indices((index1, index2))
+            n = link.n(k0)
+            Dn = link.Dn
+            length = link.length
+            optical_path_length.append(length * (n + Dn))
+
+        total_opl = np.sum(optical_path_length)
+        return total_opl
+
 
 # Helper functions outside the Network class that are used for multiprocessing
 # Global placeholders that every worker process can reach
