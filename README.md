@@ -11,6 +11,9 @@ complex_network/
 │   ├── component.py                 # Base class for network components
 │   ├── link.py                      # Waveguides that connect nodes
 │   └── node.py                      # Junction points in the network
+|---detection/                       # Module that looks at sensing in networks
+|   |---compressive_sensing.py       # Sensing algorithms based on compressive sensing
+|   |---graph_search_sensing.py      # Sensing algorithms based on graph searching algorithms
 ├── materials/                       
 │   ├── dielectric.py                # Dielectric material properties
 │   ├── material.py                  # Base class for optical material properties
@@ -25,8 +28,9 @@ complex_network/
 │   ├── link_matrix.py               # Methods for link scattering matrices
 │   └── node_matrix.py               # Methods for node scattering matrices
 ├── ensemble.py                      
-├── Scattering_ensemble.py           # Generating ensemble of scattering matrices stored in HDF5 format                
-└── utils.py                         
+├── scattering_ensemble.py           # Generating ensemble of scattering matrices stored in HDF5 format                
+└── utils.py   
+|___interferometry.py                # Implements various reflectometry methods on the network (OLCR)                      
 ```
 
 ## 🔧 Package versions
