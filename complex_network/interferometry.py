@@ -219,7 +219,7 @@ class OLCR:
             plt.plot(self.opls * 1e6, interferogram, label='Interferogram', color='blue')
 
         if plot_envelope:
-            plt.plot(self.opls * 1e6, self._compute_envelope(smooth_envelope), label='Envelope', color='red')
+            plt.plot(self.opls * 1e6, self._compute_envelope(smooth_envelope), label='Envelope', color='red',lw=2)
 
         if signal_window is not None:
             plt.xlim(signal_window)

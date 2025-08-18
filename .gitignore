@@ -16,3 +16,6 @@ test.py
 test.ipynb
 complex_network.egg-info/
 setup.py
+__pycache__/
+.vscode/
+.path_cache/

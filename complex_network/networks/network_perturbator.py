@@ -7,9 +7,10 @@ from dataclasses import dataclass
 import numpy as np
 from tqdm import tqdm
 
-from complex_network.networks import pole_calculator
-from complex_network.networks.network import Network
-from complex_network.scattering_matrices import link_matrix, node_matrix
+from complex_network.networks import pole_calculator #type: ignore
+from complex_network.networks.network import Network #type: ignore
+from complex_network.scattering_matrices import link_matrix, node_matrix #type:ignore
+from typing import Callable
 
 
 @dataclass
@@ -195,7 +196,45 @@ class NetworkPerturbator:
             new_node_S_mat_params,
         )
         return self.perturbed_network
-    
+
+    def add_perturbation_node(self, link_index:int,
+                            fractional_position: float,
+                            scattering_matrix:Callable | None = None,
+                            scattering_matrix_inverse: Callable | None = None,
+                            scattering_matrix_derivative: Callable | None = None
+                           )->Network:
+        """ Add a perturbation in the form of a node to a fractional position within a link of `link_index`
+            If the scattering matrix isnt provided, a default non-equal splitter is used.
+            1% is reflected and 99% is transmitted to model a weak reflector"""
+        
+        if not 0<fractional_position<1:
+            raise ValueError("Fractional position must be between 0 and 1")
+
+        # If any function is None, set it to sensible defaults
+        if scattering_matrix is None:
+            scattering_matrix = _partial_reflector
+        if scattering_matrix_inverse is None:
+            scattering_matrix_inverse = _partial_reflector_inverse
+        if scattering_matrix_derivative is None:
+            scattering_matrix_derivative = _partial_reflector_derivative
+
+        # Validate the provided callables
+        if not callable(scattering_matrix) or not callable(scattering_matrix_inverse) or not callable(scattering_matrix_derivative):
+            raise TypeError("scattering_matrix, its inverse and derivative must be callable functions of k")
+
+        
+        link = self.perturbed_network.get_link(link_index)
+        # Add the node to the link
+        self.perturbed_network.add_node_to_link(
+            link_index=link_index,
+            fractional_position=fractional_position,
+            new_get_S=scattering_matrix,
+            new_get_S_inv=scattering_matrix_inverse,
+            new_get_dS=scattering_matrix_derivative
+        )
+
+        return self.perturbed_network
+
     # -------------------------------------------------------------------------
     # Pump network with gain
     # -------------------------------------------------------------------------
@@ -557,3 +596,24 @@ class NetworkPerturbator:
             self.update()
 
         return poles_dict, pole_shifts_dict
+
+
+# Helper functions (kept at bottom to keep API class earlier in file)
+def _partial_reflector(k0: float) -> np.ndarray:
+    """Create a partial reflector scattering matrix."""
+    r = 0.01
+    t = 0.99
+    return np.array([[np.sqrt(r), np.sqrt(t)], [np.sqrt(t), -np.sqrt(r)]])
+
+
+def _partial_reflector_inverse(k0: float) -> np.ndarray:
+    """Create an inverse partial reflector scattering matrix.
+        In this case, both will be the same as the partial reflector"""
+    r = 0.01
+    t = 0.99
+    return np.array([[np.sqrt(r), np.sqrt(t)], [np.sqrt(t), -np.sqrt(r)]])
+
+
+def _partial_reflector_derivative(k0: float):
+    """Create a partial reflector scattering matrix derivative."""
+    return np.zeros((2, 2), dtype=complex)  # No derivative for constant S-matrix
