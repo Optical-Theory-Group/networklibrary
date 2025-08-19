@@ -10,7 +10,7 @@ from complex_network.networks.network_spec import NetworkSpec
 from complex_network.interferometry import OLCR
 from multiprocessing import Pool, cpu_count
 from collections import deque
-from complex_network.networks.network_paths import find_paths_to_target_distance
+from complex_network.networks.network_path_search import find_paths_to_target_distance
 
 
 def check_unique_paths(path_results):
@@ -50,60 +50,61 @@ target_link_length = network.get_link_by_node_indices(target_link).length
 target_link_index = network.get_link_by_node_indices(target_link).index
 
 # get the paths and positions
-# for target_opl in target_opls:
-#     path_results = find_paths_to_target_distance(
-#         network=network,
-#         source_node_idx=source_node,
-#         target_link=target_link,
-#         target_distance=target_opl,
-#         max_hops=max_hops,
-#         tolerance=1e-6,
-#         max_bounces=3
-#     )
-
-#     all_paths = []
-#     all_positions = []
-#     for result in path_results:
-#         position = result[1]
-#         path = result[0]
-
-#         all_paths.append(path)
-#         all_positions.append(position)
-
-#         # Make a perturbed network with the node added to that position
-#         # By default, the node is added from pos from the shorter index node
-
-#         ratio = position/ target_link_length
-#         perturbator = NetworkPerturbator(network)
-#         perturbator.add_perturbation_node(link_index=target_link_index, fractional_position=ratio)
-#         after = perturbator.perturbed_network
-
-#         # now, the path, R will be replaced by 10. The first and last element of the path needs to be added by 1
-#         path = [10 if x == 'R' else x for x in path]
-#         path = [10 if x=='T' else x for x in path]
-#         path[0] += 1
-#         path[-1] += 1
-
-        # print(path)
-
-        # path_sum = np.sum(after.get_lengths_along_path(path))
-        # print(path_sum*1e6)
-
-# check if the paths are unique
-path_results = find_paths_to_target_distance(
+for target_opl in target_opls:
+    path_results = find_paths_to_target_distance(
         network=network,
         source_node_idx=source_node,
         target_link=target_link,
-        target_distance=target_opls[0],
+        target_distance=target_opl,
         max_hops=max_hops,
         tolerance=1e-6,
         max_bounces=3
     )
-is_unique, duplicates = check_unique_paths(path_results)
-if not is_unique:
-    print("Found duplicate paths:")
-    for dup in duplicates:
-        print(dup)
 
-if is_unique:
-    print("All paths are unique.")
+    all_paths = []
+    all_positions = []
+    for result in path_results:
+        position = result[1]
+        path = result[0]
+
+        all_paths.append(path)
+        all_positions.append(position)
+
+        # Make a perturbed network with the node added to that position
+        # By default, the node is added from pos from the shorter index node
+
+        ratio = position/ target_link_length
+        perturbator = NetworkPerturbator(network)
+        perturbator.add_perturbation_node(link_index=target_link_index, fractional_position=ratio)
+        after = perturbator.perturbed_network
+
+        # now, the path, R will be replaced by 10. The first and last element of the path needs to be added by 1
+        path = [10 if x == 'R' else x for x in path]
+        path = [10 if x=='T' else x for x in path]
+        path[0] += 1
+        path[-1] += 1
+
+        print(path)
+
+        path_sum = np.sum(after.get_lengths_along_path(path))
+        print(path_sum*1e6)
+        
+print('count = ', len(all_paths))
+# # check if the paths are unique
+# path_results = find_paths_to_target_distance(
+#         network=network,
+#         source_node_idx=source_node,
+#         target_link=target_link,
+#         target_distance=target_opls[0],
+#         max_hops=max_hops,
+#         tolerance=1e-6,
+#         max_bounces=3
+#     )
+# is_unique, duplicates = check_unique_paths(path_results)
+# if not is_unique:
+#     print("Found duplicate paths:")
+#     for dup in duplicates:
+#         print(dup)
+
+# if is_unique:
+#     print("All paths are unique.")

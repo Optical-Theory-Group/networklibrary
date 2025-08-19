@@ -3,7 +3,7 @@
 
 from complex_network.networks.network_spec import NetworkSpec
 from complex_network.networks.network_factory import generate_network
-from complex_network.networks.network_paths import find_paths_to_target_distance
+from complex_network.networks.network_path_search import find_paths_to_target_distance
 
 def test_reflection_validation():
     # Create a test network
