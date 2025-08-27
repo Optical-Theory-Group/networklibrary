@@ -19,3 +19,4 @@ setup.py
 __pycache__/
 .vscode/
 .path_cache/
+.path_cache_detailed_paths/

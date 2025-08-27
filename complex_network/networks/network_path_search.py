@@ -25,6 +25,147 @@ from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Set
 
 import numpy as np
+import tempfile
+
+
+# Data structures for discrete graph search sensing
+@dataclass
+class GraphData:
+    """Lightweight graph representation for multiprocessing."""
+    neighbors: Dict[int, List[int]]
+    link_lengths: Dict[Tuple[int, int], float]
+    internal_links: List[Tuple[int, int]]
+    external_nodes: Set[int]
+    internal_nodes: Set[int]
+
+
+def extract_graph_data(network: Any) -> GraphData:
+    """Extract lightweight graph data from network object for multiprocessing."""
+    neighbors: Dict[int, List[int]] = defaultdict(list)
+    link_lengths: Dict[Tuple[int, int], float] = {}
+    internal_links: List[Tuple[int, int]] = []
+    
+    external_nodes = {node.index for node in network.external_nodes}
+    internal_nodes = {node.index for node in network.internal_nodes}
+    
+    # Process all links
+    for link in network.internal_links + network.external_links:
+        a, b = link.sorted_connected_nodes
+        length = link.length
+        
+        key = _link_key(a, b)
+        link_lengths[key] = length
+        neighbors[int(a)].append(int(b))
+        neighbors[int(b)].append(int(a))
+        
+        if a in internal_nodes and b in internal_nodes:
+            internal_links.append(key)
+    
+    # Ensure deterministic ordering
+    for n in list(neighbors.keys()):
+        neighbors[n] = sorted(set(neighbors[n]))
+    
+    return GraphData(
+        neighbors=dict(neighbors),
+        link_lengths=link_lengths,
+        internal_links=internal_links,
+        external_nodes=external_nodes,
+        internal_nodes=internal_nodes
+    )
+
+
+def _link_key(a: int, b: int) -> Tuple[int, int]:
+    """Generate canonical link key (min, max)."""
+    return (min(a, b), max(a, b))
+
+
+# Discrete path cache functions
+def load_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int) -> Optional[Dict]:
+    """Load detailed path cache for discrete graph search sensing."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
+    if os.path.exists(fn):
+        try:
+            return np.load(fn, allow_pickle=True).item()
+        except Exception:
+            return None
+    return None
+
+
+def save_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int, cache_data: Dict) -> None:
+    """Save detailed path cache for discrete graph search sensing."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
+    
+    # Create a temp file (unique) in same directory
+    fd, tmp_path = tempfile.mkstemp(dir=sub)
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as f:
+            np.save(f, cache_data)
+        os.replace(tmp_path, fn)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
+
+def find_all_paths_bfs(
+    graph: GraphData,
+    start: int,
+    end: int,
+    max_hops: int
+) -> List[Tuple[List[int], float]]:
+    """Find all paths using BFS with the GraphData structure."""
+    return _find_paths_bfs(
+        graph.neighbors,
+        graph.link_lengths,
+        graph.external_nodes,
+        start,
+        end,
+        max_hops
+    )
+
+
+def prepare_discrete_path_cache(
+    graph: GraphData,
+    fingerprint: str,
+    source_idx: int,
+    max_hops: int,
+    force_rebuild: bool = False
+) -> Dict[Tuple[int, int, int], List[Tuple[List[int], float]]]:
+    """Prepare path cache for discrete graph search sensing."""
+    cache_key = f"{fingerprint}_discrete_s{source_idx}_h{max_hops}"
+    
+    if not force_rebuild:
+        cached = load_detailed_path_cache(fingerprint, source_idx, max_hops)
+        if cached is not None:
+            return cached
+    
+    # Build cache by finding paths to all internal nodes
+    path_cache = {}
+    
+    for target in graph.internal_nodes:
+        if target == source_idx:
+            continue
+            
+        # Paths from source to target
+        paths_to = find_all_paths_bfs(graph, source_idx, target, max_hops // 2)
+        if paths_to:
+            path_cache[(source_idx, target, max_hops // 2)] = paths_to
+        
+        # Paths from target back to source
+        paths_from = find_all_paths_bfs(graph, target, source_idx, max_hops // 2)
+        if paths_from:
+            path_cache[(target, source_idx, max_hops // 2)] = paths_from
+    
+    # Save to disk cache
+    save_detailed_path_cache(fingerprint, source_idx, max_hops, path_cache)
+    
+    return path_cache
 
 
 # ____________________________________cache helpers___________________________________________
@@ -97,9 +238,6 @@ def load_hop_counts_cache(fingerprint: str, source_idx: int, target_idx: int, ma
     return None
 
 
-import tempfile
-
-
 def save_path_lengths_cache(fingerprint: str,
                             source_idx: int,
                             target_idx: int,
@@ -170,7 +308,265 @@ def save_hop_counts_cache(fingerprint: str,
         raise
 
 
+def save_scattering_coeffs_cache(fingerprint: str,
+                                 source_idx: int,
+                                 target_idx: int,
+                                 max_hops: int,
+                                 scattering_coeffs: List[float]) -> None:
+    """Atomically save scattering coefficients as a .npy file in the fingerprint cache directory.
+
+    Uses a temp file created via tempfile.mkstemp (in same directory), writes via
+    an open binary file handle (so np.save doesn't add '.npy'), then os.replace.
+    Cleans up on error.
+    """
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"ss_s{source_idx}_t{target_idx}_h{max_hops}.npy")
+    arr = np.array(scattering_coeffs, dtype=float)
+
+    # Create a temp file (unique) in same directory
+    fd, tmp_path = tempfile.mkstemp(dir=sub)
+    # mkstemp returns an open FD; close it and open with python file object instead
+    os.close(fd)
+    try:
+        # Write using open file handle so np.save will not append ".npy"
+        with open(tmp_path, "wb") as f:
+            np.save(f, arr)
+        # Atomic replace (rename across same filesystem)
+        os.replace(tmp_path, fn)
+    except Exception:
+        # cleanup any leftover tmp file
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
+
+def load_scattering_coeffs_cache(fingerprint: str, source_idx: int, target_idx: int, max_hops: int) -> Optional[np.ndarray]:
+    """Load cached scattering coefficients (.npy) for given fingerprint/source/target/hops.
+
+    Returns None if the file isn't present or can't be loaded.
+    """
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"ss_s{source_idx}_t{target_idx}_h{max_hops}.npy")
+    if os.path.exists(fn):
+        try:
+            return np.load(fn)
+        except Exception:
+            return None
+    return None
+
+
 # ________________________Path enumeration_______________________________
+
+def compute_path_scattering_coefficient(path: List[int], 
+                                       neighbors: Dict[int, List[int]], 
+                                       network_nodes: Dict[int, Any],
+                                       external_nodes: Set[int],
+                                       k0: complex = 6.28e6) -> float:
+    """Compute the scattering coefficient for a given path through the network.
+    
+    Args:
+        path: Sequence of node indices representing the path
+        neighbors: Dict mapping node -> list of neighbor nodes (in fixed order)
+        network_nodes: Dict mapping node index -> node object with scattering matrix
+        external_nodes: Set of external node indices
+        k0: Wavenumber for scattering matrix computation
+        
+    Returns:
+        Absolute value of the total scattering coefficient for the path
+    """
+    if len(path) < 2:
+        return 1.0  # No hops, no scattering
+    
+    total_amplitude = 1.0 + 0j  # Start with unit amplitude (complex)
+    
+    # Debug only for short paths to avoid spam
+    debug_this_path = False  # Disable debug output
+    
+    if debug_this_path:
+        print(f"\nDebug: Computing scattering for path {path}")
+    
+    for i in range(len(path) - 1):
+        current_node = path[i]
+        next_node = path[i + 1]
+        
+        # Get the scattering matrix for the current node
+        node_obj = network_nodes[current_node]
+        
+        # Handle both callable functions and numpy arrays
+        if callable(node_obj.get_S):
+            S_matrix = node_obj.get_S(k0)  # Internal nodes: callable function
+            if debug_this_path:
+                print(f"  Node {current_node} (internal): callable S_matrix, shape={S_matrix.shape}")
+        else:
+            S_matrix = node_obj.get_S  # External nodes: numpy array
+            if debug_this_path:
+                print(f"  Node {current_node} (external): array S_matrix, shape={S_matrix.shape}")
+        
+        # Get the neighbor list for port mapping
+        node_neighbors = neighbors[current_node]
+        if debug_this_path:
+            print(f"  Node {current_node} neighbors: {node_neighbors}")
+        
+        # Find output port (where we're going to)
+        try:
+            output_port = node_neighbors.index(next_node)
+        except ValueError:
+            print(f"Error: Node {next_node} not found in neighbors {node_neighbors} of node {current_node}")
+            raise ValueError(f"Node {next_node} not found in neighbors of node {current_node}")
+        
+        # Find input port (where we came from)
+        if i == 0:
+            # First hop: starting from external source
+            if current_node in external_nodes:
+                # For external nodes: signal enters from external side, exits to network side
+                # External nodes typically have 2 ports: port 0 (external) and port 1 (network)
+                # But we need to figure out which port connects to the network
+                # output_port was calculated as the index of next_node in neighbors
+                # For a 2-port external node, if output_port=0, then network port is 1, external port is 0
+                # If neighbors list is [next_node], then output_port=0, so network connection is at matrix port 1
+                input_port = 0  # Always enter from external side (port 0)
+                # Correct the output port: if neighbors index is 0, the actual matrix port for network is 1
+                output_port = 1  # Network side is port 1
+                if debug_this_path:
+                    print(f"  External node: signal enters port 0 (external) -> exits port 1 (network)")
+                    print(f"  Corrected: input_port={input_port}, output_port={output_port}")
+            else:
+                raise ValueError(f"First node {current_node} should be an external node")
+        else:
+            # Subsequent hops: came from previous node
+            prev_node = path[i - 1]
+            try:
+                input_port = node_neighbors.index(prev_node)
+                if debug_this_path:
+                    print(f"  From previous node {prev_node}: input_port={input_port}")
+            except ValueError:
+                print(f"Error: Previous node {prev_node} not found in neighbors {node_neighbors} of node {current_node}")
+                raise ValueError(f"Previous node {prev_node} not found in neighbors of node {current_node}")
+        
+        if debug_this_path:
+            print(f"  Going from port {input_port} to port {output_port}")
+            print(f"  S_matrix:\n{S_matrix}")
+        
+        # Validate matrix dimensions
+        if output_port >= S_matrix.shape[0] or input_port >= S_matrix.shape[1]:
+            print(f"Error: Port indices out of bounds: output_port={output_port}, input_port={input_port}, matrix_shape={S_matrix.shape}")
+            raise ValueError(f"Port indices out of bounds: output_port={output_port}, input_port={input_port}, matrix_shape={S_matrix.shape}")
+        
+        # Get scattering coefficient
+        scattering_coeff = S_matrix[output_port, input_port]
+        if debug_this_path:
+            print(f"  S[{output_port}, {input_port}] = {scattering_coeff}")
+        
+        total_amplitude *= scattering_coeff
+        if debug_this_path:
+            print(f"  Total amplitude after this hop: {total_amplitude}")
+    
+    result = abs(total_amplitude)
+    if debug_this_path:
+        print(f"  Final result: {result}")
+    
+    return result
+
+
+def find_all_path_info_bfs(
+    neighbors: Dict[int, List[int]],
+    link_lengths: Dict[Tuple[int, int], float],
+    external_nodes: Set[int],
+    network_nodes: Dict[int, Any],
+    start: int,
+    end: int,
+    max_hops: int,
+    k0: complex = 6.28e6,
+) -> Tuple[List[float], List[int], List[float], List[List[int]]]:
+    """Breadth-first enumeration of path geometric lengths, hop counts, scattering coefficients, and paths.
+    
+    Key optical network constraints:
+    1. External nodes can only be sources or final destinations
+    2. Paths cannot traverse "through" external nodes, light enters and exists the system through these nodes
+    3. Internal nodes can be revisited multiple times
+    4. Source node can be revisited in internal portions of paths
+    
+    Args:
+        neighbors: Dict mapping node -> list of neighbor nodes
+        link_lengths: Dict mapping (min_node, max_node) -> length
+        external_nodes: Set of external node indices
+        network_nodes: Dict mapping node index -> node object with scattering matrix
+        start: Source node index
+        end: Target node index
+        max_hops: Maximum number of hops to explore
+        k0: Wavenumber for scattering matrix computation
+        
+    Returns:
+        Tuple of (geometric path lengths, hop counts, scattering coefficients, paths) 
+        where ith element in each list corresponds to the same path
+    """
+    if end in external_nodes and end != start:
+        # Cannot reach other external nodes in optical networks
+        return [], [], [], []
+        
+    lengths: List[float] = []
+    hop_counts: List[int] = []
+    scattering_coeffs: List[float] = []
+    paths: List[List[int]] = []
+    
+    # Queue entries: (current_node, hops_so_far, geometric_length, visited_path)
+    queue = deque([(start, 0, 0.0, [start])])
+    
+    while queue:
+        current, hops, geom_len, path = queue.popleft()
+        
+        if hops > max_hops:
+            continue
+            
+        # Check if we've reached the target (with at least one hop)
+        if current == end and hops > 0:
+            lengths.append(geom_len)
+            hop_counts.append(hops)
+            
+            # Compute scattering coefficient for this path
+            try:
+                scatt_coeff = compute_path_scattering_coefficient(path, neighbors, network_nodes, external_nodes, k0)
+                scattering_coeffs.append(scatt_coeff)
+                paths.append(path[:])  # Store a copy of the path
+            except Exception as e:
+                print(f"Warning: Could not compute scattering coefficient for path {path}: {e}")
+                scattering_coeffs.append(0.0)  # Default to 0 if computation fails
+                paths.append(path[:])
+            
+            # Continue exploring from here if target is internal (allows return paths)
+            if end not in external_nodes:
+                pass  # Continue processing below
+            else:
+                continue  # External nodes are terminal
+                
+        # Explore neighbors
+        for neighbor in neighbors.get(current, []):
+            # Skip if this would be too many hops
+            if hops + 1 > max_hops:
+                continue
+                
+            # External node constraints
+            if neighbor in external_nodes:
+                # Can only go to external nodes if:
+                # 1. It's the target we're seeking, OR  
+                # 2. It's the source node and we're doing a return path
+                if neighbor != end and neighbor != start:
+                    continue
+                # Don't traverse through external nodes
+                if neighbor != end and len(path) > 1:
+                    continue
+                    
+            # Calculate link length
+            lk = (min(current, neighbor), max(current, neighbor))
+            seg_len = link_lengths.get(lk, 0.0)
+            
+            new_path = path + [neighbor]
+            queue.append((neighbor, hops + 1, geom_len + seg_len, new_path))
+    
+    return lengths, hop_counts, scattering_coeffs, paths
 
 def find_all_path_lengths_bfs(
     neighbors: Dict[int, List[int]],
@@ -252,44 +648,51 @@ def find_all_path_lengths_bfs(
 
 
 # Worker helper must be top-level so it can be pickled by multiprocessing
-def _compute_target_and_save_star(args: Tuple[int, Dict[int, List[int]], Dict[Tuple[int, int], float], Set[int], int, str, int]):
-    """Unpack args, compute all lengths and hop counts from source->target, save to cache, return (target, count)."""
-    target, neighbors, link_lengths, external_nodes, source_idx, fingerprint, max_hops = args
+def _compute_target_and_save_star(args: Tuple[int, Dict[int, List[int]], Dict[Tuple[int, int], float], Set[int], Dict[int, Any], int, str, int, complex]):
+    """Unpack args, compute all lengths, hop counts, and scattering coeffs from source->target, save to cache, return (target, count)."""
+    target, neighbors, link_lengths, external_nodes, network_nodes, source_idx, fingerprint, max_hops, k0 = args
     
-    lengths, hop_counts = find_all_path_lengths_bfs(
-        neighbors, link_lengths, external_nodes, 
-        source_idx, target, max_hops
+    lengths, hop_counts, scattering_coeffs, paths = find_all_path_info_bfs(
+        neighbors, link_lengths, external_nodes, network_nodes,
+        source_idx, target, max_hops, k0
     )
     
     if lengths:  # Only save non-empty results
         save_path_lengths_cache(fingerprint, source_idx, target, max_hops, lengths)
         save_hop_counts_cache(fingerprint, source_idx, target, max_hops, hop_counts)
+        save_scattering_coeffs_cache(fingerprint, source_idx, target, max_hops, scattering_coeffs)
     
     return target, len(lengths)
 
 
-def compute_and_cache_all_path_lengths(network: Any, source_node_idx: int, fingerprint: str, max_hops: int, n_workers: Optional[int] = None, use_processes: bool = True) -> None:
-    """Compute path-length distributions and hop counts from source_node_idx to every reachable node.
+def compute_cache_all_path_info(network: Any, source_node_idx: int, fingerprint: str, max_hops: int, k0: complex = 6.28e6, n_workers: Optional[int] = None, use_processes: bool = True) -> None:
+    """Compute path-length distributions, hop counts, and scattering coefficients from source_node_idx to every reachable node.
 
     Results are saved per-target as .npy files inside the cache fingerprint directory.
-    Path lengths and hop counts are saved as pl_s{source}_t{target}_h{max_hops}.npy and hc_s{source}_t{target}_h{max_hops}.npy.
+    Path lengths, hop counts, and scattering coefficients are saved as:
+    - pl_s{source}_t{target}_h{max_hops}.npy (path lengths)
+    - hc_s{source}_t{target}_h{max_hops}.npy (hop counts) 
+    - ss_s{source}_t{target}_h{max_hops}.npy (scattering coefficients)
     Only computes paths to internal nodes (external nodes other than source are unreachable).
 
     Parameters
     ----------
     network: object
-        Network object
+        Network object with nodes and links
     source_node_idx: int
         Source node index (should be external node)
     fingerprint: str
         Cache fingerprint to write results under
     max_hops: int
         Maximum number of hops to explore
+    k0: complex
+        Wavenumber for scattering matrix computation (default: 6.28e6)
     n_workers: Optional[int]
         Number of parallel workers to use. If None, uses max(1, cpu_count()-2).
     use_processes: bool
         If True, uses ProcessPoolExecutor (default). If False, uses ThreadPoolExecutor.
     """
+
     # Get node types directly from the network object
     external_nodes = {node.index for node in network.external_nodes}
     internal_nodes = {node.index for node in network.internal_nodes}
@@ -303,6 +706,11 @@ def compute_and_cache_all_path_lengths(network: Any, source_node_idx: int, finge
     # Build lightweight graph representation
     neighbors: Dict[int, List[int]] = defaultdict(list)
     link_lengths: Dict[Tuple[int, int], float] = {}
+    
+    # Build node mapping for scattering matrices
+    network_nodes: Dict[int, Any] = {}
+    for node in network.external_nodes + network.internal_nodes:
+        network_nodes[node.index] = node
 
     # Collect links directly from network properties
     links = network.internal_links + network.external_links
@@ -326,8 +734,24 @@ def compute_and_cache_all_path_lengths(network: Any, source_node_idx: int, finge
 
     # Only compute paths to internal nodes (external nodes other than source are unreachable)
     targets = sorted(internal_nodes)
+
+    # Filter out targets that have already been cached
+    missing_targets = []
+    for target in targets:
+        path_cache = load_path_cache(fingerprint, source_node_idx, target, max_hops)
+        hop_cache = load_hop_counts_cache(fingerprint, source_node_idx, target, max_hops)
+        scatt_cache = load_scattering_coeffs_cache(fingerprint, source_node_idx, target, max_hops)
+        if path_cache is None or hop_cache is None or scatt_cache is None:
+            missing_targets.append(target)
+
+    if not missing_targets:
+        print("All target paths are already cached.")
+        return
     
-    print(f"Computing paths from source {source_node_idx} to {len(targets)} internal nodes")
+    print(f'Found {len(missing_targets)} targets to compute from source {source_node_idx} with max_hops {max_hops}')
+
+    print(f"Computing paths from source {source_node_idx} to {len(missing_targets)} internal nodes")
+    print('Generating paths may take a while, Please Wait .... ')
 
     # Determine worker count
     if n_workers is None:
@@ -342,8 +766,8 @@ def compute_and_cache_all_path_lengths(network: Any, source_node_idx: int, finge
 
     # Prepare arg tuples for worker function
     args_list = [
-        (target, dict(neighbors), dict(link_lengths), external_nodes, 
-         source_node_idx, fingerprint, max_hops)
+        (target, dict(neighbors), dict(link_lengths), external_nodes, dict(network_nodes),
+         source_node_idx, fingerprint, max_hops, k0)
         for target in targets
     ]
 
@@ -358,9 +782,13 @@ def compute_and_cache_all_path_lengths(network: Any, source_node_idx: int, finge
         # Process results as they complete
         for target, count in ex.map(_compute_target_and_save_star, args_list):
             if count > 0:
-                print(f"Computed and cached path lengths and hop counts from source {source_node_idx} -> target {target}: {count} paths")
+                print(f"Computed and cached path lengths, hop counts, and scattering coeffs from source {source_node_idx} -> target {target}: {count} paths")
             else:
                 print(f"No valid paths found from source {source_node_idx} -> target {target}")
+
+
+# Backward compatibility alias
+compute_and_cache_all_path_lengths = compute_cache_all_path_info
 
 
 #________________________Detailed Path Enumerations_______________________________________________________
@@ -777,4 +1205,5 @@ def _find_paths_bfs(
             queue.append((neighbor, new_path, geom_len + seg_len))
     
     return paths
+
 
