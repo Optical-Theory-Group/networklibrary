@@ -349,10 +349,6 @@ def _solve_for_single_link(
     return best
 
 
-# ---------------------
-# Public OO API
-# ---------------------
-
 class DiscreteGraphSearchSensing:
     """
     Object oriented entry point for discrete graph search sensing.
@@ -607,9 +603,7 @@ def get_perturbation_candidates_for_opl(
         return []
 
 
-# ---------------------
-# Example usage and testing
-# ---------------------
+#_______________Example Testing ____________________________________
 
 if __name__ == "__main__":
     import time

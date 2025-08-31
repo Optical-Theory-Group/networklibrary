@@ -59,7 +59,7 @@ def _compute_weighted_combinations(centers_a, centers_b, hist_a, hist_b, T_min, 
         return None, None, None
     
     # Scattering parameters
-    alpha = 0.2  # Signal reduction factor per scattering event
+    alpha = 0.43  # Signal reduction factor per scattering event
     
     # First pass: find all valid combinations and collect all hop counts to find global minimum
     all_hop_counts = set()
@@ -150,9 +150,9 @@ def _compute_weighted_combinations(centers_a, centers_b, hist_a, hist_b, T_min, 
                     hop_weight = alpha ** hops
                     calculated_strength += num_paths * hop_weight
 
-                print(f"center: {center:.2e}, strength={calculated_strength:.2e}", end="")
+                print(f"center: {center*1e6:.2f} µm, strength={calculated_strength:.2e}", end="")
             else:
-                print(f"center: {center:.2e}, strength={strength:.2e}", end="")
+                print(f"center: {center*1e6:.2f} µm, strength={strength:.2e}", end="")
             
             # Sort paths by hop count for consistent output
             sorted_paths = sorted(details['paths'].items())
@@ -171,6 +171,58 @@ def _compute_weighted_combinations(centers_a, centers_b, hist_a, hist_b, T_min, 
 
     return final_centers, final_strengths, bin_details
     
+def _create_fixed_position_bins(link_length: float, bin_size: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Create fixed bins from 0 to link_length with given bin_size.
+    
+    Args:
+        link_length: Length of the link (L)
+        bin_size: Size of each bin
+    
+    Returns:
+        bin_edges, bin_centers: Arrays of bin edges and centers
+    """
+    # Create bins from 0 to link_length
+    num_bins = int(np.ceil(link_length / bin_size))
+    bin_edges = np.linspace(0, num_bins * bin_size, num_bins + 1)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    return bin_edges, bin_centers
+
+def _bin_x_positions_with_strengths(x_positions: np.ndarray, strengths: np.ndarray, 
+                                  bin_edges: np.ndarray, bin_centers: np.ndarray,
+                                  link_length: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Bin x positions into fixed bins and aggregate their strengths.
+    
+    Args:
+        x_positions: Array of x positions to bin
+        strengths: Corresponding strengths for each x position
+        bin_edges: Fixed bin edges from 0 to L
+        bin_centers: Fixed bin centers
+        link_length: Length of the link for filtering valid positions
+    
+    Returns:
+        non_zero_centers, non_zero_strengths: Centers and strengths of non-zero bins
+    """
+    if len(x_positions) == 0 or len(strengths) == 0:
+        return np.array([]), np.array([])
+    
+    # Filter x positions to be within [0, link_length]
+    valid_mask = (x_positions >= 0) & (x_positions <= link_length)
+    valid_x = x_positions[valid_mask]
+    valid_strengths = strengths[valid_mask]
+    
+    if len(valid_x) == 0:
+        return np.array([]), np.array([])
+    
+    # Bin the valid x positions with their strengths
+    binned_strengths, _ = np.histogram(valid_x, bins=bin_edges, weights=valid_strengths)
+    
+    # Filter out bins with zero strength
+    non_zero_mask = binned_strengths > 0
+    non_zero_centers = bin_centers[non_zero_mask]
+    non_zero_strengths = binned_strengths[non_zero_mask]
+    
+    return non_zero_centers, non_zero_strengths
+
 def _plot_solutions(network:Network, target_link:Tuple[int, int], solutions:np.ndarray, color:str = 'r',marker="x"):
     """This plots the suspected positions on the link that might correpsond to the actual point on the network"""
     # plt.figure(figsize=(10, 10), dpi=200)
@@ -218,6 +270,11 @@ class OptimizedSolver:
         # Get the node indices of the target link
         (node_a, node_b) = target_link
         target_link_length = self.network.get_link_by_node_indices((node_a, node_b)).length
+
+        # Create fixed bins from 0 to L
+        bin_edges, bin_centers = _create_fixed_position_bins(target_link_length, bin_size)
+        print(f"\nFixed bins from 0 to {target_link_length*1e6:.2f} µm with bin size {bin_size*1e6:.2f} µm")
+        print(f"Number of bins: {len(bin_centers)}")
 
         # Load all the distances and hop counts
         path_distances_to_a = load_path_cache(self.network_spec_fingerprint, source_idx, node_a, self.max_hops)
@@ -308,56 +365,98 @@ class OptimizedSolver:
             bin_size=bin_size
         )
 
-        # Print lengths for verification
-        print(f"Centers_aa: {len(centers_aa) if centers_aa is not None else 'None'}")
-        print(f"Centers_ab: {len(centers_ab) if centers_ab is not None else 'None'}")
-        print(f"Centers_bb: {len(centers_bb) if centers_bb is not None else 'None'}")
-        print(f"Strengths_aa: {len(strengths_aa) if strengths_aa is not None else 'None'}")
-        print(f"Strengths_ab: {len(strengths_ab) if strengths_ab is not None else 'None'}")
-        print(f"Strengths_bb: {len(strengths_bb) if strengths_bb is not None else 'None'}")
-
-        # I need to find the x values that will add upto target_OPLS
+        # Calculate x values, handling None cases
         # For aa-> x = (target_opls - centers_aa) / 2
-        # For bb-> x = target_link_length - (target_opls + centers_bb) / 2
+        # For bb-> x = target_link_length - (target_opls - centers_bb) / 2
         # for ab-> 
         #   reflection_first transmission second:
         #       x = (target_opls-centers_ab-target_link_length) / 2
         #   transmission_first reflection_second:
         #       x = (centers_ab + 3*target_link_length - target_opls) / 2
-
-        # Calculate x values, handling None cases
         x_aa = (target_opls - centers_aa) / 2 if centers_aa is not None else np.array([])
         x_ab = (target_opls - centers_ab - target_link_length) / 2 if centers_ab is not None else np.array([])
         x_ba = (centers_ab + 3*target_link_length - target_opls) / 2 if centers_ab is not None else np.array([])
         x_bb = target_link_length - (target_opls - centers_bb) / 2 if centers_bb is not None else np.array([])
 
-        # Print positions mapped to centers for each case
-        if centers_aa is not None and len(centers_aa) > 0:
-            print("\nCase AA positions (center -> position, strength):")
-            for i, c in enumerate(centers_aa):
-                pos = x_aa[i]
-                s = strengths_aa[i] if strengths_aa is not None and i < len(strengths_aa) else None
-                print(f"  center={c:.2e} -> x={pos:.2e}, strength={s if s is None else f'{s:.2e}'}")
+        # Bin x positions into fixed bins and get non-zero bins with strengths
+        print("\n=== Binning x positions into fixed bins ===")
+        
+        # Case AA
+        aa_centers, aa_strengths = _bin_x_positions_with_strengths(
+            x_aa, strengths_aa if strengths_aa is not None else np.array([]), 
+            bin_edges, bin_centers, target_link_length
+        )
+        
+        # Case BB  
+        bb_centers, bb_strengths = _bin_x_positions_with_strengths(
+            x_bb, strengths_bb if strengths_bb is not None else np.array([]), 
+            bin_edges, bin_centers, target_link_length
+        )
+        
+        # Case AB (reflection first)
+        ab_centers, ab_strengths = _bin_x_positions_with_strengths(
+            x_ab, strengths_ab if strengths_ab is not None else np.array([]), 
+            bin_edges, bin_centers, target_link_length
+        )
+        
+        # Case BA (transmission first)  
+        ba_centers, ba_strengths = _bin_x_positions_with_strengths(
+            x_ba, strengths_ab if strengths_ab is not None else np.array([]), 
+            bin_edges, bin_centers, target_link_length
+        )
 
-        if centers_bb is not None and len(centers_bb) > 0:
-            print("\nCase BB positions (center -> position, strength):")
-            for i, c in enumerate(centers_bb):
-                pos = x_bb[i]
-                s = strengths_bb[i] if strengths_bb is not None and i < len(strengths_bb) else None
-                print(f"  center={c:.2e} -> x={pos:.2e}, strength={s if s is None else f'{s:.2e}'}")
+        # Combine all non-zero bins
+        all_centers = []
+        all_strengths = []
+        
+        if len(aa_centers) > 0:
+            all_centers.extend(aa_centers)
+            all_strengths.extend(aa_strengths)
+            
+        if len(bb_centers) > 0:
+            all_centers.extend(bb_centers)
+            all_strengths.extend(bb_strengths)
+            
+        if len(ab_centers) > 0:
+            all_centers.extend(ab_centers)
+            all_strengths.extend(ab_strengths)
+            
+        if len(ba_centers) > 0:
+            all_centers.extend(ba_centers)
+            all_strengths.extend(ba_strengths)
 
-        if centers_ab is not None and len(centers_ab) > 0:
-            print("\nCase AB positions (center -> pos_reflect_first, pos_transmit_first, strength):")
-            for i, c in enumerate(centers_ab):
-                pos_reflect = x_ab[i]
-                pos_transmit = x_ba[i]
-                s = strengths_ab[i] if strengths_ab is not None and i < len(strengths_ab) else None
-                print(f"  center={c:.2e} -> reflect_x={pos_reflect:.2e}, transmit_x={pos_transmit:.2e}, strength={s if s is None else f'{s:.2e}'}")
-        # Concatenate all the results as x, filtering out empty arrays
+        # Aggregate strengths for bins that appear multiple times
+        if all_centers:
+            unique_centers = np.unique(all_centers)
+            aggregated_strengths = np.zeros(len(unique_centers))
+            
+            for center, strength in zip(all_centers, all_strengths):
+                idx = np.where(unique_centers == center)[0][0]
+                aggregated_strengths[idx] += strength
+            
+            # Filter out zero strengths
+            non_zero_mask = aggregated_strengths > 0
+            final_centers = unique_centers[non_zero_mask]
+            final_strengths = aggregated_strengths[non_zero_mask]
+            
+            # Sort by position
+            sort_idx = np.argsort(final_centers)
+            final_centers = final_centers[sort_idx]
+            final_strengths = final_strengths[sort_idx]
+        else:
+            final_centers = np.array([])
+            final_strengths = np.array([])
+
+        # Print results
+        print(f"\nFinal binned results ({len(final_centers)} non-zero bins):")
+        for center, strength in zip(final_centers, final_strengths):
+            print(f"  Bin center: {center*1e6:.2f} µm, Strength: {strength:.2e}")
+
+        # Concatenate all the x values for compatibility (optional)
         x_arrays = [arr for arr in [x_aa, x_ab, x_ba, x_bb] if len(arr) > 0]
         x = np.concatenate(x_arrays) if x_arrays else np.array([])
 
-        return (x_aa, x_bb, x_ab, x_ba, x)
+        return (final_centers, final_strengths, x_aa, x_bb, x_ab, x_ba, x)
 
 if __name__ == "__main__":
     seed = 10
@@ -366,7 +465,6 @@ if __name__ == "__main__":
 
     wavelength = 1000e-9
     k = 2 * np.pi / wavelength
-    use_mp = True
 
     spec = NetworkSpec(
         num_external_nodes=ne,
@@ -388,14 +486,7 @@ if __name__ == "__main__":
     plt.figure(figsize=(10, 10), dpi=200)
     network.draw(show_internal_indices=True, show_external_indices=True)
 
-    (x_aa, x_bb, x_ab, x_ba,x) = d._single_link_solver(target_opls=target_pls, source_idx=10, target_link=(2,8), bin_size=1e-6)
-
-    # if an element in x is within 0.5um of 46.6e-6, the only print that path and its strength
-    # if np.any(np.abs(x - 46.6e-6) < 0.5e-6):
-    #     print("Found paths near 46.6um:")
-    #     for i, pos in enumerate(x):
-    #         if np.abs(pos - 46.6e-6) < 0.5e-6:
-    #             print(f"  Path {i}: x={pos:.2e}, strength={strengths[i] if strengths is not None and i < len(strengths) else None}")
+    (final_centers, final_strengths, x_aa, x_bb, x_ab, x_ba, x) = d._single_link_solver(target_opls=target_pls, source_idx=10, target_link=(2,8), bin_size=1e-6)
 
     # _plot_solutions(network, (2, 8), x, color='r',marker="o")
     # plt.savefig(os.path.join(os.getcwd(), "test.png"))

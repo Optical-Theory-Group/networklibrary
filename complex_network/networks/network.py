@@ -2767,6 +2767,11 @@ class Network:
 
         return np.array(lengths)
 
+    def get_path_length(self, path_indices):
+        """Calculate the total length of a given path in the network."""
+        lengths = self.get_lengths_along_path(path_indices)
+        return np.sum(lengths)
+
     def get_optical_path_length(self, path_indices, k0: float | complex = 1e7):
         """Calculate the optical path length along a given path in the network."""
 
