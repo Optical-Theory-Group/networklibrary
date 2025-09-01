@@ -10,6 +10,7 @@ from collections import deque
 from complex_network.components.link import Link
 from complex_network.components.node import Node
 from complex_network.scattering_matrices import link_matrix, node_matrix
+from typing import Tuple, List
 
 from multiprocessing import Pool, cpu_count
 
@@ -360,10 +361,9 @@ class Network:
         self.node_dict = new_node_dict
         self.link_dict = new_link_dict
 
-    # -------------------------------------------------------------------------
-    #  Altering the geometry of the network
-    # -------------------------------------------------------------------------
 
+    #  _________________Altering the geometry of the network____________________________
+ 
     def add_node_to_link(
         self,
         link_index: int,
@@ -722,6 +722,278 @@ class Network:
             link.get_dS = (
                 link_matrix.get_propagation_matrix_derivative_closure(link)
             )
+
+    def add_node(self, 
+                 node_position: Tuple[float, float],
+                 node_connections: List[int],
+                 node_type: str = "internal",
+                 new_get_S: Callable | None = None,
+                 new_get_S_inv: Callable | None = None,
+                 new_get_dS: Callable | None = None
+                 )->None:
+        
+        """ This method adds a node to the position (x,y) and connects them to the nodes listed in
+             node_connections
+            parameters:
+             node_position: Tuple[float, float]  position of the newly added node in the form (x,y)
+             node_connections: List[int]  list of indices the newly added node will be connected to
+             node_type: str  type of the node (internal or external)
+             new_get_S: Callable | None  optional function to compute the S matrix
+             new_get_S_inv: Callable | None  optional function to compute the inverse S matrix
+             new_get_dS: Callable | None  optional function to compute the derivative S matrix
+             """
+        
+        # Validate inputs
+        if not node_connections:
+            raise ValueError("node_connections cannot be empty")
+        
+        for node_index in node_connections:
+            if node_index not in self.node_dict:
+                raise ValueError(f"Node with index {node_index} does not exist to connect the new node to it")
+        
+        # Give default values if none are passed
+        if new_get_S is None:
+            from complex_network.scattering_matrices import node_matrix
+            new_get_S = node_matrix.get_constant_node_S_closure(
+                "neumann", len(node_connections), {}
+            )
+        if new_get_S_inv is None:
+            new_get_S_inv = node_matrix.get_inverse_matrix_closure(new_get_S)
+        if new_get_dS is None:
+            new_get_dS = node_matrix.get_zero_matrix_closure(len(node_connections))
+        
+        # Create new node
+        new_node_index = self.num_nodes
+        new_node = Node(
+            new_node_index,
+            node_type,
+            node_position,
+            data={
+                "get_S": new_get_S,
+                "get_S_inv": new_get_S_inv,
+                "get_dS": new_get_dS,
+                "S_mat_type": "neumann",
+                "S_mat_params": {},
+            },
+        )
+        
+        # Set up node properties
+        new_node.sorted_connected_nodes = sorted(node_connections)
+        new_node.num_connect = len(node_connections)
+        new_node.inwave = {node_idx: 0 + 0j for node_idx in node_connections}
+        new_node.outwave = {node_idx: 0 + 0j for node_idx in node_connections}
+        new_node.inwave_np = np.zeros(len(node_connections), dtype=np.complex128)
+        new_node.outwave_np = np.zeros(len(node_connections), dtype=np.complex128)
+        
+        # Add node to network
+        self.node_dict[new_node_index] = new_node
+        
+        # Create links to connected nodes
+        new_links = []
+        for connected_node_index in node_connections:
+            connected_node = self.get_node(connected_node_index)
+            
+            # Create new link
+            new_link_index = self.num_links + len(new_links)
+            new_link = Link(
+                new_link_index, 
+                "internal", 
+                (new_node_index, connected_node_index)
+            )
+            
+            # Calculate link length
+            new_link.length = np.linalg.norm(
+                new_node.position - connected_node.position
+            )
+            new_link.sorted_connected_nodes = sorted([new_node_index, connected_node_index])
+            new_link.inwave = {
+                new_node_index: 0 + 0j,
+                connected_node_index: 0 + 0j,
+            }
+            new_link.outwave = {
+                new_node_index: 0 + 0j,
+                connected_node_index: 0 + 0j,
+            }
+            new_link.inwave_np = np.array([0 + 0j, 0 + 0j])
+            new_link.outwave_np = np.array([0 + 0j, 0 + 0j])
+            
+            # Set up link scattering matrices
+            new_link.get_S = link_matrix.get_propagation_matrix_closure(new_link)
+            new_link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(new_link)
+            new_link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(new_link)
+            
+            new_links.append(new_link)
+            
+            # Update connected node properties
+            connected_node.sorted_connected_nodes.append(new_node_index)
+            connected_node.sorted_connected_nodes.sort()
+            connected_node.sorted_connected_links.append(new_link_index)
+            connected_node.sorted_connected_links.sort()
+            connected_node.num_connect += 1
+            connected_node.inwave[new_node_index] = 0 + 0j
+            connected_node.outwave[new_node_index] = 0 + 0j
+            
+            # Update numpy arrays for connected node
+            connected_node.inwave_np = np.zeros(connected_node.num_connect, dtype=np.complex128)
+            connected_node.outwave_np = np.zeros(connected_node.num_connect, dtype=np.complex128)
+            
+            # Update connected node's scattering matrices to handle new dimensionality
+            # Generate new scattering matrices for the increased number of connections
+            from complex_network.scattering_matrices import node_matrix
+            connected_node.get_S = node_matrix.get_constant_node_S_closure(
+                connected_node.S_mat_type, connected_node.num_connect, connected_node.S_mat_params
+            )
+            connected_node.get_S_inv = node_matrix.get_inverse_matrix_closure(connected_node.get_S)
+            connected_node.get_dS = node_matrix.get_zero_matrix_closure(connected_node.num_connect)
+        
+        # Set up new node's connected links list
+        new_node.sorted_connected_links = sorted([link.index for link in new_links])
+        
+        # Add links to network
+        for link in new_links:
+            self.link_dict[link.index] = link
+        
+        # Update network matrices and indices
+        self.reset_dict_indices()
+        self._reset_fields()
+        self._set_matrix_calc_utils()
+        
+        # Fix any nodes that may have inconsistent scattering matrix settings
+        # and regenerate all scattering matrices to ensure consistency
+        # This must be done AFTER all index resets to override any permutation matrices
+        from complex_network.scattering_matrices import node_matrix
+        for node in self.nodes:
+            # Ensure we have proper attributes
+            if not hasattr(node, 'S_mat_type') or node.S_mat_type == "custom":
+                if not hasattr(node, 'S_mat_params') or "S_mat" not in node.S_mat_params:
+                    node.S_mat_type = "neumann"
+            if not hasattr(node, 'S_mat_params'):
+                node.S_mat_params = {}
+            
+            # Completely replace the scattering matrix functions to override any permutation matrices
+            node.get_S = node_matrix.get_constant_node_S_closure(
+                node.S_mat_type, node.num_connect, node.S_mat_params
+            )
+            node.get_S_inv = node_matrix.get_inverse_matrix_closure(node.get_S)
+            node.get_dS = node_matrix.get_zero_matrix_closure(node.num_connect)
+        
+        return None
+        
+    def add_link(self,
+                link_connections: List[Tuple[int, int]]
+                ) -> None:
+        
+        """ Adds the links described in the link_connections list to the network
+            parameters:
+             link_connections: List[Tuple[int, int]]  list of tuples in the form (node1_index, node2_index)
+             representing the links to be added
+            """
+        
+        # Validate inputs
+        if not link_connections:
+            raise ValueError("link_connections cannot be empty")
+        
+        for node1_index, node2_index in link_connections:
+            if node1_index not in self.node_dict:
+                raise ValueError(f"Node with index {node1_index} does not exist")
+            if node2_index not in self.node_dict:
+                raise ValueError(f"Node with index {node2_index} does not exist")
+            if node1_index == node2_index:
+                raise ValueError("Cannot create link between a node and itself")
+            
+            # Check if link already exists
+            for existing_link in self.links:
+                if (existing_link.node_indices == (node1_index, node2_index) or 
+                    existing_link.node_indices == (node2_index, node1_index)):
+                    raise ValueError(f"Link between nodes {node1_index} and {node2_index} already exists")
+        
+        new_links = []
+        
+        for i, (node1_index, node2_index) in enumerate(link_connections):
+            node1 = self.get_node(node1_index)
+            node2 = self.get_node(node2_index)
+            
+            # Create new link
+            new_link_index = self.num_links + len(new_links)
+            new_link = Link(
+                new_link_index,
+                "internal",  # Default to internal links
+                (node1_index, node2_index)
+            )
+            
+            # Calculate link length
+            new_link.length = np.linalg.norm(node1.position - node2.position)
+            new_link.sorted_connected_nodes = sorted([node1_index, node2_index])
+            new_link.inwave = {
+                node1_index: 0 + 0j,
+                node2_index: 0 + 0j,
+            }
+            new_link.outwave = {
+                node1_index: 0 + 0j,
+                node2_index: 0 + 0j,
+            }
+            new_link.inwave_np = np.array([0 + 0j, 0 + 0j])
+            new_link.outwave_np = np.array([0 + 0j, 0 + 0j])
+            
+            # Set up link scattering matrices
+            new_link.get_S = link_matrix.get_propagation_matrix_closure(new_link)
+            new_link.get_S_inv = link_matrix.get_propagation_matrix_inverse_closure(new_link)
+            new_link.get_dS = link_matrix.get_propagation_matrix_derivative_closure(new_link)
+            
+            new_links.append(new_link)
+            
+            # Update both connected nodes
+            for node in [node1, node2]:
+                other_node_index = node2_index if node.index == node1_index else node1_index
+                
+                # Add to connected nodes and links lists
+                if other_node_index not in node.sorted_connected_nodes:
+                    node.sorted_connected_nodes.append(other_node_index)
+                    node.sorted_connected_nodes.sort()
+                    node.num_connect += 1
+                    
+                node.sorted_connected_links.append(new_link_index)
+                node.sorted_connected_links.sort()
+                
+                # Update wave dictionaries
+                if other_node_index not in node.inwave:
+                    node.inwave[other_node_index] = 0 + 0j
+                if other_node_index not in node.outwave:
+                    node.outwave[other_node_index] = 0 + 0j
+                
+                # Update numpy arrays
+                node.inwave_np = np.zeros(node.num_connect, dtype=np.complex128)
+                node.outwave_np = np.zeros(node.num_connect, dtype=np.complex128)
+        
+        # Add all new links to network
+        for link in new_links:
+            self.link_dict[link.index] = link
+        
+        # Update network matrices and indices
+        self.reset_dict_indices()
+        self._reset_fields()
+        self._set_matrix_calc_utils()
+        
+        # Fix any nodes that may have inconsistent scattering matrix settings
+        # and regenerate all scattering matrices to ensure consistency
+        # This must be done AFTER all index resets to override any permutation matrices
+        from complex_network.scattering_matrices import node_matrix
+        for node in self.nodes:
+            # Ensure we have proper attributes
+            if not hasattr(node, 'S_mat_type') or node.S_mat_type == "custom":
+                if not hasattr(node, 'S_mat_params') or "S_mat" not in node.S_mat_params:
+                    node.S_mat_type = "neumann"
+            if not hasattr(node, 'S_mat_params'):
+                node.S_mat_params = {}
+            
+            # Completely replace the scattering matrix functions to override any permutation matrices
+            node.get_S = node_matrix.get_constant_node_S_closure(
+                node.S_mat_type, node.num_connect, node.S_mat_params
+            )
+            node.get_S_inv = node_matrix.get_inverse_matrix_closure(node.get_S)
+            node.get_dS = node_matrix.get_zero_matrix_closure(node.num_connect)
+        
+        return None
 
     # -------------------------------------------------------------------------
     #  Direct scattering methods
