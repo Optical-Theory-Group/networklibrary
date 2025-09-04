@@ -480,7 +480,7 @@ if __name__ == "__main__":
     network = generate_network(spec)
 
     d = OptimizedSolver(network, spec, [10], 10)
-    target_opls = 3041.56083122e-6
+    target_opls = 311.90623812e-6
     target_pls = target_opls / 1.5
 
     plt.figure(figsize=(10, 10), dpi=200)

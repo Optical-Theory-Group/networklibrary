@@ -605,11 +605,196 @@ def get_perturbation_candidates_for_opl(
 
 #_______________Example Testing ____________________________________
 
+def run_random_trials(net, source_node, links, measured_opls, n_trials=10, **kwargs):
+    """
+    Run random trials where one OPL measurement is used for candidate generation
+    and the rest are used for validation.
+    
+    Args:
+        net: Network object
+        source_node: Source node index
+        links: List of link tuples
+        measured_opls: Array of measured OPL values
+        n_trials: Number of random trials to perform
+        **kwargs: Additional parameters for the sensor
+    
+    Returns:
+        Dictionary with trial results and best candidate information
+    """
+    import random
+    
+    trial_results = []
+    all_candidates = {}  # Track candidates found for each link across all trials
+    
+    sensor = DiscreteGraphSearchSensing(net, source_node, spec=kwargs.get('spec'))
+    
+    print(f"Running {n_trials} random trials...")
+    print(f"Total OPL measurements available: {len(measured_opls)}")
+    print(f"Each trial: 1 for candidate generation, {len(measured_opls)-1} for validation")
+    print("-" * 70)
+    
+    for trial in range(n_trials):
+        print(f"\nTrial {trial + 1}/{n_trials}")
+        
+        # Randomly select one OPL for candidate generation
+        candidate_idx = random.randint(0, len(measured_opls) - 1)
+        first_peak = measured_opls[candidate_idx]
+        
+        # Use remaining OPLs for validation
+        validation_peaks = np.concatenate([
+            measured_opls[:candidate_idx], 
+            measured_opls[candidate_idx+1:]
+        ])
+        
+        print(f"  Candidate OPL: {first_peak*1e6:.2f} μm (index {candidate_idx})")
+        print(f"  Validation OPLs: {len(validation_peaks)} measurements")
+        
+        # Create provider function for this trial
+        def trial_provider(_link):
+            return np.concatenate([[first_peak], validation_peaks])
+        
+        # Run analysis for all links
+        trial_start = time.time()
+        results = sensor.find_best_for_all_links(
+            links, trial_provider,
+            max_hops=kwargs.get('max_hops', 12),
+            n_index=kwargs.get('n_index', 1.5),
+            tolerance=kwargs.get('tolerance', 1e-6),
+            max_bounces=kwargs.get('max_bounces', 2),
+            parallel=kwargs.get('parallel', True),
+            debug=False
+        )
+        trial_time = time.time() - trial_start
+        
+        # Collect results for this trial
+        trial_result = {
+            'trial': trial + 1,
+            'candidate_opl': first_peak,
+            'candidate_idx': candidate_idx,
+            'validation_opls': validation_peaks,
+            'link_results': {},
+            'best_link': None,
+            'best_score': 0,
+            'best_location': None,
+            'processing_time': trial_time
+        }
+        
+        # Process results for each link
+        for link in links:
+            link_result = results.get(tuple(link), {})
+            explained_count = link_result.get('explained_count', 0)
+            best_location = link_result.get('best_location')
+            
+            trial_result['link_results'][tuple(link)] = {
+                'explained_count': explained_count,
+                'best_location': best_location,
+                'unexplained_opls': len(link_result.get('unexplained_opls', []))
+            }
+            
+            # Track best result for this trial
+            if explained_count > trial_result['best_score']:
+                trial_result['best_score'] = explained_count
+                trial_result['best_link'] = tuple(link)
+                trial_result['best_location'] = best_location
+            
+            # Accumulate candidates across all trials
+            if tuple(link) not in all_candidates:
+                all_candidates[tuple(link)] = []
+            
+            if best_location is not None:
+                all_candidates[tuple(link)].append({
+                    'trial': trial + 1,
+                    'location': best_location,
+                    'score': explained_count,
+                    'candidate_opl': first_peak
+                })
+        
+        trial_results.append(trial_result)
+        
+        print(f"  Best link: {trial_result['best_link']} (score: {trial_result['best_score']})")
+        print(f"  Best location: {trial_result['best_location']}")
+        print(f"  Processing time: {trial_time:.2f}s")
+    
+    print("\n" + "="*70)
+    print("RANDOM TRIALS SUMMARY")
+    print("="*70)
+    
+    # Analyze overall results
+    link_performance = {}
+    for link in links:
+        link_tuple = tuple(link)
+        candidates = all_candidates.get(link_tuple, [])
+        
+        if candidates:
+            scores = [c['score'] for c in candidates]
+            locations = [c['location'] for c in candidates]
+            
+            link_performance[link_tuple] = {
+                'total_detections': len(candidates),
+                'avg_score': np.mean(scores),
+                'max_score': max(scores),
+                'avg_location': np.mean(locations),
+                'location_std': np.std(locations),
+                'detection_rate': len(candidates) / n_trials * 100
+            }
+        else:
+            link_performance[link_tuple] = {
+                'total_detections': 0,
+                'avg_score': 0,
+                'max_score': 0,
+                'avg_location': None,
+                'location_std': None,
+                'detection_rate': 0
+            }
+    
+    # Find best performing link overall
+    best_overall_link = None
+    best_overall_score = 0
+    
+    for link, perf in link_performance.items():
+        if perf['max_score'] > best_overall_score:
+            best_overall_score = perf['max_score']
+            best_overall_link = link
+    
+    print(f"\nBEST CANDIDATE LINK: {best_overall_link}")
+    print(f"Maximum score achieved: {best_overall_score}")
+    if best_overall_link:
+        perf = link_performance[best_overall_link]
+        print(f"Detection rate: {perf['detection_rate']:.1f}% ({perf['total_detections']}/{n_trials} trials)")
+        print(f"Average score: {perf['avg_score']:.2f}")
+        if perf['avg_location'] is not None:
+            print(f"Average location: {perf['avg_location']:.6f}")
+            print(f"Location std dev: {perf['location_std']:.6f}")
+    
+    print(f"\nLINK PERFORMANCE RANKING:")
+    sorted_links = sorted(link_performance.items(), 
+                         key=lambda x: (x[1]['max_score'], x[1]['detection_rate']), 
+                         reverse=True)
+    
+    for i, (link, perf) in enumerate(sorted_links[:5]):  # Top 5
+        print(f"{i+1:2d}. Link {link}: max_score={perf['max_score']}, "
+              f"detection_rate={perf['detection_rate']:.1f}%, "
+              f"avg_score={perf['avg_score']:.2f}")
+    
+    return {
+        'trial_results': trial_results,
+        'link_performance': link_performance,
+        'best_candidate_link': best_overall_link,
+        'best_score': best_overall_score,
+        'all_candidates': all_candidates
+    }
+
+
 if __name__ == "__main__":
     import time
+    import random
     from complex_network.networks.network_factory import generate_network
     from complex_network.networks.network_spec import NetworkSpec
 
+    # Set random seed for reproducibility
+    random.seed(42)
+    np.random.seed(42)
+    
     start = time.time()
     
     spec = NetworkSpec(
@@ -633,17 +818,37 @@ if __name__ == "__main__":
         389.30778616,  399.30798616,  406.50813016,  433.20866417,  442.20884418,
         453.60907218,  463.00926019,  478.10956219,  486.90973819,  511.6102322]) * 1e-6
 
-    sensor = DiscreteGraphSearchSensing(net, source_node, spec=spec)
-
-    def provider(_link):
-        return measured_opls
-
-    # Start with parallel processing
-    results_all = sensor.find_best_for_all_links(
-        links, provider,
-        max_hops=12, n_index=1.5, tolerance=1e-6, max_bounces=2,
-        parallel=True, debug=True
+    print("Starting Random Trials Analysis")
+    print(f"Network: {len(links)} links, {spec.num_internal_nodes} internal nodes")
+    print(f"Source node: {source_node}")
+    print(f"Available OPL measurements: {len(measured_opls)}")
+    
+    # Run the random trials
+    results = run_random_trials(
+        net=net,
+        source_node=source_node,
+        links=links,
+        measured_opls=measured_opls,
+        n_trials=20,
+        spec=spec,
+        max_hops=12,
+        n_index=1.5,
+        tolerance=1e-6,
+        max_bounces=2,
+        parallel=True
     )
-
-    best_location_array = [results_all.get(tuple(l), {}).get('best_location') for l in links]
-    print("Best locations per link:", best_location_array)
+    
+    total_time = time.time() - start
+    print(f"\nTotal execution time: {total_time:.2f}s")
+    
+    # Additional detailed analysis
+    print(f"\nDETAILED CANDIDATE ANALYSIS:")
+    print("-" * 50)
+    
+    for link, candidates in results['all_candidates'].items():
+        if candidates:
+            print(f"\nLink {link}:")
+            print(f"  Found in {len(candidates)} trials")
+            for candidate in candidates:
+                print(f"    Trial {candidate['trial']}: location={candidate['location']:.6f}, "
+                      f"score={candidate['score']}, candidate_opl={candidate['candidate_opl']*1e6:.2f}μm")

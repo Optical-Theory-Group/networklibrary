@@ -1,0 +1,10 @@
+o. Fix the memory issue when finding the simple paths using multiprocessing
+o. add_node and add_link methods have not been validated and tested for edge case scenarios [DONE]
+o. in the detailed path finding in the network_path, it is not proper.
+o. As of now, nodes are infinitely small spatial points, maybe try to account for that
+o. When nodes are moved or added, the network links might start to criss-cross each other. This should not be possible. Add a method that checks
+    if that is happening.
+o. Add methods to remove nodes and links, also change existing connections
+
+
+o. And more....I'm sure there is more.... I don't know what they are....I just know there is...

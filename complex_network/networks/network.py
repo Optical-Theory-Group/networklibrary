@@ -762,8 +762,8 @@ class Network:
         if new_get_dS is None:
             new_get_dS = node_matrix.get_zero_matrix_closure(len(node_connections))
         
-        # Create new node
-        new_node_index = self.num_nodes
+        # Create new node - assign it the highest available index to avoid conflicts
+        new_node_index = max(self.node_dict.keys()) + 1 if self.node_dict else 0
         new_node = Node(
             new_node_index,
             node_type,
@@ -788,17 +788,44 @@ class Network:
         # Add node to network
         self.node_dict[new_node_index] = new_node
         
+        # Get material properties from existing internal links (they should all have the same material)
+        # This is the proper way to inherit material properties in the network
+        material = None
+        link_n = None
+        link_dn = None
+        link_Dn = 0.0
+        
+        if self.internal_links:
+            # Use the material properties from the first internal link as reference
+            reference_link = self.internal_links[0]
+            material = getattr(reference_link, 'material', None)
+            link_n = getattr(reference_link, 'n', lambda k0: 1.0)
+            link_dn = getattr(reference_link, 'dn', lambda k0: 0.0)
+            link_Dn = getattr(reference_link, 'Dn', 0.0)
+        else:
+            # Fallback to default values if no internal links exist yet
+            link_n = lambda k0: 1.0
+            link_dn = lambda k0: 0.0
+            link_Dn = 0.0
+        
         # Create links to connected nodes
         new_links = []
         for connected_node_index in node_connections:
             connected_node = self.get_node(connected_node_index)
             
-            # Create new link
-            new_link_index = self.num_links + len(new_links)
+            # Create new link - assign it the highest available index to avoid conflicts
+            new_link_index = max(self.link_dict.keys()) + 1 + len(new_links) if self.link_dict else len(new_links)
+            
+            # Determine link type: external if either node is external, internal otherwise
+            link_type = "external" if (node_type == "external" or connected_node.node_type == "external") else "internal"
+            
+            # Ensure node indices are always in sorted order
+            sorted_node_indices = (min(new_node_index, connected_node_index), max(new_node_index, connected_node_index))
+            
             new_link = Link(
                 new_link_index, 
-                "internal", 
-                (new_node_index, connected_node_index)
+                link_type, 
+                sorted_node_indices
             )
             
             # Calculate link length
@@ -816,6 +843,13 @@ class Network:
             }
             new_link.inwave_np = np.array([0 + 0j, 0 + 0j])
             new_link.outwave_np = np.array([0 + 0j, 0 + 0j])
+            
+            # Set material properties using the same approach as network_factory._initialise_links
+            if material is not None:
+                new_link.material = material
+            new_link.n = link_n
+            new_link.dn = link_dn
+            new_link.Dn = link_Dn
             
             # Set up link scattering matrices
             new_link.get_S = link_matrix.get_propagation_matrix_closure(new_link)
@@ -861,7 +895,6 @@ class Network:
         # Fix any nodes that may have inconsistent scattering matrix settings
         # and regenerate all scattering matrices to ensure consistency
         # This must be done AFTER all index resets to override any permutation matrices
-        from complex_network.scattering_matrices import node_matrix
         for node in self.nodes:
             # Ensure we have proper attributes
             if not hasattr(node, 'S_mat_type') or node.S_mat_type == "custom":
@@ -878,7 +911,10 @@ class Network:
             node.get_dS = node_matrix.get_zero_matrix_closure(node.num_connect)
         
         return None
-        
+
+    # You can only add links between existing internal nodes
+    # links added will be internal links 
+
     def add_link(self,
                 link_connections: List[Tuple[int, int]]
                 ) -> None:
@@ -913,12 +949,15 @@ class Network:
             node1 = self.get_node(node1_index)
             node2 = self.get_node(node2_index)
             
+            # Ensure node indices are always in sorted order
+            sorted_node_indices = (min(node1_index, node2_index), max(node1_index, node2_index))
+            
             # Create new link
             new_link_index = self.num_links + len(new_links)
             new_link = Link(
                 new_link_index,
                 "internal",  # Default to internal links
-                (node1_index, node2_index)
+                sorted_node_indices
             )
             
             # Calculate link length
@@ -934,6 +973,16 @@ class Network:
             }
             new_link.inwave_np = np.array([0 + 0j, 0 + 0j])
             new_link.outwave_np = np.array([0 + 0j, 0 + 0j])
+            
+            # Copy material properties from existing links if they exist
+            if self.links:
+                # Get material properties from the first existing link
+                existing_link = self.links[0]
+                new_link.material = existing_link.material
+                new_link.n = existing_link.n
+                new_link.dn = existing_link.dn
+                if hasattr(existing_link, 'Dn'):
+                    new_link.Dn = existing_link.Dn
             
             # Set up link scattering matrices
             new_link.get_S = link_matrix.get_propagation_matrix_closure(new_link)
@@ -994,6 +1043,9 @@ class Network:
             node.get_dS = node_matrix.get_zero_matrix_closure(node.num_connect)
         
         return None
+    
+    # maybe add a method to remove nodes or links in the future
+    # Maybe also add a method to change the connections between existing nodes
 
     # -------------------------------------------------------------------------
     #  Direct scattering methods
