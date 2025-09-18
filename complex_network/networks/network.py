@@ -14,6 +14,8 @@ from typing import Tuple, List
 
 from multiprocessing import Pool, cpu_count
 
+from complex_network.networks.network_spec import NetworkSpec
+
 
 
 class Network:
@@ -35,6 +37,7 @@ class Network:
         node_dict: dict[int, Node],
         link_dict: dict[int, Link],
         data: dict[str, Any] | None = None,
+        spec: "NetworkSpec | None" = None,
     ) -> None:
         """Nodes and links are primarily stored in dictionaries whose keys
         are the indices. Don't make a network directly from here; use
@@ -42,6 +45,7 @@ class Network:
         self._reset_values(data)
         self.node_dict = node_dict
         self.link_dict = link_dict
+        self._network_spec = spec  # Store the NetworkSpec used to create this network
         self._reset_fields()
         self._set_matrix_calc_utils()
 
@@ -230,6 +234,18 @@ class Network:
     def num_internal_links(self) -> int:
         """Number of internal links in the network."""
         return len(list(self.internal_links))
+
+    @property
+    def spec(self) -> "NetworkSpec | None":
+        """Return the NetworkSpec object that was used to create this network.
+        
+        Returns
+        -------
+        NetworkSpec | None
+            The specification object describing how this network was constructed,
+            or None if no spec was provided during network creation.
+        """
+        return self._network_spec
 
     # -------------------------------------------------------------------------
     # Basic utility functions
@@ -2581,9 +2597,7 @@ class Network:
 
         return U_3
 
-    # -------------------------------------------------------------------------
-    # Plotting methods
-    # -------------------------------------------------------------------------
+    # ______________________plotting methods_______________________________
 
     def draw(
         self,
@@ -2705,6 +2719,15 @@ class Network:
                     node_2 = self.get_node(node_2_index)
                     node_1.draw(ax, show_index = False, show_external_index = False, show_internal_index = False, color=None)
                     node_2.draw(ax, show_index = False, show_external_index = False, show_internal_index = False, color=None)
+
+        # Set scientific notation for axes
+        if not hide_axes:
+            from matplotlib.ticker import ScalarFormatter
+            formatter = ScalarFormatter(useMathText=True)
+            formatter.set_scientific(True)
+            formatter.set_powerlimits((-1, 1))  # Use scientific notation for values outside 0.1 to 10
+            ax.xaxis.set_major_formatter(formatter)
+            ax.yaxis.set_major_formatter(formatter)
 
         if hide_axes:
             ax.tick_params(

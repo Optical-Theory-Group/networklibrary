@@ -54,7 +54,7 @@ def generate_network(spec: NetworkSpec) -> Network:
     # off the numbering.
     _initialise_links(node_dict, link_dict, spec)
     _initialise_nodes(node_dict, link_dict, spec)
-    return Network(node_dict, link_dict)
+    return Network(node_dict, link_dict, spec=spec)
 
 
 def _check_node_index_matching(node_dict: dict[int, Node]) -> None:
