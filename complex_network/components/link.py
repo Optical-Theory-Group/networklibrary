@@ -49,7 +49,7 @@ class Link(Component):
         data: dict[str, Any] | None = None,
     ):
         super().__init__(index=index, nature=link_type, data=data)
-        self.node_indices = node_indices
+        self.node_indices = (int(node_indices[0]), int(node_indices[1]))
 
     @property
     def link_type(self) -> str:

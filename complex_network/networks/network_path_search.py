@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 import numpy as np
 import tempfile
 
+from complex_network.networks.network_spec import NetworkSpec
+
 
 # Data structures for discrete graph search sensing
 @dataclass
@@ -40,7 +42,8 @@ class GraphData:
 
 
 def extract_graph_data(network: Any) -> GraphData:
-    """Extract lightweight graph data from network object for multiprocessing."""
+    """Extract lightweight graph data from the heavy network object for multiprocessing.
+       The network object is already serializable, but this avoids passing the whole object."""
     neighbors: Dict[int, List[int]] = defaultdict(list)
     link_lengths: Dict[Tuple[int, int], float] = {}
     internal_links: List[Tuple[int, int]] = []
@@ -49,17 +52,16 @@ def extract_graph_data(network: Any) -> GraphData:
     internal_nodes = {node.index for node in network.internal_nodes}
     
     # Process all links
-    for link in network.internal_links + network.external_links:
+    for link in network.links:
         a, b = link.sorted_connected_nodes
         length = link.length
         
-        key = _link_key(a, b)
-        link_lengths[key] = length
+        link_lengths[(a,b)] = length
         neighbors[int(a)].append(int(b))
         neighbors[int(b)].append(int(a))
         
         if a in internal_nodes and b in internal_nodes:
-            internal_links.append(key)
+            internal_links.append((a,b))
     
     # Ensure deterministic ordering
     for n in list(neighbors.keys()):
@@ -73,44 +75,43 @@ def extract_graph_data(network: Any) -> GraphData:
         internal_nodes=internal_nodes
     )
 
+# ________________________Enhanced Detailed Path Enumeration with Coherence Grouping_______________________________
 
-def _link_key(a: int, b: int) -> Tuple[int, int]:
-    """Generate canonical link key (min, max)."""
-    return (min(a, b), max(a, b))
-
-
-# Discrete path cache functions
-def load_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int) -> Optional[Dict]:
-    """Load detailed path cache for discrete graph search sensing."""
-    sub = _ensure_fingerprint_dir(fingerprint)
-    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
-    if os.path.exists(fn):
-        try:
-            return np.load(fn, allow_pickle=True).item()
-        except Exception:
-            return None
-    return None
-
-
-def save_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int, cache_data: Dict) -> None:
-    """Save detailed path cache for discrete graph search sensing."""
-    sub = _ensure_fingerprint_dir(fingerprint)
-    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
+@dataclass
+class PathGroup:
+    """Group of paths with similar lengths within coherence length tolerance."""
+    representative_length: float
+    paths: List[Tuple[List[int], float]]  # [(path_nodes, path_length), ...]
     
-    # Create a temp file (unique) in same directory
-    fd, tmp_path = tempfile.mkstemp(dir=sub)
-    os.close(fd)
-    try:
-        with open(tmp_path, "wb") as f:
-            np.save(f, cache_data)
-        os.replace(tmp_path, fn)
-    except Exception:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-        raise
+    def add_path(self, path: List[int], length: float) -> None:
+        """Add a path to this group."""
+        self.paths.append((path, length))
+    
+    def get_representative_path(self) -> Tuple[List[int], float]:
+        """For each group saved as x = (path, length), we will take the absolute
+           value of difference between all the lengths and the representative length
+            and then return the path with minimum difference."""
+        if not self.paths:
+            # No paths, return empty and 0
+            return [], 0.0
+        return min(self.paths, key=lambda x: abs(x[1] - self.representative_length))
+
+
+@dataclass 
+class CoherentPathData:
+    """Path data structure grouping paths that come within the coherence length."""
+    source_idx: int
+    target_idx: int
+    coherence_length: float
+    path_groups: List[PathGroup]
+    total_paths: int
+    
+    def get_all_paths(self) -> List[Tuple[List[int], float]]:
+        """Get all paths across all groups."""
+        all_paths = []
+        for group in self.path_groups:
+            all_paths.extend(group.paths)
+        return all_paths
 
 
 def find_all_paths_bfs(
@@ -119,7 +120,8 @@ def find_all_paths_bfs(
     end: int,
     max_hops: int
 ) -> List[Tuple[List[int], float]]:
-    """Find all paths using BFS with the GraphData structure."""
+    """Find all paths using BFS with the GraphData structure.
+        A cleaner wrapper around the core BFS function."""
     return _find_paths_bfs(
         graph.neighbors,
         graph.link_lengths,
@@ -130,51 +132,55 @@ def find_all_paths_bfs(
     )
 
 
-def prepare_discrete_path_cache(
+def prepare_detailed_path_cache(
     graph: GraphData,
     fingerprint: str,
     source_idx: int,
     max_hops: int,
     force_rebuild: bool = False
 ) -> Dict[Tuple[int, int, int], List[Tuple[List[int], float]]]:
-    """Prepare path cache for discrete graph search sensing."""
-    cache_key = f"{fingerprint}_discrete_s{source_idx}_h{max_hops}"
+    """Prepare path cache for fault detection.
+        Args:
+        graph: GraphData object with neighbors, link lengths, and node sets
+        fingerprint: Unique fingerprint string for the network spec
+        source_idx: Index of the source node
+        max_hops: Maximum number of hops to explore
+        force_rebuild: If True, ignore existing cache and rebuild"""
+    
     
     if not force_rebuild:
         cached = load_detailed_path_cache(fingerprint, source_idx, max_hops)
         if cached is not None:
             return cached
-    
+
     # Build cache by finding paths to all internal nodes
     path_cache = {}
     
     for target in graph.internal_nodes:
         if target == source_idx:
             continue
-            
+                   
         # Paths from source to target
+        # (source_idx, target) is the key and that key will map to list of paths from source to target
         paths_to = find_all_paths_bfs(graph, source_idx, target, max_hops // 2)
         if paths_to:
-            path_cache[(source_idx, target, max_hops // 2)] = paths_to
-        
-        # Paths from target back to source
-        paths_from = find_all_paths_bfs(graph, target, source_idx, max_hops // 2)
-        if paths_from:
-            path_cache[(target, source_idx, max_hops // 2)] = paths_from
+            path_cache[(source_idx, target)] = paths_to
+            
+            # Since paths are symmetric in optical networks, we can derive the reverse paths
+            # by reversing each path and swapping the path length (which remains the same)
+            paths_from = [(path[::-1], length) for path, length in paths_to]
+            path_cache[(target, source_idx)] = paths_from
     
     # Save to disk cache
     save_detailed_path_cache(fingerprint, source_idx, max_hops, path_cache)
     
     return path_cache
-
-
 # ____________________________________cache helpers___________________________________________
 
-def _spec_fingerprint(spec: Any, salt: Optional[str] = None) -> str:
+def _spec_fingerprint(spec: NetworkSpec, salt: Optional[str] = None) -> str:
     """Generate a stable fingerprint string for a NetworkSpec-like object.
 
-    Accepts objects that have attributes used in the original code. This function
-    intentionally avoids importing NetworkSpec to keep the module decoupled for tests.
+    So that networks with identical specs will share the same cache directory.
     """
     ni = getattr(spec, "num_internal_nodes", "NA")
     ne = getattr(spec, "num_external_nodes", "NA")
@@ -195,18 +201,19 @@ def _spec_fingerprint(spec: Any, salt: Optional[str] = None) -> str:
     return base
 
 
+# function for making sure cache directory exists
+# if not, create it
 def _cache_dir() -> str:
     d = os.path.join(os.getcwd(), ".path_cache")
     os.makedirs(d, exist_ok=True)
     return d
 
-
+# function for making sure fingerprint subdirectory exists
 def _ensure_fingerprint_dir(fingerprint: str) -> str:
     base = _cache_dir()
     sub = os.path.join(base, str(fingerprint))
     os.makedirs(sub, exist_ok=True)
     return sub
-
 
 def load_path_cache(fingerprint: str, source_idx: int, target_idx: int, max_hops: int) -> Optional[np.ndarray]:
     """Load cached path lengths (.npy) for given fingerprint/source/target/hops.
@@ -357,36 +364,146 @@ def load_scattering_coeffs_cache(fingerprint: str, source_idx: int, target_idx: 
             return None
     return None
 
+# detailed path cache functions
+def load_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int) -> Optional[Dict]:
+    """Load detailed path cache for fault detection."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
+    if os.path.exists(fn):
+        try:
+            return np.load(fn, allow_pickle=True).item()
+        except Exception:
+            return None
+    return None
 
-# ________________________Path enumeration_______________________________
+
+def save_detailed_path_cache(fingerprint: str, source_idx: int, max_hops: int, cache_data: Dict) -> None:
+    """Save detailed path cache for fault detection."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"detailed_paths_s{source_idx}_h{max_hops}.npy")
+    
+    # Create a temp file (unique) in same directory
+    fd, tmp_path = tempfile.mkstemp(dir=sub)
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as f:
+            np.save(f, cache_data)
+        os.replace(tmp_path, fn)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
+def group_paths_by_coherence(paths: List[List[int]], 
+                           lengths: List[float], 
+                           coherence_length: float = 1e-6) -> List[PathGroup]:
+    """Group paths by coherence length tolerance (L_c/2 by default).
+    
+    Args:
+        paths: List of path node sequences [s, n1, n2, ..., target] 
+        s: source_node, n_i: internal nodes, target: target_node.
+        lengths: Corresponding path lengths
+        coherence_length: Coherence length in meters 
+        (set to 1um because a bandwidth of 400nm at 1000nm wavelength gives ~1um coherence length)
+        
+    Returns:
+        List of PathGroup objects, each containing paths within coherence tolerance
+    """
+    if not paths or not lengths:
+        return []
+        
+    tolerance = coherence_length / 2  # L_c/2 = 0.5um by default
+    
+    # Sort by length for efficient grouping
+    sorted_indices = sorted(range(len(paths)), key=lambda i: lengths[i])
+    
+    groups = []
+    current_group = None
+    
+    for idx in sorted_indices:
+        path = paths[idx]
+        length = lengths[idx]
+        
+        if current_group is None or length > current_group.representative_length + tolerance:
+            # Start new group when we go outside the tolerance
+            current_group = PathGroup(representative_length=length, paths=[])
+            groups.append(current_group)
+        
+        current_group.add_path(path, length)
+    
+    return groups
+
+
+def load_grouped_path_cache(fingerprint: str, 
+                           source_idx: int, 
+                           target_idx: int, 
+                           max_hops: int) -> Optional[CoherentPathData]:
+    """Load cached grouped path data."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"grouped_paths_s{source_idx}_t{target_idx}_h{max_hops}.npy")
+    if os.path.exists(fn):
+        try:
+            data = np.load(fn, allow_pickle=True).item()
+            return data
+        except Exception:
+            return None
+    return None
+
+
+def save_grouped_path_cache(fingerprint: str,
+                           source_idx: int,
+                           target_idx: int,
+                           max_hops: int,
+                           coherent_data: CoherentPathData) -> None:
+    """Save coherent path data to cache."""
+    sub = _ensure_fingerprint_dir(fingerprint)
+    fn = os.path.join(sub, f"grouped_paths_s{source_idx}_t{target_idx}_h{max_hops}.npy")
+    
+    # Create a temp file (unique) in same directory
+    fd, tmp_path = tempfile.mkstemp(dir=sub)
+    os.close(fd)
+    try:
+        with open(tmp_path, "wb") as f:
+            np.save(f, coherent_data)
+        os.replace(tmp_path, fn)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
 
 def compute_path_scattering_coefficient(path: List[int], 
                                        neighbors: Dict[int, List[int]], 
                                        network_nodes: Dict[int, Any],
                                        external_nodes: Set[int],
                                        k0: complex = 6.28e6) -> float:
-    """Compute the scattering coefficient for a given path through the network.
+    """Compute the scattering coefficient for a given path in the network.
     
     Args:
         path: Sequence of node indices representing the path
         neighbors: Dict mapping node -> list of neighbor nodes (in fixed order)
         network_nodes: Dict mapping node index -> node object with scattering matrix
         external_nodes: Set of external node indices
-        k0: Wavenumber for scattering matrix computation
+        k0: Wavenumber for scattering matrix computation in the node method
         
     Returns:
         Absolute value of the total scattering coefficient for the path
     """
-    if len(path) < 2:
-        return 1.0  # No hops, no scattering
-    
-    total_amplitude = 1.0 + 0j  # Start with unit amplitude (complex)
-    
-    # Debug only for short paths to avoid spam
-    debug_this_path = False  # Disable debug output
-    
-    if debug_this_path:
-        print(f"\nDebug: Computing scattering for path {path}")
+    # No hops, no scattering
+    if 0 < len(path) < 2:
+        return 1.0
+
+    if len(path) == 0:
+        raise ValueError("Path must have at least one node")
+
+    # Start with unit amplitude (complex) can accumulate phase/amplitude changes
+    total_amplitude = 1.0 + 0j
     
     for i in range(len(path) - 1):
         current_node = path[i]
@@ -395,44 +512,33 @@ def compute_path_scattering_coefficient(path: List[int],
         # Get the scattering matrix for the current node
         node_obj = network_nodes[current_node]
         
-        # Handle both callable functions and numpy arrays
-        if callable(node_obj.get_S):
-            S_matrix = node_obj.get_S(k0)  # Internal nodes: callable function
-            if debug_this_path:
-                print(f"  Node {current_node} (internal): callable S_matrix, shape={S_matrix.shape}")
+        # For internal nodes, get_S is callable; for external nodes, it's a numpy array
+        if node_obj.type == 'internal':
+            S_matrix = node_obj.get_S(k0)
+
+        elif node_obj.type == 'external':
+            S_matrix = node_obj.get_S
         else:
-            S_matrix = node_obj.get_S  # External nodes: numpy array
-            if debug_this_path:
-                print(f"  Node {current_node} (external): array S_matrix, shape={S_matrix.shape}")
+            raise ValueError(f"Unknown node type {node_obj.type} for node {current_node}")
         
         # Get the neighbor list for port mapping
         node_neighbors = neighbors[current_node]
-        if debug_this_path:
-            print(f"  Node {current_node} neighbors: {node_neighbors}")
         
         # Find output port (where we're going to)
         try:
             output_port = node_neighbors.index(next_node)
         except ValueError:
-            print(f"Error: Node {next_node} not found in neighbors {node_neighbors} of node {current_node}")
             raise ValueError(f"Node {next_node} not found in neighbors of node {current_node}")
         
-        # Find input port (where we came from)
+        # if the first node, it is entering the network from the external node
         if i == 0:
-            # First hop: starting from external source
+            """
+            For external nodes: signal enters from external side (port 0) and exits to network side (port 1).
+            This assumes external nodes have 2 ports: port 0 (external) and port 1 (network).
+            """
             if current_node in external_nodes:
-                # For external nodes: signal enters from external side, exits to network side
-                # External nodes typically have 2 ports: port 0 (external) and port 1 (network)
-                # But we need to figure out which port connects to the network
-                # output_port was calculated as the index of next_node in neighbors
-                # For a 2-port external node, if output_port=0, then network port is 1, external port is 0
-                # If neighbors list is [next_node], then output_port=0, so network connection is at matrix port 1
-                input_port = 0  # Always enter from external side (port 0)
-                # Correct the output port: if neighbors index is 0, the actual matrix port for network is 1
-                output_port = 1  # Network side is port 1
-                if debug_this_path:
-                    print(f"  External node: signal enters port 0 (external) -> exits port 1 (network)")
-                    print(f"  Corrected: input_port={input_port}, output_port={output_port}")
+                input_port = 0  
+                output_port = 1
             else:
                 raise ValueError(f"First node {current_node} should be an external node")
         else:
@@ -440,15 +546,9 @@ def compute_path_scattering_coefficient(path: List[int],
             prev_node = path[i - 1]
             try:
                 input_port = node_neighbors.index(prev_node)
-                if debug_this_path:
-                    print(f"  From previous node {prev_node}: input_port={input_port}")
             except ValueError:
                 print(f"Error: Previous node {prev_node} not found in neighbors {node_neighbors} of node {current_node}")
                 raise ValueError(f"Previous node {prev_node} not found in neighbors of node {current_node}")
-        
-        if debug_this_path:
-            print(f"  Going from port {input_port} to port {output_port}")
-            print(f"  S_matrix:\n{S_matrix}")
         
         # Validate matrix dimensions
         if output_port >= S_matrix.shape[0] or input_port >= S_matrix.shape[1]:
@@ -457,25 +557,18 @@ def compute_path_scattering_coefficient(path: List[int],
         
         # Get scattering coefficient
         scattering_coeff = S_matrix[output_port, input_port]
-        if debug_this_path:
-            print(f"  S[{output_port}, {input_port}] = {scattering_coeff}")
         
-        total_amplitude *= scattering_coeff
-        if debug_this_path:
-            print(f"  Total amplitude after this hop: {total_amplitude}")
-    
+        total_amplitude *= scattering_coeff    
     result = abs(total_amplitude)
-    if debug_this_path:
-        print(f"  Final result: {result}")
-    
     return result
 
+# ________________________Path enumeration_______________________________
 
 def find_all_path_info_bfs(
     neighbors: Dict[int, List[int]],
     link_lengths: Dict[Tuple[int, int], float],
     external_nodes: Set[int],
-    network_nodes: Dict[int, Any],
+    internal_nodes: Dict[int, Any],
     start: int,
     end: int,
     max_hops: int,
@@ -487,13 +580,13 @@ def find_all_path_info_bfs(
     1. External nodes can only be sources or final destinations
     2. Paths cannot traverse "through" external nodes, light enters and exists the system through these nodes
     3. Internal nodes can be revisited multiple times
-    4. Source node can be revisited in internal portions of paths
-    
+    4. Source node cannot be revisited in internal portions of paths
+
     Args:
         neighbors: Dict mapping node -> list of neighbor nodes
         link_lengths: Dict mapping (min_node, max_node) -> length
         external_nodes: Set of external node indices
-        network_nodes: Dict mapping node index -> node object with scattering matrix
+        internal_nodes: Dict mapping node index -> node object with scattering matrix
         start: Source node index
         end: Target node index
         max_hops: Maximum number of hops to explore
@@ -528,7 +621,7 @@ def find_all_path_info_bfs(
             
             # Compute scattering coefficient for this path
             try:
-                scatt_coeff = compute_path_scattering_coefficient(path, neighbors, network_nodes, external_nodes, k0)
+                scatt_coeff = compute_path_scattering_coefficient(path, neighbors, internal_nodes, external_nodes, k0)
                 scattering_coeffs.append(scatt_coeff)
                 paths.append(path[:])  # Store a copy of the path
             except Exception as e:
@@ -648,12 +741,16 @@ def find_all_path_lengths_bfs(
 
 
 # Worker helper must be top-level so it can be pickled by multiprocessing
-def _compute_target_and_save_star(args: Tuple[int, Dict[int, List[int]], Dict[Tuple[int, int], float], Set[int], Dict[int, Any], int, str, int, complex]):
-    """Unpack args, compute all lengths, hop counts, and scattering coeffs from source->target, save to cache, return (target, count)."""
-    target, neighbors, link_lengths, external_nodes, network_nodes, source_idx, fingerprint, max_hops, k0 = args
-    
+def _compute_target_and_save_star(args: Tuple[int, Dict[int, List[int]],
+                                        Dict[Tuple[int, int], float],
+                                        Set[int], Dict[int, Any],
+                                        int, str, int, complex]):
+    """Unpack args, compute all lengths, hop counts, and scattering coeffs from source->target,
+       save to cache, return (target, count)."""
+    target, neighbors, link_lengths, external_nodes, internal_nodes, source_idx, fingerprint, max_hops, k0 = args
+
     lengths, hop_counts, scattering_coeffs, paths = find_all_path_info_bfs(
-        neighbors, link_lengths, external_nodes, network_nodes,
+        neighbors, link_lengths, external_nodes, internal_nodes,
         source_idx, target, max_hops, k0
     )
     
@@ -663,6 +760,316 @@ def _compute_target_and_save_star(args: Tuple[int, Dict[int, List[int]], Dict[Tu
         save_scattering_coeffs_cache(fingerprint, source_idx, target, max_hops, scattering_coeffs)
     
     return target, len(lengths)
+
+
+def _compute_coherent_paths_star(args: Tuple[int, Dict[int, List[int]],
+                                       Dict[Tuple[int, int], float],
+                                       Set[int], Dict[int, Any],
+                                       int, str, int, complex, float]):
+    """Worker function for computing coherent path data with length grouping."""
+    target, neighbors, link_lengths, external_nodes, network_nodes, source_idx, fingerprint, max_hops, k0, coherence_length = args
+    
+    # Get all path information 
+    lengths, hop_counts, scattering_coeffs, paths = find_all_path_info_bfs(
+        neighbors, link_lengths, external_nodes, network_nodes,
+        source_idx, target, max_hops, k0
+    )
+    
+    # Only process non-empty results
+    if lengths:  
+        path_groups = group_paths_by_coherence(paths, lengths, coherence_length)
+        
+        # Create coherent path data structure
+        coherent_data = CoherentPathData(
+            source_idx=source_idx,
+            target_idx=target,
+            coherence_length=coherence_length,
+            path_groups=path_groups,
+            total_paths=len(paths)
+        )
+        
+        # Save to cache
+        save_grouped_path_cache(fingerprint, source_idx, target, max_hops, coherent_data)
+        
+        # Also save legacy format for backward compatibility
+        save_path_lengths_cache(fingerprint, source_idx, target, max_hops, lengths)
+        save_hop_counts_cache(fingerprint, source_idx, target, max_hops, hop_counts)
+        save_scattering_coeffs_cache(fingerprint, source_idx, target, max_hops, scattering_coeffs)
+        
+        return target, len(paths), len(path_groups)
+    
+    return target, 0, 0
+
+
+def compute_grouped_path_cache_all(network: Any, 
+                                  source_node_idx: int, 
+                                  fingerprint: str, 
+                                  max_hops: int, 
+                                  coherence_length: float = 1e-6,
+                                  k0: complex = 6.28e6, 
+                                  n_workers: Optional[int] = None, 
+                                  use_processes: bool = True) -> None:
+    """Compute coherent path data from source to all internal nodes with coherence length grouping.
+
+    This enhanced version stores paths as node sequences [s, n1, n2, ..., target] and groups them
+    by coherence length tolerance (L_c/2 = 0.5um by default). Results are saved as:
+    - coherent_paths_s{source}_t{target}_h{max_hops}.npy (coherent path data with grouping)
+    - Legacy format files for backward compatibility
+
+    Parameters
+    ----------
+    network: object
+        Network object with nodes and links
+    source_node_idx: int
+        Source node index (should be external node)
+    fingerprint: str
+        Cache fingerprint to write results under
+    max_hops: int
+        Maximum number of hops to explore
+    coherence_length: float
+        Coherence length in meters (default: 1um = 1e-6m)
+    k0: complex
+        Wavenumber for scattering matrix computation (default: 6.28e6)
+    n_workers: Optional[int]
+        Number of parallel workers to use. If None, uses max(1, cpu_count()-2).
+    use_processes: bool
+        If True, uses ProcessPoolExecutor (default). If False, uses ThreadPoolExecutor.
+    """
+
+    # Get node types directly from the network object
+    external_nodes = {node.index for node in network.external_nodes}
+    internal_nodes = {node.index for node in network.internal_nodes}
+    
+    print(f"Computing coherent paths with L_c = {coherence_length*1e6:.1f}um (grouping tolerance: {coherence_length*0.5*1e6:.1f}um)")
+    print(f"Identified {len(external_nodes)} external nodes: {sorted(external_nodes)}")
+    print(f"Identified {len(internal_nodes)} internal nodes: {sorted(internal_nodes)}")
+    
+    if source_node_idx not in external_nodes:
+        print(f"Warning: Source node {source_node_idx} is not identified as external node")
+    
+    # Build lightweight graph representation
+    neighbors: Dict[int, List[int]] = defaultdict(list)
+    link_lengths: Dict[Tuple[int, int], float] = {}
+    
+    # Build node mapping for scattering matrices
+    network_nodes: Dict[int, Any] = {}
+    for node in network.external_nodes + network.internal_nodes:
+        network_nodes[node.index] = node
+
+    # Collect links directly from network properties
+    links = network.internal_links + network.external_links
+
+    if not links:
+        raise RuntimeError("Network object has no links")
+
+    # Build graph from links
+    for link in links:
+        a, b = link.sorted_connected_nodes
+        L = link.length
+        
+        k = (min(int(a), int(b)), max(int(a), int(b)))
+        link_lengths[k] = L
+        neighbors[int(a)].append(int(b))
+        neighbors[int(b)].append(int(a))
+
+    # Ensure deterministic ordering of neighbors
+    for n in list(neighbors.keys()):
+        neighbors[n] = sorted(set(neighbors[n]))
+
+    # Only compute paths to internal nodes
+    targets = sorted(internal_nodes)
+
+    # Filter out targets that have already been cached
+    missing_targets = []
+    for target in targets:
+        coherent_cache = load_grouped_path_cache(fingerprint, source_node_idx, target, max_hops)
+        if coherent_cache is None:
+            missing_targets.append(target)
+
+    if not missing_targets:
+        print("All coherent path data is already cached.")
+        return
+    
+    print(f'Found {len(missing_targets)} targets to compute coherent paths from source {source_node_idx} with max_hops {max_hops}')
+    print('Generating coherent path data may take a while, Please Wait .... ')
+
+    # Determine worker count
+    if n_workers is None:
+        try:
+            cpu_count = os.cpu_count() or 1
+            n_workers = max(1, cpu_count - 2)
+        except Exception:
+            n_workers = 1
+
+    # Ensure cache dir exists
+    _ensure_fingerprint_dir(fingerprint)
+
+    # Prepare arg tuples for worker function
+    args_list = [
+        (target, dict(neighbors), dict(link_lengths), external_nodes, dict(network_nodes),
+         source_node_idx, fingerprint, max_hops, k0, coherence_length)
+        for target in missing_targets
+    ]
+
+    if use_processes and n_workers > 1:
+        Executor = ProcessPoolExecutor
+    else:
+        # Fallback to threaded execution
+        from concurrent.futures import ThreadPoolExecutor
+        Executor = ThreadPoolExecutor
+
+    with Executor(max_workers=n_workers) as ex:
+        # Process results as they complete
+        for target, path_count, group_count in ex.map(_compute_coherent_paths_star, args_list):
+            if path_count > 0:
+                print(f"Computed coherent paths from source {source_node_idx} -> target {target}: {path_count} paths in {group_count} coherence groups")
+            else:
+                print(f"No valid paths found from source {source_node_idx} -> target {target}")
+
+
+def get_coherent_paths_to_target(network: Any,
+                                source_node_idx: int, 
+                                target_node_idx: int,
+                                max_hops: int,
+                                coherence_length: float = 1e-6,
+                                force_rebuild: bool = False) -> Optional[CoherentPathData]:
+    """Get coherent path data from source to target, computing if necessary.
+    
+    Args:
+        network: Network object
+        source_node_idx: Source node index
+        target_node_idx: Target node index  
+        max_hops: Maximum hops to explore
+        coherence_length: Coherence length in meters (default: 1um)
+        force_rebuild: Force recomputation even if cached data exists
+        
+    Returns:
+        CoherentPathData object or None if no paths found
+    """
+    fingerprint = _spec_fingerprint(network.spec)
+    
+    if not force_rebuild:
+        cached_data = load_grouped_path_cache(fingerprint, source_node_idx, target_node_idx, max_hops)
+        if cached_data is not None:
+            return cached_data
+    
+    # Compute single target 
+    print(f"Computing coherent paths from {source_node_idx} to {target_node_idx}...")
+    
+    # Extract graph data
+    graph_data = extract_graph_data(network)
+    
+    # Build node mapping for scattering matrices
+    network_nodes: Dict[int, Any] = {}
+    for node in network.external_nodes + network.internal_nodes:
+        network_nodes[node.index] = node
+    
+    # Get path info
+    lengths, hop_counts, scattering_coeffs, paths = find_all_path_info_bfs(
+        graph_data.neighbors, graph_data.link_lengths, graph_data.external_nodes, 
+        network_nodes, source_node_idx, target_node_idx, max_hops
+    )
+    
+    if not lengths:
+        return None
+        
+    # Group by coherence length
+    path_groups = group_paths_by_coherence(paths, lengths, coherence_length, tolerance_factor=0.5)
+    
+    # Create coherent data structure
+    coherent_data = CoherentPathData(
+        source_idx=source_node_idx,
+        target_idx=target_node_idx,
+        coherence_length=coherence_length,
+        path_groups=path_groups,
+        total_paths=len(paths)
+    )
+    
+    # Save to cache
+    save_grouped_path_cache(fingerprint, source_node_idx, target_node_idx, max_hops, coherent_data)
+    
+    return coherent_data
+
+
+def print_coherent_path_summary(coherent_data: CoherentPathData) -> None:
+    """Print a summary of coherent path data for analysis.
+    
+    Args:
+        coherent_data: CoherentPathData object to summarize
+    """
+    print(f"\nCoherent Path Summary:")
+    print(f"Source: {coherent_data.source_idx} -> Target: {coherent_data.target_idx}")
+    print(f"Coherence Length: {coherent_data.coherence_length*1e6:.1f}um")
+    print(f"Total Paths: {coherent_data.total_paths}")
+    print(f"Coherence Groups: {len(coherent_data.path_groups)}")
+    
+    print(f"\nGroup Details:")
+    for i, group in enumerate(coherent_data.path_groups):
+        rep_path, rep_length = group.get_representative_path()
+        length_range = (
+            min(length for _, length in group.paths),
+            max(length for _, length in group.paths)
+        )
+        print(f"  Group {i+1}: {len(group.paths)} paths")
+        print(f"    Length range: {length_range[0]*1e6:.3f} - {length_range[1]*1e6:.3f} um")
+        print(f"    Representative: {rep_length*1e6:.3f} um")
+        print(f"    Example path: {rep_path}")
+
+
+def get_paths_in_length_range(coherent_data: CoherentPathData, 
+                            min_length: float, 
+                            max_length: float) -> List[Tuple[List[int], float]]:
+    """Get all paths within a specific length range.
+    
+    Args:
+        coherent_data: CoherentPathData object
+        min_length: Minimum path length (meters)
+        max_length: Maximum path length (meters)
+        
+    Returns:
+        List of (path, length) tuples within the specified range
+    """
+    filtered_paths = []
+    for group in coherent_data.path_groups:
+        for path, length in group.paths:
+            if min_length <= length <= max_length:
+                filtered_paths.append((path, length))
+    
+    return filtered_paths
+
+
+def get_coherent_groups_for_analysis(coherent_data: CoherentPathData) -> List[Dict]:
+    """Extract coherent group information for further analysis.
+    
+    Args:
+        coherent_data: CoherentPathData object
+        
+    Returns:
+        List of dictionaries with group statistics
+    """
+    group_info = []
+    
+    for i, group in enumerate(coherent_data.path_groups):
+        lengths = [length for _, length in group.paths]
+        paths = [path for path, _ in group.paths]
+        hop_counts = [len(path) - 1 for path in paths]
+        
+        info = {
+            'group_id': i,
+            'num_paths': len(group.paths),
+            'representative_length': group.representative_length,
+            'min_length': min(lengths),
+            'max_length': max(lengths),
+            'mean_length': sum(lengths) / len(lengths),
+            'length_std': np.std(lengths) if len(lengths) > 1 else 0.0,
+            'min_hops': min(hop_counts),
+            'max_hops': max(hop_counts),
+            'mean_hops': sum(hop_counts) / len(hop_counts),
+            'example_path': group.get_representative_path()[0]
+        }
+        group_info.append(info)
+    
+    return group_info
 
 
 def compute_cache_all_path_info(network: Any, source_node_idx: int, fingerprint: str, max_hops: int, k0: complex = 6.28e6, n_workers: Optional[int] = None, use_processes: bool = True) -> None:
@@ -961,8 +1368,7 @@ def _find_paths_with_target_link_crossings(
             queue.append((neighbor, new_path, new_len, new_crossings))
     
     return paths
-    
-    return paths
+
 
 
 def _build_detailed_path_with_reflections(
@@ -1172,37 +1578,63 @@ def _find_paths_bfs(
     end: int,
     max_hops: int
 ) -> List[Tuple[List[int], float]]:
-    """Find all paths from start to end using BFS with geometric lengths."""
+    """Find ALL paths from start to end using exhaustive search with geometric lengths.
+    
+    This version allows ALL possible paths within the hop limit, including:
+    - Loops and cycles
+    - Immediate node revisiting (e.g., A → B → A)
+    - Complex path patterns
+    
+    The only constraints are:
+    1. Maximum hop limit
+    2. External node handling (external nodes can only be start/end points)
+    """
     paths = []
     queue = deque([(start, [start], 0.0)])
     
     while queue:
         current, path, geom_len = queue.popleft()
         
-        if len(path) - 1 > max_hops:
+        # Check if we've reached the maximum hop limit
+        current_hops = len(path) - 1
+        if current_hops > max_hops:
             continue
             
+        # If we've reached the target and it's not a trivial path, record it
         if current == end and len(path) > 1:
             paths.append((path[:], geom_len))
-            continue
-            
-        for neighbor in neighbors.get(current, []):
-            if len(path) - 1 + 1 > max_hops:
+            # Continue exploring from this point if we haven't reached max hops
+            # This allows finding longer paths that also end at the target
+            if current_hops >= max_hops:
                 continue
+            
+        # Explore all neighbors if we haven't exceeded the hop limit
+        if current_hops < max_hops:
+            for neighbor in neighbors.get(current, []):
+                # STRICT external node constraints
+                if neighbor in external_nodes:
+                    # Case 1: Neighbor is the target (end) - always allowed
+                    if neighbor == end:
+                        pass  # Allow this
+                    # Case 2: Neighbor is not the target but is external
+                    else:
+                        # External nodes can only be start or end, never intermediate
+                        # So we can never visit a non-target external node
+                        continue
                 
-            # External node constraints
-            if neighbor in external_nodes:
-                if neighbor != end and neighbor != start:
+                # CRITICAL: If current node is external and we're continuing from it,
+                # this is only valid if current is the start node
+                if current in external_nodes and current != start:
+                    # We should never be continuing from an external node that isn't the start
                     continue
-                if neighbor != end and len(path) > 1:
-                    continue
-            
-            # Calculate link length
-            lk = (min(current, neighbor), max(current, neighbor))
-            seg_len = link_lengths.get(lk, 0.0)
-            
-            new_path = path + [neighbor]
-            queue.append((neighbor, new_path, geom_len + seg_len))
+                
+                # Calculate link length
+                lk = (min(current, neighbor), max(current, neighbor))
+                seg_len = link_lengths.get(lk, 0.0)
+                
+                # Create new path - allow revisiting internal nodes only
+                new_path = path + [neighbor]
+                queue.append((neighbor, new_path, geom_len + seg_len))
     
     return paths
 

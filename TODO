@@ -1,10 +1,47 @@
+o. add_node and add_link methods have not been validated and tested for edge case scenarios
+    [DONE]
+o. in the detailed path finding in the network_path, it is not proper. 
+    [DONE]
+
 o. Fix the memory issue when finding the simple paths using multiprocessing
-o. add_node and add_link methods have not been validated and tested for edge case scenarios [DONE]
-o. in the detailed path finding in the network_path, it is not proper.
+
 o. As of now, nodes are infinitely small spatial points, maybe try to account for that
+
 o. When nodes are moved or added, the network links might start to criss-cross each other. This should not be possible. Add a method that checks
     if that is happening.
+
 o. Add methods to remove nodes and links, also change existing connections
 
+o. Monte-Carlo based method for finding the fault and then using it to prove the probability based method as an extension
+    [NOT NEEDED]
+
+o. Make the prepare_detailed_path_cache such that it can be used directly in naive_localization.py without extraction
+
+o. Account for the dispersive effects of the medium
+
+o. The fault localizer does not do complexity checks. it should do BUT LATER WHEN VALIDATION CHECKS (redundant operation)
+    [DONE]
+
+o. generate linear networks and fix the voronoi networks
+
+o. The node_indices of links are saved as np.int32 while the indices of nodes are saved as int. Now, I fixed it by making converting any index
+    link.node_indices to ints. (BWAAAAA.....I know its minor....fix it before something breaks | DOES IT NEED FIXING? BWAAAAAAA....I dont know)
+    [DONE]
+
+o. The interferometry file uses the amplitude of sample and reference beam as 1/sqrt. Make them variables
+
+o. Implement the gpu code for interferometry that can be used for bigger networks.
+
+o. Give the input measurement pairs required in the begining itself. So that we wont need to calculate the scattering matrices again.
+
+o. Look at what find_peaks_cwt is seems to be better for Noisy Data.
+
+o. Add a _spec_fingerprint code to different module, maybe add it to NetworkSpec and make a Cache folder in the Home directory
+   and make it based on the SHA256 architechture.
+
+o. I implemented the valid candidates from the intersection method such that I will consider the max matching 
+    in all links. (should be a better way to do it, maybe look at the distribution and choose more than 90%)
+
+o. Make a util function that plots a candidate on the network given the candidate
 
 o. And more....I'm sure there is more.... I don't know what they are....I just know there is...

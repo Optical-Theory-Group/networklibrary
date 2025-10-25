@@ -1945,10 +1945,10 @@ class Network:
 
             # Wave that is going into node_one
             row = self.internal_scattering_map[
-                (node_one_index,node_two_index)
+                (node_one_index, node_two_index)
             ]
             col = self.internal_scattering_map[
-                (node_two_index,node_one_index)
+                (node_two_index, node_one_index)
             ]
 
             dP_ii[row, col] = phase_factor
@@ -3119,7 +3119,7 @@ class Network:
         lengths = self.get_lengths_along_path(path_indices)
         return np.sum(lengths)
 
-    def get_optical_path_length(self, path_indices, k0: float | complex = 1e7):
+    def get_optical_path_length(self, path_indices: List[int], k0: float | complex = 1e7):
         """Calculate the optical path length along a given path in the network."""
 
         # The default k value is set to 1e7 must be changed when accounting for dispersion

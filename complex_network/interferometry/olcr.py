@@ -5,11 +5,11 @@ from scipy.signal import hilbert, savgol_filter
 from collections import deque
 from complex_network.components.link import Link # type: ignore
 from typing import Tuple
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import cpu_count
 import os
 from tqdm import tqdm
+from scipy.signal import czt
 
 class OLCR:
     def __init__(self,
@@ -21,8 +21,11 @@ class OLCR:
                  num_wavelength_sample: int,
                  optical_path_length: Tuple[float, float],
                  num_optical_path_length_sample: int,
+                 integeration_method: str = 'czt',
                  width_factor: int = 3,
                  use_multi_proc: bool = False,
+                 use_gpu: bool = False,
+                 make_cache: bool = False,
                  num_workers: int = None):
         
         self.network = network
@@ -37,6 +40,9 @@ class OLCR:
         self.width_factor = width_factor
         self.use_mp = use_multi_proc
         self.num_workers = num_workers if num_workers is not None else cpu_count()
+        self.use_gpu = use_gpu
+        self.integeration_method = integeration_method.lower()
+        self.make_cache = make_cache
 
         # precalculate the values that dont depend on the main loop
         self.opls = np.linspace(self.opl_start, self.opl_end, self.num_opl)
@@ -63,8 +69,16 @@ class OLCR:
         self.k_max = self.k0 + self.width_factor * self.sigma_k
         self.k = np.linspace(self.k_min, self.k_max, self.num_lambda)
 
+        # Constant spacing
+        self.delta_k = (self.k_max - self.k_min) / (self.num_lambda - 1)
+        self.delta_l = (self.opl_end - self.opl_start) / (self.num_opl - 1)
+
         # Calculate the spatial resolution of the interferogram
         self.spatial_resolution = 0.4412712003053032*self.central_lambda**2/self.bandwidth
+
+        # Validate integration method
+        if self.integeration_method not in ['euler', 'czt']:
+            raise ValueError(f"Invalid integration method: {self.integration_method}. Choose 'euler' or 'czt'.")
 
     def generate_broadband_source(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -79,17 +93,26 @@ class OLCR:
         spectrum = np.exp(-0.5 * ((self.k - self.k0) / self.sigma_k) ** 2)
         
         # Normalize the spectrum
-        spectrum /= np.sum(spectrum)
+        spectrum /= np.trapezoid(spectrum, self.k)
         
         return self.k, spectrum
-    
-    def _compute_interferogram_serial(self) -> np.ndarray:
-        """Performs the calculation of the interferogram
-        by propagating the reference beam and the sample signal through the network."""
+
+    """ The interferogram calculation is mainly an integral given by:
+        I(l) = ∫ G(k) |E_sample(k) + E_reference(k,l)|^2 dk
+        where G(k) is the source spectrum, E_sample(k) is the field at the measurement node.
+
+        This integral can be further simplified to:
+        I(l) = C0 + 2 Re{ ∫ G(k) E_sample(k) * E_reference^*(k,l) dk }
+        where C0 is a constant background term that does not depend on l.
+    """
+
+    def _compute_interferogram_euler_serial(self) -> np.ndarray:
+        """Performs the calculation of the interferogram where the Integral over k is done using Euler method
+        """
 
         self.interferogram = np.zeros_like(self.opls, dtype=np.float64)
         # We will launch a beam-splitted light through the input node
-        self.input_signal[self.input_node] = 1.0 / np.sqrt(2)
+        self.input_signal[self.input_node] = 1.0 / np.sqrt(2) # TODO : update for arbitrary splitting ratio
         k, gaussian_frequency = self.generate_broadband_source()
 
         for k_val, gaussian_freq in tqdm(zip(k, gaussian_frequency), total=len(k), desc="Computing interferogram"):
@@ -100,20 +123,20 @@ class OLCR:
             # Signal at the measurement node
             E_measurement = E_sample[self.measurement_node]
             # Add the incoherent intensities (low-coherence assumption )
-            self.interferogram += gaussian_freq * np.abs(E_measurement + E_reference) ** 2
+            self.interferogram += gaussian_freq * np.abs(E_measurement + E_reference) ** 2 * self.delta_k
 
         return self.interferogram
 
-    def _compute_interferogram_parallel(self)-> np.ndarray:
+    def _compute_interferogram_euler_parallel(self)-> np.ndarray:
         """Performs the calculation of the interferogram
         by propagating the reference beam and the sample signal through the network."""
 
         self.interferogram = np.zeros_like(self.opls, dtype=np.float64)
         # We will launch a beam-splitted light through the input node
-        self.input_signal[self.input_node] = 1.0 / np.sqrt(2)
+        self.input_signal[self.input_node] = 1.0 / np.sqrt(2) # TODO : update for arbitrary splitting ratio
         k, gaussian_frequency = self.generate_broadband_source()
 
-        print("Calculating interferogram parallelly")
+        print("Calculating interferogram (Euler Method) parallelly")
         _env_init()  # Initialize environment variables for multiprocessing
         num_chunks = self.num_workers * 2  # Number of chunks to process in parallel
 
@@ -126,6 +149,88 @@ class OLCR:
                 self.interferogram += partial
         
         return self.interferogram
+    
+    def _compute_interferogram_euler_gpu(self) -> np.ndarray:
+        """Uses both Multiprocessing for loading the matrices and GPU for accelerating the matrix operations."""
+        # Placeholder for GPU implementation for bigger networks
+        pass
+    
+    def _compute_interferogram_ft_serial(self) -> np.ndarray:
+        """ Compute the interferogram using Fourier Transform method.
+            This method uses the CZT algorithm to perform the inverse transform from k-space to l-space.
+            The CZT allows flexible selection of both the frequency (or wavenumber) span and the grid spacing
+        """
+        E_Sample = np.zeros_like(self.k, dtype=np.complex128)
+        for idx, k_value in enumerate(tqdm(self.k, desc="Computing Signal")):
+            S = self.network.get_S_ee(k_value)
+            E_Sample[idx] = (S @ self.input_signal)[self.measurement_node]
+
+        a_r = 1.0 / np.sqrt(2)  # Reference arm amplitude (50/50 beam splitter) TODO: generalize for arbitrary splitting ratio
+        # generate the broadband source
+        _, gaussian_spectrum = self.generate_broadband_source()
+
+        # The quantity we want to transform (This is only term that varies with l)
+        # G(k) = gaussian_spectrum(k) * a_r^* * E_sample
+        G = gaussian_spectrum * np.conj(a_r) * E_Sample
+
+        # The CZT parameters ( A, W, M ) are defined as
+        W = np.exp(-1j * self.delta_k * self.delta_l)
+        A = np.exp(1j * self.opl_start * self.delta_k)
+
+        # Perform the CZT to get the interferogram
+        raw_g_czt = czt(G, self.num_opl, W, A)
+
+        # Constant background term that does not depend on l
+        C0 = np.sum(gaussian_spectrum * (np.abs(E_Sample)**2 + np.abs(a_r)**2)) * self.delta_k
+
+        # Apply the required phase and scaling
+        g_czt = np.exp(-1j * self.k_min * self.opls) * raw_g_czt
+        self.interferogram = C0 + 2 * np.real(g_czt*self.delta_k)
+
+        return self.interferogram
+    
+    def _compute_interferogram_ft_parallel(self) -> np.ndarray:
+
+        """ Compute the interferogram using Fourier Transform method on multiple processors."""
+
+        self.interferogram = np.zeros_like(self.opls, dtype=np.float64)
+        # We will launch a beam-splitted light through the input node
+        self.input_signal[self.input_node] = 1.0 / np.sqrt(2)  # TODO : update for arbitrary splitting ratio
+        k, gaussian_frequency = self.generate_broadband_source()
+        print("Calculating interferogram (FT Method) parallelly")
+        _env_init()  # Initialize environment variables for multiprocessing
+
+        num_chunks = self.num_workers * 2  # Number of chunks to process in parallel
+        idx_chunks = np.array_split(np.arange(len(k)), num_chunks)
+        chunks = [(k[idx], gaussian_frequency[idx]) for idx in idx_chunks]
+        with ProcessPoolExecutor(max_workers=self.num_workers, 
+                                    initializer=_worker_init,
+                                    initargs=(self.network, self.input_signal, self.measurement_node, self.opls)) as executor:
+            E_sample_chunks = list(executor.map(_chunk_worker_ft, chunks))
+
+        # Combine the results from all chunks
+        E_sample = np.concatenate(E_sample_chunks)
+        a_r = 1.0 / np.sqrt(2)  # Reference arm amplitude (50/50 beam splitter) TODO: generalize for arbitrary splitting ratio
+        # generate the broadband source
+        _, gaussian_spectrum = self.generate_broadband_source()
+        # The quantity we want to transform (This is only term that varies with l)
+        # G(k) = gaussian_spectrum(k) * a_r^* * E_sample
+        G = gaussian_spectrum * np.conj(a_r) * E_sample
+        # The CZT parameters ( A, W, M ) are defined as
+        W = np.exp(-1j * self.delta_k * self.delta_l)
+        A = np.exp(1j * self.opl_start * self.delta_k)
+        # Perform the CZT to get the interferogram
+        raw_g_czt = czt(G, self.num_opl, W, A)
+        # Constant background term that does not depend on l
+        C0 = np.sum(gaussian_spectrum * (np.abs(E_sample)**2 + np.abs(a_r)**2)) * self.delta_k
+        # Apply the required phase and scaling
+        g_czt = np.exp(-1j * self.k_min * self.opls) * raw_g_czt
+        self.interferogram = C0 + 2 * np.real(g_czt*self.delta_k)
+        return self.interferogram
+
+    def _compute_interferogram_ft_gpu(self) -> np.ndarray:
+        # Placeholder for GPU implementation for bigger networks
+        pass
     
     def _check_nyquist_criterion(self):
         """Check if the sampling satisfies the Nyquist criterion."""
@@ -143,14 +248,18 @@ class OLCR:
         """Compute the interferogram using either serial or parallel method based on the use_mp flag."""
         self._check_nyquist_criterion()
         if self.use_mp:
-            return self._compute_interferogram_parallel()
+            return self._compute_interferogram_euler_parallel()
         else:
-            return self._compute_interferogram_serial()
+            return self._compute_interferogram_euler_serial()
   
     def get_interferogram(self)-> np.ndarray:
         """ Returns the interferogram, calculating it if it has not been done yet."""
-        if self._interferogram is None:
-            self._interferogram = self._compute_interferogram()
+        if self.integeration_method == 'euler':
+            if self._interferogram is None:
+                self._interferogram = self._compute_interferogram_euler_parallel() if self.use_mp else self._compute_interferogram_euler_serial()
+        if self.integeration_method == 'czt':
+            if self._interferogram is None:
+                self._interferogram = self._compute_interferogram_ft_parallel() if self.use_mp else self._compute_interferogram_ft_serial()
         return self._interferogram
     
     def _compute_envelope(self,
@@ -224,7 +333,7 @@ class OLCR:
         if signal_window is not None:
             plt.xlim(signal_window)
         else:
-            plt.xlim(0, self.max_opl * 1e6)
+            plt.xlim(self.opl_start*1e6, self.opl_end * 1e6)
         if not saveto:
             plt.tight_layout()
             # plt.show()
@@ -252,6 +361,7 @@ def _chunk_worker(args)-> np.ndarray:
     """Worker processes one chunk of (k, weight) pairs and returns one partial interferogram"""
 
     k_chunk, gaussian_freq_chunk = args
+    delta_k = k_chunk[1] - k_chunk[0]
     partial = np.zeros_like(_global_opls, dtype=np.float64)
 
     for k_val, gaussian_freq in zip(k_chunk, gaussian_freq_chunk):
@@ -261,9 +371,20 @@ def _chunk_worker(args)-> np.ndarray:
         E_sample = _global_network.get_S_ee(k_val) @ _global_input_signal
         E_measurement = E_sample[_global_measurement_node]
         # Add the incoherent intensities (low-coherence assumption )
-        partial += gaussian_freq * np.abs(E_measurement + E_reference) ** 2
+        partial += gaussian_freq * np.abs(E_measurement + E_reference) ** 2 * delta_k
 
     return partial
+
+def _chunk_worker_ft(args) -> np.ndarray:
+    """Worker processes one chunk of k values and returns partial E_sample array"""
+    k_chunk, _ = args
+    E_sample_chunk = np.zeros_like(k_chunk, dtype=np.complex128)
+
+    for idx, k_value in enumerate(k_chunk):
+        S = _global_network.get_S_ee(k_value)
+        E_sample_chunk[idx] = (S @ _global_input_signal)[_global_measurement_node]
+
+    return E_sample_chunk
 
 def _env_init():
     os.environ["OMP_NUM_THREADS"] = "1"
