@@ -413,7 +413,7 @@ class FaultLocalizer:
             if global_max_frequency in candidates_with_freq.keys():
                 max_common_link_candidates[link] = candidates_with_freq[global_max_frequency]
 
-        print(f"Max candidate frequency across all links: {global_max_frequency}")
+        # print(f"Max candidate frequency across all links: {global_max_frequency}")
         # print(max_common_link_candidates)
 
         return max_common_link_candidates
@@ -486,16 +486,8 @@ class FaultLocalizer:
             Total exponential score based on position prediction accuracy across all sources
         """
 
-        # with ProcessPoolExecutor() as executor:
-        #     futures = {source_idx: executor.submit(
-        #         self._score_candidate_single_source, candidate, source_idx, source_data[0]
-        #     ) for source_idx, source_data in source_peak_dict.items()}
-        #     source_scores = [future.result() for future in futures.values()]
-        #     total_score = sum(source_scores)
-
         total_score = 0.0
         for source_idx, source_data in source_peak_dict.items():
-            # Use ALL peaks for scoring, not just qualifying peaks
             all_peaks_loc, _ = source_data
             
             # Score using peaks from this source and paths for this source
@@ -961,28 +953,31 @@ class FaultLocalizer:
         # Links with max common candidates
         valid_links = list(common_candidates_per_link.keys())
 
-        for link in valid_links:
-            common_candidates = common_candidates_per_link[link]
-            
-            # Score each common candidate using all sources
-            for candidate in common_candidates:
-                score = self.score_candidate_multi_source(candidate, source_peak_dict)
+        # Lets score candidates using multiprocessing
+        # create a link candidates tuple for each link
+        candidate_source_tuple = [(candidate, source_peak_dict) for link in valid_links for candidate in common_candidates_per_link[link]]
+
+        with ProcessPoolExecutor() as executor:
+            futures = {(candidate.link, candidate.position): executor.submit(self.score_candidate_multi_source, candidate, source_peak_dict)
+                        for (candidate, source_peak_dict) in candidate_source_tuple}
+            all_scores = {key: future.result() for key, future in futures.items()}
+
+        # Now, we will find the best candidates across all links
+        for (link, position), score in all_scores.items():
+            if score > best_score:
+                best_score = score
+                best_candidates = [(link, position, score)]
+            elif score == best_score and score > 0:
+                # Check if this candidate is a duplicate (same link and very similar position)
+                is_duplicate = False
+                for existing_link, existing_pos, existing_score in best_candidates:
+                    if (existing_link == link and 
+                        abs(existing_pos - position) < 1e-10):  # Very small tolerance for floating point
+                        is_duplicate = True
+                        break
                 
-                if score > best_score:
-                    best_score = score
-                    best_candidates = [(candidate.link, candidate.position, score)]
-                elif score == best_score and score > 0:
-                    # Check if this candidate is a duplicate (same link and very similar position)
-                    is_duplicate = False
-                    for existing_link, existing_pos, existing_score in best_candidates:
-                        if (existing_link == candidate.link and 
-                            abs(existing_pos - candidate.position) < 1e-10):  # Very small tolerance for floating point
-                            is_duplicate = True
-                            break
-                    
-                    if not is_duplicate:
-                        best_candidates.append((candidate.link, candidate.position, score))
-        
+                if not is_duplicate:
+                    best_candidates.append((link, position, score))
         return best_candidates
 
     def _find_peaks_in_olcr_scan(self,
