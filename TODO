@@ -44,4 +44,7 @@ o. I implemented the valid candidates from the intersection method such that I w
 
 o. Make a util function that plots a candidate on the network given the candidate
 
+o. Make a function in the network module that when you give it a link and a ratio, it returns the spatial coordinate of that position.
+     or a node, it returns its position or a link, it returns its end positions.
+
 o. And more....I'm sure there is more.... I don't know what they are....I just know there is...

@@ -20,3 +20,5 @@ nohup.out
 complex_network/detection/test_locations.py
 *.olcr_cache*/
 */output.log
+complex_network/interferometry/dispersion_compensation.ipynb
+complex_network/detection/idea.py

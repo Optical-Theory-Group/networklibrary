@@ -166,6 +166,7 @@ class FaultLocalizer:
 
         # Ensure paths are sorted by length for binning
         paths = sorted(paths, key=lambda x: x[1])
+        spatial_resolution = coherence_length / (2 * self.n_index)
 
         path_bins = []
         num_paths = len(paths)
@@ -182,7 +183,7 @@ class FaultLocalizer:
             path, length = paths[i]
             _, length_start = paths[bin_start]
 
-            if abs(length - length_start) < coherence_length/2:
+            if abs(length - length_start) < spatial_resolution/2:
                 binned_paths.append(path)
                 lengths.append(length)
             else:
@@ -235,6 +236,8 @@ class FaultLocalizer:
 
         candidates = self._generate_class_candidates(link, peak, path_bins_to_a, path_bins_to_b, L_link, measured_peaks)
 
+
+        # print(source_idx,candidates)
         return candidates
 
     def _generate_class_candidates(self,
@@ -390,10 +393,11 @@ class FaultLocalizer:
 
         for link in links:
             all_candidates_for_link = {source: all_candidates[(source, link)] for source in sources}
-            # Get candidates with frequencies for this link
+
             candidates_with_freq = self._get_candidates_with_frequency(
                 all_candidates_for_link, sources
             )
+
             # max frequency is the highest key in candidates_with_freq
             link_frequencies = list(candidates_with_freq.keys())
             link_max_freq = max(link_frequencies) if link_frequencies else 0
@@ -413,63 +417,93 @@ class FaultLocalizer:
             if global_max_frequency in candidates_with_freq.keys():
                 max_common_link_candidates[link] = candidates_with_freq[global_max_frequency]
 
-        # print(f"Max candidate frequency across all links: {global_max_frequency}")
-        # print(max_common_link_candidates)
-
         return max_common_link_candidates
 
     def _get_candidates_with_frequency(self,
-                                       all_candidates_for_link: Dict[int, List[Candidate]],
-                                       sources: List[int]) -> List[Tuple[Candidate, int]]:
+                                    all_candidates_for_link: Dict[int, List[Candidate]],
+                                    sources: List[int]) -> Dict[int, List[Candidate]]:
         """
         We will look at candidates from all sources for a particular link and see how many 
         sources they appeared in (within one coherence length). And return one candidate
         representing those candidates along with the frequency count."""
         if len(sources) < 1:
             raise ValueError("No sources provided")
+        
+        # Filter out sources with empty candidate lists
+        non_empty_sources = {source: candidates for source, candidates in 
+                            all_candidates_for_link.items() if candidates}
+        
+        # If all sources have empty candidate lists, return empty dict
+        if not non_empty_sources:
+            return {}
+        
         candidate_source_list = [(candidate, source) for source, candidates in
-                                  all_candidates_for_link.items() for candidate in candidates]
+                                non_empty_sources.items() for candidate in candidates]
         candidates = np.array([candidate for candidate, _ in candidate_source_list])
         candidate_locations = np.array([candidate.position for candidate, _ in candidate_source_list])
         candidate_sources = np.array([source for _, source in candidate_source_list])
 
-        # Sort candidates by location and subsequently by source
+        # Sort candidates by location
         sorted_indices = np.argsort(candidate_locations)
+        candidates = candidates[sorted_indices]
         candidate_locations = candidate_locations[sorted_indices]
         candidate_sources = candidate_sources[sorted_indices]
 
-        # We need to find the threshold for grouping candidates
-        candidate_link = all_candidates_for_link[sources[0]][0].link
+        # Calculate threshold
+        first_non_empty_source = next(iter(non_empty_sources.keys()))
+        candidate_link = non_empty_sources[first_non_empty_source][0].link
         candidate_link_length = self._get_link_length(candidate_link)
         threshold = self.coherence_length / (2 * self.n_index * candidate_link_length)
 
-        # Break candidates into groups based on threshold
-        diffs = np.diff(candidate_locations)
-        breaks = np.where(diffs > threshold)[0]
-        groups = np.split(np.arange(len(candidate_locations)), breaks+1)
+        # TWO-PASS CLUSTERING: Break chains by checking distance from cluster start
+        groups = []
+        current_group = [0]
+        cluster_start_pos = candidate_locations[0]
+        
+        for i in range(1, len(candidate_locations)):
+            # Check both: consecutive diff AND distance from cluster start
+            consecutive_diff = candidate_locations[i] - candidate_locations[i-1]
+            distance_from_start = candidate_locations[i] - cluster_start_pos
+            
+            # Break if EITHER condition is violated
+            if consecutive_diff > threshold or distance_from_start > threshold:
+                groups.append(np.array(current_group))
+                current_group = [i]
+                cluster_start_pos = candidate_locations[i]
+            else:
+                current_group.append(i)
+        
+        # Add last group
+        if current_group:
+            groups.append(np.array(current_group))
 
-        # Compute cluster means & source counts
+        # Create grouped candidates
         grouped_candidates = defaultdict(list)
 
         for group in groups:
-            cluster_mean = candidate_locations[group].mean()
-
-            # Make a representative candidate for the group
-            base_candidate = candidates[group][0]
+            if len(group) == 0:
+                continue
+                
+            cluster_position = candidate_locations[group].mean()
+            base_candidate = candidates[group[0]]
+            
             grouped_candidate = Candidate(
-                    link=base_candidate.link,
-                    position=cluster_mean,
-                    type='grouped',          # Set to string (could be improved later)
-                    generating_peak=None,    # Set to None (could be improved later)
-                    path_in=None,            # Set to None (could be improved later)
-                    path_out=None,           # Set to None (could be improved later)
-                    score=0  # Score will be calculated later
-                )
+                link=base_candidate.link,
+                position=cluster_position,
+                type='grouped',
+                generating_peak=None,
+                path_in=None,
+                path_out=None,
+                score=0
+            )
 
             contributing_sources = len(np.unique(candidate_sources[group]))
             grouped_candidates[contributing_sources].append(grouped_candidate)
             
         return dict(grouped_candidates)
+
+
+
     
     def score_candidate_multi_source(self, 
                                     candidate: Candidate, 
@@ -528,6 +562,10 @@ class FaultLocalizer:
         for measured_peak in measured_peaks:
             best_score_for_peak = 0.0
             
+            # best_score_aa = 0.0
+            # best_score_ab = 0.0
+            # best_score_ba = 0.0
+            # best_score_bb = 0.0
             # Type AA: Source → A → fault → A → source
             for path_bin in path_bins_to_a.path_bins:
                 for path_bin_prime in path_bins_to_a.path_bins:
@@ -555,8 +593,14 @@ class FaultLocalizer:
                                     # Convert to physical distance for consistency
                                     physical_distance = position_distance * L_link
                                     # Calculate exponential score (higher when positions are closer)
-                                    score = np.exp(-physical_distance / (self.coherence_length / self.n_index))
+                                    score = np.exp(-physical_distance / (self.coherence_length / (2*self.n_index)))
                                     best_score_for_peak = max(best_score_for_peak, score)
+                                    # best_score_for_peak += score
+                                    # best_score_aa = max(best_score_aa, score)
+                            #     else:
+                            #         score = 0.0
+                            # else:
+                            #     score = 0.0
 
             # Type BB: Source → B → fault → B → source
             for path_bin in path_bins_to_b.path_bins:
@@ -579,8 +623,14 @@ class FaultLocalizer:
                                 if is_valid:
                                     position_distance = abs(x - x_pred)
                                     physical_distance = position_distance * L_link
-                                    score = np.exp(-physical_distance / (self.coherence_length / self.n_index))
+                                    score = np.exp(-physical_distance / (self.coherence_length / (2*self.n_index)))
                                     best_score_for_peak = max(best_score_for_peak, score)
+                                    # best_score_for_peak += score
+                                    # best_score_bb = max(best_score_bb, score)
+                            #     else:
+                            #         score = 0.0
+                            # else:
+                            #     score = 0.0
 
             # Type AB: Source → A → fault → B → source
             for path_bin in path_bins_to_a.path_bins:
@@ -603,8 +653,14 @@ class FaultLocalizer:
                                 if is_valid:
                                     position_distance = abs(x - x_pred)
                                     physical_distance = position_distance * L_link
-                                    score = np.exp(-physical_distance / (self.coherence_length / self.n_index))
+                                    score = np.exp(-physical_distance / (self.coherence_length / (2*self.n_index)))
                                     best_score_for_peak = max(best_score_for_peak, score)
+                                    best_score_for_peak += score
+                                    # best_score_ab = max(best_score_ab, score)
+                            #     else:
+                            #         score = 0.0
+                            # else:
+                            #     score = 0.0
 
             # Type BA: Source → B → fault → A → source
             for path_bin in path_bins_to_b.path_bins:
@@ -627,11 +683,18 @@ class FaultLocalizer:
                                 if is_valid:
                                     position_distance = abs(x - x_pred)
                                     physical_distance = position_distance * L_link
-                                    score = np.exp(-physical_distance / (self.coherence_length / self.n_index))
+                                    score = np.exp(-physical_distance / (self.coherence_length / (2*self.n_index)))
                                     best_score_for_peak = max(best_score_for_peak, score)
+                                    # best_score_for_peak += score
+                                    # best_score_ba = max(best_score_ba, score)
+                            #     else:
+                            #         score = 0.0
+                            # else:
+                            #     score = 0.0
             
             # Add the best score found for this peak (0 if no valid predictions within coherence length)
             total_score += best_score_for_peak
+            # total_score += (best_score_aa + best_score_ab + best_score_ba + best_score_bb)
 
         return total_score
     
@@ -813,8 +876,7 @@ class FaultLocalizer:
         returning all generated path variants with duplicates removed.
         
         Args:
-            path: Input path that may contain closed subpaths
-            
+            path: Input path that may contain closed subpaths    
         Returns:
             List of all path variants with closed subpaths removed (including original)
         """
@@ -879,8 +941,7 @@ class FaultLocalizer:
             path_in: Simplified inbound path  
             path_out: Simplified outbound path
             candidate: Fault candidate
-            measured_peaks: All measured peaks
-            
+            measured_peaks: All measured peaks           
         Returns:
             True if this variant explains any measured peak
         """
@@ -927,13 +988,12 @@ class FaultLocalizer:
     def localize_fault(self,
                        olcr_ref_dict: Dict[int,Tuple[np.ndarray, np.ndarray]],
                        olcr_perturb_dict: Dict[int,Tuple[np.ndarray, np.ndarray]],
-                       links: Optional[List[Tuple[int, int]]] = None) -> List[Tuple[Tuple[int, int], float, float]]:
+                       links: Optional[List[Tuple[int, int]]] = None) -> Tuple[Tuple[int, int], float, float]:
         """
         Main method to localize fault in the network using multiple sources.
         
         Args:
             links: List of links to test (if None, tests all internal links)
-
         Returns:
             List of tuples (link, position, score) for all candidates with the highest score
         """
@@ -947,6 +1007,7 @@ class FaultLocalizer:
         common_candidates_per_link = self.find_common_candidates(
             source_peak_dict, qualifying_peak_dict, links
         )
+        
         best_score = 0.0
         best_candidates = []
 
@@ -978,7 +1039,11 @@ class FaultLocalizer:
                 
                 if not is_duplicate:
                     best_candidates.append((link, position, score))
-        return best_candidates
+
+        # Return best candidates with highest score if multiple have the same highest score
+        # return the first one
+
+        return best_candidates[0] # Return only the best candidate for now
 
     def _find_peaks_in_olcr_scan(self,
                                  olcr_ref_dict: Dict[int,Tuple[np.ndarray, np.ndarray]],
@@ -988,9 +1053,8 @@ class FaultLocalizer:
         Identify peaks in the olcr scan above a given threshold.
         
         Args:
-            olcr_ref_dict: dictionary of reference scan data
-            olcr_perturb_dict: dictionary of perturbed scan data
-
+            olcr_ref_dict: dictionary of reference scan data (Envelope signal of interferrogram)
+            olcr_perturb_dict: dictionary of perturbed scan data (Envelope signal of interferrogram)
             threshold: Minimum height for a peak to be considered
         Returns:
             Dictionary mapping source indices to lists of peak locations
@@ -1008,7 +1072,7 @@ class FaultLocalizer:
         max_peaks = [max(olcr_perturb_dict[source][1] - olcr_ref_dict[source][1]) for source in sources]
         # find global max across all sources
         global_max = max(max_peaks) if max_peaks else 0
-        print(f"Global max peak height across all sources: {global_max}")
+
         for source in sources:
             ref_scan_x, ref_scan_data = olcr_ref_dict[source]
             perturbed_scan_x, perturbed_scan_data = olcr_perturb_dict[source]
@@ -1018,14 +1082,11 @@ class FaultLocalizer:
                 raise ValueError(f"Scan x arrays do not match for source {source}")
 
             difference_signal = perturbed_scan_data - ref_scan_data
-            print(max(difference_signal))
 
             dx = (ref_scan_x[-1] - ref_scan_x[0])/(len(ref_scan_x)-1)
             smooth_window = int(np.ceil(self.coherence_length / dx))
             if smooth_window % 2 == 0:
-                smooth_window += 1  # Ensure window length is odd for savgol_filter
-
-            # Normalize difference signal
+                smooth_window += 1
             if global_max > 0:
                 difference_signal /= global_max
 
@@ -1041,7 +1102,7 @@ class FaultLocalizer:
         return self.source_peaks_dict
 
     def _find_peaks_with_adaptive_threshold(self,
-                                            initial_threshold: float = 0.75,
+                                            initial_threshold: float = 0.5,
                                             reduction_factor: float = 0.25,
                                             max_reductions: int = 4) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
         """ From the detected peaks, we will apply an adaptive thresholding to select qualifying peaks for candidate generation."""
@@ -1062,7 +1123,13 @@ class FaultLocalizer:
 
             loc_array = np.array([loc for loc, _ in qualifying_peaks])
             height_array = np.array([height for _, height in qualifying_peaks])
-            # qualifying_peaks = (loc_array[0:1], height_array[0:1]) # remove this later
-            qualifying_peaks = (loc_array, height_array)
+            qualifying_peaks = (loc_array[0:1], height_array[0:1]) # remove this later
+
+            # max value of qualifying peaks
+            # max_qualifying_peak = height_array.max()
+            # # get corresponding locations
+            # max_qualifying_locations = loc_array[height_array == max_qualifying_peak]
+            # qualifying_peaks = (max_qualifying_locations, max_qualifying_peak)
             self.qualifying_peaks_dict[source] = qualifying_peaks
+
         return self.qualifying_peaks_dict
