@@ -1,0 +1,47 @@
+{
+  "title": "Complex Network Scattering Library",
+  "description": "",
+  "creators": [
+    {
+      "name": "Niall Byrnes",
+      "affiliation": "School of Electrical and Electronic Engineering, Nanyang Technological University, Singapore",
+      "orcid": "0000-0002-1554-3820"
+    },
+    {
+      "name": "Matthew R. Foreman",
+      "affiliation": "Institute for Digital Molecular Analytics and Science and School of Electrical and Electronic Engineering, Nanyang Technological University, Singapore",
+      "orcid": "0000-0001-5864-9636"
+    }
+  ],
+  "license": "CC-BY-NC-4.0",
+  "keywords": [
+    "random network",
+    "scattering matrix",
+    "complex graph",
+    "optics",
+    "Python"
+  ],
+  "upload_type": "software",
+  "access_right": "open",
+  "related_identifiers": [
+    {
+      "relation": "isRelatedTo",
+      "identifier": "10.1016/j.newton.2025.100194",
+      "scheme": "doi"
+    }
+  ],
+  "grants": [
+    {
+      "id": "Singapore Ministry of Education Research Centres of Excellence scheme (EDUN C-33-18-279-V12)"
+    },
+    {
+      "id": "Singapore Ministry of Education Academic Research Fund (Tier 1) Grant RG66/23"
+    },
+    {
+      "id": "Nanyang Technological University grant SUG:022824-00001"
+    }
+  ],
+  "publication_date": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "version": "1.0.0",
+  "language": "eng"
+}
