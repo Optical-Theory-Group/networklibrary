@@ -22,7 +22,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 import time
 import numpy as np
-from scipy.signal import find_peaks, savgol_filter
+from scipy.signal import find_peaks
 from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict
 
@@ -168,17 +168,18 @@ class FaultLocalizer:
         paths = sorted(paths, key=lambda x: x[1])
         spatial_resolution = coherence_length / (2 * self.n_index)
 
-        path_bins = []
+        path_bins: List[PathBin] = []
         num_paths = len(paths)
 
-        binned_paths = []
-        lengths = []
-
-        bin_start = 0
+        binned_paths: List[Path] = []
+        lengths: List[float] = []
+        bin_start: int = 0
         
         # add the first path and length
-        binned_paths.append(paths[0][0])
-        lengths.append(paths[0][1])
+        first_path, first_length = paths[0]
+        binned_paths.append(first_path)
+        lengths.append(first_length)
+
         for i in range(1, num_paths):
             path, length = paths[i]
             _, length_start = paths[bin_start]
@@ -200,7 +201,7 @@ class FaultLocalizer:
                     lengths = [length]
 
 
-        # Don't forget to add the last bin
+        # Bin any remaining paths
         if binned_paths:
             path_bins.append(PathBin(source=source,
                                           target=target,

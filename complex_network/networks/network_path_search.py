@@ -624,8 +624,8 @@ def find_all_path_info_bfs(
                 scatt_coeff = compute_path_scattering_coefficient(path, neighbors, internal_nodes, external_nodes, k0)
                 scattering_coeffs.append(scatt_coeff)
                 paths.append(path[:])  # Store a copy of the path
-            except Exception as e:
-                print(f"Warning: Could not compute scattering coefficient for path {path}: {e}")
+            except Exception:
+                # Silently handle scattering coefficient computation failures (common for looping paths)
                 scattering_coeffs.append(0.0)  # Default to 0 if computation fails
                 paths.append(path[:])
             
@@ -1591,6 +1591,12 @@ def _find_paths_bfs(
     """
     paths = []
     queue = deque([(start, [start], 0.0)])
+
+    # Check if the start and end nodes provided are in the network
+    if start not in neighbors:
+        raise ValueError(f"Start node index {start} not found in the network")
+    if end not in neighbors:
+        raise ValueError(f"End node index {end} not found in the network")
     
     while queue:
         current, path, geom_len = queue.popleft()

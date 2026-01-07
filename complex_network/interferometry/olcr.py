@@ -10,6 +10,7 @@ from multiprocessing import cpu_count
 import os
 from tqdm import tqdm
 from scipy.signal import czt
+import warnings
 
 class OLCR:
     def __init__(self,
@@ -22,6 +23,7 @@ class OLCR:
                  optical_path_length: Tuple[float, float],
                  num_optical_path_length_sample: int,
                  integeration_method: str = 'czt',
+                 material_compensation:bool = True,
                  width_factor: int = 3,
                  use_multi_proc: bool = False,
                  use_gpu: bool = False,
@@ -43,6 +45,7 @@ class OLCR:
         self.use_gpu = use_gpu
         self.integeration_method = integeration_method.lower()
         self.make_cache = make_cache
+        self.material_compensation = material_compensation
 
         # precalculate the values that dont depend on the main loop
         self.opls = np.linspace(self.opl_start, self.opl_end, self.num_opl)
@@ -79,6 +82,15 @@ class OLCR:
         # Validate integration method
         if self.integeration_method not in ['euler', 'czt']:
             raise ValueError(f"Invalid integration method: {self.integration_method}. Choose 'euler' or 'czt'.")
+        
+        # Check for incompatibility between CZT and material compensation
+        # if self.integeration_method == 'czt' and self.material_compensation:
+        #     warnings.warn(
+        #         "Dispersion compensation is not yet implemented with the CZT method. "
+        #         "switching to Euler integration method.",
+        #         UserWarning
+        #     )
+        #     self.integeration_method = 'euler'
 
     def generate_broadband_source(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -98,7 +110,7 @@ class OLCR:
         return self.k, spectrum
 
     """ The interferogram calculation is mainly an integral given by:
-        I(l) = ∫ G(k) |E_sample(k) + E_reference(k,l)|^2 dk
+        I(l) = ∫ G(k) |E_sample(k) + E_reference(n,k,l)|^2 dk
         where G(k) is the source spectrum, E_sample(k) is the field at the measurement node.
 
         This integral can be further simplified to:
@@ -117,7 +129,13 @@ class OLCR:
 
         for k_val, gaussian_freq in tqdm(zip(k, gaussian_frequency), total=len(k), desc="Computing interferogram"):
             # Propagate the reference beam to the detector (air propagation)
-            E_reference = np.exp(1j * k_val * self.opls) / np.sqrt(2)
+            if self.material_compensation:
+                # compensate for the material dispersion by propogating the reference beam through the same material
+                # Choose the first link as the reference for material (Assumption: all links have same material)
+                link_refractive_index = self.network.get_link(0).n(k_val)
+                E_reference = np.exp(1j * k_val * link_refractive_index * self.opls) / np.sqrt(2)
+            else:
+                E_reference = np.exp(1j * k_val * self.opls) / np.sqrt(2)
             # Propogate the sample signal through the network and get the output field
             E_sample = self.network.get_S_ee(k_val) @ self.input_signal
             # Signal at the measurement node
@@ -144,7 +162,7 @@ class OLCR:
         chunks = [(k[idx], gaussian_frequency[idx]) for idx in idx_chunks]
         with ProcessPoolExecutor(max_workers=self.num_workers, 
                                     initializer=_worker_init,
-                                    initargs=(self.network, self.input_signal, self.measurement_node, self.opls)) as executor:
+                                    initargs=(self.network, self.input_signal, self.measurement_node, self.opls, self.material_compensation)) as executor:
             for partial in executor.map(_chunk_worker, chunks):
                 self.interferogram += partial
         
@@ -205,7 +223,7 @@ class OLCR:
         chunks = [(k[idx], gaussian_frequency[idx]) for idx in idx_chunks]
         with ProcessPoolExecutor(max_workers=self.num_workers, 
                                     initializer=_worker_init,
-                                    initargs=(self.network, self.input_signal, self.measurement_node, self.opls)) as executor:
+                                    initargs=(self.network, self.input_signal, self.measurement_node, self.opls, self.material_compensation)) as executor:
             E_sample_chunks = list(executor.map(_chunk_worker_ft, chunks))
 
         # Combine the results from all chunks
@@ -290,7 +308,7 @@ class OLCR:
                     print("Warning: Window size is too small, setting to 3")
                     window_size = 3
             # Apply Savitzky-Golay filter to smooth the envelope
-            envelope = savgol_filter(envelope, window_length=window_size, polyorder=2)
+            envelope = savgol_filter(envelope, window_length=window_size, polyorder=3)
         # restore the vertical offset so that the envelope sits on the signal
         """ This can make spotting difference harder, so we comment it out
              We will leave it because it is useful for some applications"""
@@ -346,16 +364,18 @@ _global_network = None
 _global_input_signal =None
 _global_measurement_node =None
 _global_opls = None
+_global_material_compensation = None
 
 def _worker_init(network:Network, input_signal: np.ndarray,
-                 measurement_node: int, opls: np.ndarray)-> None:
+                 measurement_node: int, opls: np.ndarray, material_compensation: bool)-> None:
     "Called once per worker to initialize global variables"
 
-    global _global_network, _global_input_signal, _global_measurement_node, _global_opls
+    global _global_network, _global_input_signal, _global_measurement_node, _global_opls, _global_material_compensation
     _global_network = network
     _global_input_signal = input_signal
     _global_measurement_node = measurement_node
     _global_opls = opls
+    _global_material_compensation = material_compensation
 
 def _chunk_worker(args)-> np.ndarray:
     """Worker processes one chunk of (k, weight) pairs and returns one partial interferogram"""
@@ -366,7 +386,12 @@ def _chunk_worker(args)-> np.ndarray:
 
     for k_val, gaussian_freq in zip(k_chunk, gaussian_freq_chunk):
         # Propagate the reference beam to the detector (air propagation)
-        E_reference = np.exp(1j * k_val * _global_opls) / np.sqrt(2)
+        if _global_material_compensation:
+            # compensate for the material dispersion by propogating the reference beam through the same material
+            link_refractive_index = _global_network.get_link(0).n(k_val)
+            E_reference = np.exp(1j * k_val * link_refractive_index * _global_opls) / np.sqrt(2)
+        else:
+            E_reference = np.exp(1j * k_val * _global_opls) / np.sqrt(2)
         # Propogate the sample signal through the network and get the output field
         E_sample = _global_network.get_S_ee(k_val) @ _global_input_signal
         E_measurement = E_sample[_global_measurement_node]

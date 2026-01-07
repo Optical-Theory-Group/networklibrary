@@ -601,16 +601,16 @@ class NetworkPerturbator:
 # Helper functions (kept at bottom to keep API class earlier in file)
 def _partial_reflector(k0: float) -> np.ndarray:
     """Create a partial reflector scattering matrix."""
-    r = 0.01
-    t = 0.99
+    r = 0.1
+    t = 0.9
     return np.array([[np.sqrt(r), np.sqrt(t)], [np.sqrt(t), -np.sqrt(r)]])
 
 
 def _partial_reflector_inverse(k0: float) -> np.ndarray:
     """Create an inverse partial reflector scattering matrix.
         In this case, both will be the same as the partial reflector"""
-    r = 0.01
-    t = 0.99
+    r = 0.1
+    t = 0.9
     return np.array([[np.sqrt(r), np.sqrt(t)], [np.sqrt(t), -np.sqrt(r)]])
 
 

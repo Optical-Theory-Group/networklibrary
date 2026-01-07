@@ -1,8 +1,3 @@
-o. add_node and add_link methods have not been validated and tested for edge case scenarios
-    [DONE]
-o. in the detailed path finding in the network_path, it is not proper. 
-    [DONE]
-
 o. Fix the memory issue when finding the simple paths using multiprocessing
 
 o. As of now, nodes are infinitely small spatial points, maybe try to account for that
@@ -12,25 +7,15 @@ o. When nodes are moved or added, the network links might start to criss-cross e
 
 o. Add methods to remove nodes and links, also change existing connections
 
-o. Monte-Carlo based method for finding the fault and then using it to prove the probability based method as an extension
-    [NOT NEEDED]
+o. Make the prepare_detailed_path_cache such that it can be used directly in naive_localization.py without extraction. maybe fill the rest of  the paths with NAN's so that vectorization is possible.
 
-o. Make the prepare_detailed_path_cache such that it can be used directly in naive_localization.py without extraction
-
-o. Account for the dispersive effects of the medium
-
-o. The fault localizer does not do complexity checks. it should do BUT LATER WHEN VALIDATION CHECKS (redundant operation)
-    [DONE]
+o. Account for the dispersive effects of the medium (Kind of Done)
 
 o. generate linear networks and fix the voronoi networks
 
-o. The node_indices of links are saved as np.int32 while the indices of nodes are saved as int. Now, I fixed it by making converting any index
-    link.node_indices to ints. (BWAAAAA.....I know its minor....fix it before something breaks | DOES IT NEED FIXING? BWAAAAAAA....I dont know)
-    [DONE]
-
 o. The interferometry file uses the amplitude of sample and reference beam as 1/sqrt. Make them variables
 
-o. Implement the gpu code for interferometry that can be used for bigger networks.
+o. Implement the gpu code for interferometry that can be used for bigger networks. (Kind of Done)
 
 o. Give the input measurement pairs required in the begining itself. So that we wont need to calculate the scattering matrices again.
 
@@ -44,7 +29,19 @@ o. I implemented the valid candidates from the intersection method such that I w
 
 o. Make a util function that plots a candidate on the network given the candidate
 
-o. Make a function in the network module that when you give it a link and a ratio, it returns the spatial coordinate of that position.
-     or a node, it returns its position or a link, it returns its end positions.
-
 o. And more....I'm sure there is more.... I don't know what they are....I just know there is...
+
+
+_______________________________________________________________________________________________________________________________________________
+DONE SECTION
+================================================================================================================================================
+o. Make a function in the network module that when you give it a link and a ratio, it returns the spatial coordinate of that position.
+
+o. The node_indices of links are saved as np.int32 while the indices of nodes are saved as int. Now, I fixed it by making converting any index
+    link.node_indices to ints. (BWAAAAA.....I know its minor....fix it before something breaks | DOES IT NEED FIXING? BWAAAAAAA....I dont know)
+
+o. The fault localizer does not do complexity checks. it should do BUT LATER WHEN VALIDATION CHECKS (redundant operation)
+
+o. add_node and add_link methods have not been validated and tested for edge case scenarios
+
+o. in the detailed path finding in the network_path, it is not proper. 

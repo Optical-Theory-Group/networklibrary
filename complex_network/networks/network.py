@@ -2923,6 +2923,42 @@ class Network:
         if save_dir is not None:
             plt.savefig(save_dir, format="svg", bbox_inches="tight")
 
+    # ____________________Spatial Network Property __________________________
+    # Write a function that given the link_index or node_index or fractional ratio returns the position in space
+    def spatial_position_within_link(self,
+                              link_index: int | None = None,
+                              node_tuple: Tuple[int, int] | None = None,
+                              fractional_ratio: float | None = None,
+                              ) -> np.ndarray:
+        """Given a link index or the node tuple of the link
+         and fractional ratio, return the spatial position in the network"""
+        if link_index is None and node_tuple is None:
+            raise ValueError("Both link_index and node_tuple cannot be None. Provide at least one.")
+        if fractional_ratio is None:
+            raise ValueError("fractional_ratio cannot be None. Provide a value between 0 and 1.")
+        if not (0.0 <= fractional_ratio <= 1.0):
+            raise ValueError("fractional_ratio must be between 0 and 1.")
+        if link_index is None:
+            link = self.get_link_by_node_indices(node_tuple)
+        elif node_tuple is None:
+            link = self.get_link(link_index)
+        else:
+            # Check consistency
+            link = self.get_link(link_index)
+            if set(link.sorted_connected_nodes) != set(sorted(node_tuple)):
+                raise ValueError("Provided link_index and node_tuple do not correspond to the same link.")
+
+        node_1_index, node_2_index = link.sorted_connected_nodes
+        node_1_pos_x, node_1_pos_y = self.get_node(node_1_index).position[0], self.get_node(node_1_index).position[1]
+        node_2_pos_x, node_2_pos_y = self.get_node(node_2_index).position[0], self.get_node(node_2_index).position[1]
+        delta_x = node_2_pos_x - node_1_pos_x
+        delta_y = node_2_pos_y - node_1_pos_y
+
+        position_x = node_1_pos_x + fractional_ratio * delta_x
+        position_y = node_1_pos_y + fractional_ratio * delta_y
+
+        return np.array([position_x, position_y])
+
     # -------------------------------------------------------------------------
     #  Network properties and analysis methods
     # -------------------------------------------------------------------------
