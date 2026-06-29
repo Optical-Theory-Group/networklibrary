@@ -15,7 +15,6 @@ complex_network/detection/path_length_fault_detection.py
 complex_network/detection/testing_paths.py
 complex_network/detection/test.py
 complex_network/interferometry/gpu_interferometry.py
-generate_interferometric_data.py
 nohup.out
 complex_network/detection/test_locations.py
 *.olcr_cache*/
@@ -41,3 +40,7 @@ complex_network/detection/naive_test.py
 complex_network/detection/naive_debug.py
 complex_network/detection/path_vs_hop.py
 complex_network/detection/single_vs_multipath_peaks.py
+server_spec.json
+test_performancy_improved.py
+test_performance.py
+complex_optical_network.md
