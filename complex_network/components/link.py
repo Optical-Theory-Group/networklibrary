@@ -1,10 +1,8 @@
 """Class module for network links."""
 
 from typing import Any
-
 import matplotlib.pyplot as plt
 import numpy as np
-
 from complex_network.components.component import Component
 
 
@@ -38,7 +36,10 @@ class Link(Component):
     get_S_inv:
         function that returns the inverse propagation matrix
     get_dS:
-        function that returns the derivative of the propagation matrix"""
+        function that returns the derivative of the propagation matrix
+    is_perturbed:
+        boolean indicating if link is perturbed
+    """
 
     def __init__(
         self,
@@ -48,7 +49,7 @@ class Link(Component):
         data: dict[str, Any] | None = None,
     ):
         super().__init__(index=index, nature=link_type, data=data)
-        self.node_indices = node_indices
+        self.node_indices = (int(node_indices[0]), int(node_indices[1]))
 
     @property
     def link_type(self) -> str:
@@ -58,6 +59,16 @@ class Link(Component):
     @link_type.setter
     def link_type(self, value) -> None:
         self.nature = value
+
+    @property
+    def isinternal(self) -> bool:
+        """Return True if link is internal."""
+        return self.nature == "internal"
+    
+    @property
+    def isexternal(self) -> bool:
+        """Return True if link is internal."""
+        return self.nature == "external"
 
     @property
     def power_diff(self) -> float:
@@ -94,6 +105,7 @@ class Link(Component):
             "get_S": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
             "get_S_inv": lambda k0: np.array([[0, 1 + 0j], [1 + 0j, 0]]),
             "get_dS": lambda k0: np.array([[0, 0], [0, 0]]),
+            "is_perturbed": False,
         }
         return default_values
 
@@ -130,3 +142,10 @@ class Link(Component):
         ax.plot(
             [node_1_x, node_2_x], [node_1_y, node_2_y], color=linecol, lw=lw
         )
+    def get_port_index(self, node_index):
+        # Find which end of the link is connected to this node
+        for port_idx, n_idx in enumerate(self.node_indices):
+            if n_idx == node_index:
+                return port_idx
+        raise ValueError("Node not connected to this link")
+

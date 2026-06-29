@@ -8,11 +8,13 @@ from typing import Any
 from complex_network.materials.dielectric import Dielectric
 from complex_network.materials.material import Material
 from complex_network.components.node import Node
+from complex_network.components.link import Link
 
 VALID_NETWORK_TYPES = [
     "delaunay",
     "voronoi",
     "buffon",
+    "custom",
     # "linear",
     # "archimedean",
 ]
@@ -47,6 +49,7 @@ class NetworkSpec:
 
     network_type: str
     network_shape: str
+    random_seed: int | None = None
     num_internal_nodes: int | None = None
     num_external_nodes: int | None = None
     num_seed_nodes: int | None = None
@@ -57,6 +60,8 @@ class NetworkSpec:
     node_S_mat_params: dict[str, Any] | None = None
     material: Material | None = None
     fully_connected: bool | None = None
+    node_dict: dict[int, Node] | None = None
+    link_dict: dict[int, Link] | None = None
 
     def __post_init__(self) -> None:
         """Set default values for the network spec if nothing specified."""
@@ -104,6 +109,8 @@ class NetworkSpec:
                 raise NotImplementedError
             case "archimedean":
                 raise NotImplementedError
+            case "custom":
+                default_values = {}
             case _:
                 raise ValueError(
                     f"network_type '{network_type}' is invalid."
