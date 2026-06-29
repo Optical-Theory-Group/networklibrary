@@ -45,7 +45,9 @@ class Node(Component):
     S_inv:
         numpy array specifying inverse scattering matrix
     dS:
-        derivative of S with respect to k0"""
+        derivative of S with respect to k0
+    is_perturbed:
+        boolean indicating if node is perturbed"""
 
     def __init__(
         self,
@@ -61,11 +63,21 @@ class Node(Component):
     def node_type(self) -> str:
         """Alias for nature."""
         return self.nature
-
+    
     @node_type.setter
     def node_type(self, value) -> None:
         self.nature = value
 
+    @property
+    def isinternal(self) -> bool:
+        """Return True if node is internal."""
+        return self.nature == "internal"
+    
+    @property
+    def isexternal(self) -> bool:
+        """Return True if node is internal."""
+        return self.nature == "external"
+    
     @property
     def scat_loss(self) -> float:
         """Return the scattering loss at the node."""
@@ -91,6 +103,22 @@ class Node(Component):
     def y(self) -> float:
         """y coordinate of the node."""
         return self.position[1]
+    
+    # static methods shouldnt have self parameter
+    @staticmethod
+    def get_default_S(k0: complex) -> np.ndarray:
+        """Default scattering matrix for the node."""
+        return np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    @staticmethod
+    def get_default_S_inv(k0: complex) -> np.ndarray:
+        """Default inverse scattering matrix for the node."""
+        return np.array([[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128)
+
+    @staticmethod
+    def get_default_dS(k0: complex) -> np.ndarray:
+        """Default derivative of the scattering matrix for the node."""
+        return np.zeros((2, 2), dtype=np.complex128)
 
     @staticmethod
     def get_default_values() -> dict[str, Any]:
@@ -108,15 +136,11 @@ class Node(Component):
             "outwave": {},
             "inwave_np": np.zeros(0, dtype=np.complex128),
             "outwave_np": np.zeros(0, dtype=np.complex128),
-            "S_mat_type": "COE",
+            "S_mat_type": "neumann",
             "S_mat_params": {},
-            "get_S": lambda k0: np.array(
-                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
-            ),
-            "get_S_inv": lambda k0: np.array(
-                [[0.0, 1.0], [1.0, 0.0]], dtype=np.complex128
-            ),
-            "get_dS": lambda k0: np.zeros((2, 2), dtype=np.complex128),
+            "get_S": Node.get_default_S,
+            "get_S_inv": Node.get_default_S_inv,
+            "get_dS": Node.get_default_dS,
         }
         return default_values
 
@@ -125,6 +149,7 @@ class Node(Component):
         ax: plt.Axes,
         show_index: bool = False,
         show_external_index: bool = False,
+        show_internal_index: bool = False,
         color: str | None = None,
         markersize: float = 6.0,
     ) -> None:
@@ -136,6 +161,9 @@ class Node(Component):
             ax.text(self.x, self.y, self.index)
 
         if show_external_index and self.node_type == "external":
+            ax.text(self.x, self.y, self.index)
+
+        if show_internal_index and self.node_type == "internal":
             ax.text(self.x, self.y, self.index)
 
         if color is not None:
