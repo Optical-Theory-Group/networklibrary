@@ -129,11 +129,11 @@ class NetworkPerturbator:
         self._record_perturbation(value, link_index)
         return self.perturbed_network
 
-    def add_perturb_segment_n(
+    def add_index_perturbation_segment(
         self,
         link_index: int,
         size: tuple[float, float],
-        value: complex,
+        dn_value: complex,
         node_S_matrix_type: str = "fresnel",
     ) -> Network:
         """Add a segment of size (l,h), where the segment starts from l*L_i and ends at h*L_i.
@@ -147,7 +147,7 @@ class NetworkPerturbator:
             The index of the link to be perturbed
         size : tuple[float, float]
             The size of the segment (l,h)start and end of the segment in terms of ratio of the link length
-        value : complex
+        dn_value : complex
             The value to be added to the refractive index of the segment, can be real or complex.
         node_S_matrix_type : str
             The type of scattering matrix to be used for the nodes. Default is "fresnel".
@@ -163,23 +163,23 @@ class NetworkPerturbator:
             fractional_positions=size,
         )
         mid = self.perturbed_network.get_link(mid_idx)
-        mid.Dn += value
+        mid.Dn += dn_value
         mid.is_perturbed = True
         self.perturbed_network.update_segment_matrices(mid)
         self.perturbed_network.update_link_matrices(mid)
         # record segment perturbation
-        self._record_perturbation(value, mid_idx)
+        self._record_perturbation(dn_value, mid_idx)
         return self.perturbed_network
 
-    def perturb_segment_n(self, link_index: int, value: complex) -> Network:
+    def perturb_segment_n(self, link_index: int, dn_value: complex) -> Network:
         """Change the refractive index of a segment link so that it becomes
         base_n + value. Update its neighbouring node scattering matrices
         according to the fresnel coefficients"""
         link = self.perturbed_network.get_link(link_index)
-        link.Dn += value
+        link.Dn += dn_value
         self.perturbed_network.update_segment_matrices(link)
         # record this existing segment perturbation
-        self._record_perturbation(value, link_index)
+        self._record_perturbation(dn_value, link_index)
         return self.perturbed_network
 
     # Node scattering changes are not logged here

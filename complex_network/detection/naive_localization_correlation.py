@@ -13,7 +13,6 @@ We find the candidates
 from multiples sources and see which candidates are common or
 within one coherence length and then score those candidates
 based on all the peaks from all sources.
-
 """
 
 from typing import Dict, List, Tuple, Optional
@@ -48,7 +47,6 @@ class Candidate:
     path_out: Path             # outbound path from link
     score: float = 0.0         # Score of the candidate or how well it explains peaks
     num_explained: int = 0     # number of peaks this candidate explains
-
 
 @dataclass
 class PathBin:
